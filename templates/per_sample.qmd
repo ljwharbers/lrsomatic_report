@@ -16,6 +16,8 @@ params:
   reference:     "t2t"
   sex:           "female"
   gene_panel:    "lymphoid"
+  default_panel: "lymphoid"
+  all_panels:    NULL   # named list from load_all_gene_panels()
   title:         "LRSomatic Report"
   repo_dir:      "."
   outputs:       NULL   # named list from locate_outputs()
@@ -78,12 +80,12 @@ if (!is.null(outputs$clairs_somatic))
 if (!is.null(outputs$deepsomatic_vcf))
   caller_list$deepsomatic = parse_caller_vcf(outputs$deepsomatic_vcf, "deepsomatic")
 
-variant_table = build_variant_table(vep_data, caller_list, panel_genes)
+variant_table = build_variant_table(vep_data, caller_list, gene_panel = NULL)
 
 # Parse Severus
 sev_vcf  = parse_severus_vcf(outputs$severus_vcf)
 sev_tsv  = parse_severus_gene_tsv(outputs$severus_gene_tsv)
-sv_table = build_sv_table(sev_tsv, panel_genes)
+sv_table = build_sv_table(sev_tsv, gene_panel = NULL)
 
 # SNV data for circos (from VEP file — contains all somatic variants)
 snv_circos = NULL
@@ -110,10 +112,14 @@ tryCatch({
 })
 
 # Summary counts
-n_snv = if (!is.null(vep_data)) nrow(unique(vep_data[, .(chrom, pos, ref, alt)])) else NA_integer_
-n_sv  = if (!is.null(sev_vcf)) nrow(sev_vcf$nontrans) + nrow(sev_vcf$translocations) else NA_integer_
-n_panel_vars = if (!is.null(variant_table)) nrow(variant_table) else 0L
-n_panel_svs  = if (!is.null(sv_table)) nrow(sv_table) else 0L
+n_snv        = if (!is.null(vep_data)) nrow(unique(vep_data[, .(chrom, pos, ref, alt)])) else NA_integer_
+n_sv         = if (!is.null(sev_vcf)) nrow(sev_vcf$nontrans) + nrow(sev_vcf$translocations) else NA_integer_
+n_panel_vars = if (!is.null(variant_table) && length(panel_genes) > 0)
+                 sum(variant_table$symbol %in% panel_genes, na.rm = TRUE) else 0L
+n_panel_svs  = if (!is.null(sv_table) && length(panel_genes) > 0 && "NHL_GENE_HITS" %in% names(sv_table))
+                 sum(vapply(sv_table$NHL_GENE_HITS, function(h)
+                   any(trimws(unlist(strsplit(as.character(h), "[;,]+"))) %in% panel_genes),
+                   logical(1)), na.rm = TRUE) else 0L
 ```
 
 ## `r params$sample_id` {.unnumbered}
