@@ -122,6 +122,21 @@ n_panel_svs  = if (!is.null(sv_table) && length(panel_genes) > 0 && "NHL_GENE_HI
                    logical(1)), na.rm = TRUE) else 0L
 ```
 
+```{r panel-js-data, results='asis'}
+all_p = if (!is.null(params$all_panels) && length(params$all_panels) > 0)
+          params$all_panels else list()
+js_panels = paste0(
+  "const GENE_PANELS = {",
+  paste(vapply(names(all_p), function(nm) {
+    genes_json = paste0('"', all_p[[nm]], '"', collapse = ", ")
+    paste0('"', nm, '": new Set([', genes_json, '])')
+  }, character(1)), collapse = ",\n"),
+  "};\n",
+  'const DEFAULT_PANEL = "', params$default_panel, '";\n'
+)
+cat("<script>\n", js_panels, "\n</script>\n", sep = "")
+```
+
 ## `r params$sample_id` {.unnumbered}
 
 ```{r header-badges}
@@ -190,19 +205,37 @@ if (!is.null(circos_tmp) && file.exists(circos_tmp)) {
 
 ## Small variants in gene panel
 
-```{r gene-filter-ui}
-if (!is.null(variant_table) && nrow(variant_table) > 0) {
-  tags$div(
-    style = "margin-bottom:8px; font-size:0.9em; color:#495057;",
-    tags$strong("Gene panel: "), params$gene_panel, " | ",
-    tags$strong("Variants shown: "), nrow(variant_table),
-    " (use the search box below to filter by gene or consequence)"
-  )
-} else {
-  tags$div(class = "alert alert-info",
-    if (is.null(vep_data)) "VEP somatic annotation file not found." else
-    paste0("No variants from gene panel '", params$gene_panel, "' detected in this sample."))
+```{r gene-filter-ui, results='asis'}
+panel_opts = ""
+all_p = if (!is.null(params$all_panels) && length(params$all_panels) > 0)
+          params$all_panels else list()
+for (nm in names(all_p)) {
+  selected = if (nm == params$default_panel) " selected" else ""
+  label = paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
+  panel_opts = paste0(panel_opts,
+    '<option value="', nm, '"', selected, '>', label, '</option>\n')
 }
+panel_opts = paste0(panel_opts,
+  '<option value="__all__">All genes</option>\n',
+  '<option value="__custom__">Custom&hellip;</option>\n')
+
+cat(paste0('
+<div style="margin-bottom:12px;">
+  <label for="panel-select" style="font-weight:600; margin-right:8px;">Gene panel:</label>
+  <select id="panel-select" style="padding:4px 8px; border-radius:4px; border:1px solid #ced4da;">',
+    panel_opts,
+  '</select>
+  <span id="panel-variant-count" style="margin-left:12px; font-size:0.9em; color:#6c757d;"></span>
+</div>
+<div id="custom-gene-panel" style="display:none; margin-bottom:12px;">
+  <label style="font-weight:600; display:block; margin-bottom:4px;">
+    Custom genes (one per line, or comma/space separated, case-insensitive):
+  </label>
+  <textarea id="custom-gene-input"
+    rows="4" style="width:400px; font-family:monospace; padding:6px;
+                    border:1px solid #ced4da; border-radius:4px;"></textarea>
+</div>
+'))
 ```
 
 ```{r small-variant-table}
@@ -220,6 +253,7 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
     dt_display,
     rownames    = FALSE,
     filter      = "top",
+    elementId   = "snv-table",
     extensions  = c("Buttons", "Scroller"),
     options     = list(
       dom        = "Bfrtip",
@@ -227,8 +261,10 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
       scrollX    = TRUE,
       scrollY    = "400px",
       scroller   = TRUE,
+      deferRender = TRUE,
       pageLength = 25,
-      columnDefs = list(list(className = "dt-left", targets = "_all"))
+      columnDefs = list(list(className = "dt-left", targets = "_all")),
+      initComplete = JS("function() { window.snvTableElem = this.api().table().node(); }")
     )
   ) |>
     DT::formatStyle(
@@ -247,16 +283,10 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
 ## Structural variants in gene panel
 
 ```{r sv-info}
-if (!is.null(sv_table) && nrow(sv_table) > 0) {
-  tags$div(
-    style = "margin-bottom:8px; font-size:0.9em; color:#495057;",
-    tags$strong("Gene panel: "), params$gene_panel, " | ",
-    tags$strong("SVs shown: "), nrow(sv_table)
-  )
-} else {
+if (is.null(sv_table) || nrow(sv_table) == 0) {
   tags$div(class = "alert alert-info",
-    if (is.null(sev_tsv)) "Severus gene-annotated SV file not found." else
-    paste0("No SVs intersecting gene panel '", params$gene_panel, "' detected."))
+    if (is.null(sev_tsv)) "Severus gene-annotated SV file not found."
+    else "No structural variants detected.")
 }
 ```
 
@@ -266,6 +296,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
     sv_table,
     rownames   = FALSE,
     filter     = "top",
+    elementId  = "sv-table",
     extensions = c("Buttons", "Scroller"),
     options    = list(
       dom       = "Bfrtip",
@@ -273,7 +304,9 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
       scrollX   = TRUE,
       scrollY   = "350px",
       scroller  = TRUE,
-      pageLength = 25
+      deferRender = TRUE,
+      pageLength = 25,
+      initComplete = JS("function() { window.svTableElem = this.api().table().node(); }")
     )
   ) |>
     DT::formatStyle(
@@ -345,3 +378,67 @@ if (outputs$has_wakhan) {
 ---
 
 *Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.0*
+
+```{=html}
+<script>
+(function () {
+  let activePanel = DEFAULT_PANEL;
+  let customGenes = new Set();
+
+  $.fn.dataTable.ext.search.push(function (settings, data) {
+    const node = settings.nTable;
+    if (node !== window.snvTableElem && node !== window.svTableElem) return true;
+    const gene = (data[0] || "").toUpperCase();
+    if (activePanel === "__all__")    return true;
+    if (activePanel === "__custom__") return customGenes.has(gene);
+    const panel = GENE_PANELS[activePanel];
+    return panel ? panel.has(gene) : true;
+  });
+
+  function parseCustomGenes(text) {
+    return new Set(
+      text.split(/[\s,\n]+/).map(g => g.trim().toUpperCase()).filter(g => g.length > 0)
+    );
+  }
+
+  function updateCount() {
+    const snvTbl = window.snvTableElem ? $(window.snvTableElem).DataTable() : null;
+    if (!snvTbl) return;
+    const n = snvTbl.rows({ search: "applied" }).count();
+    const el = document.getElementById("panel-variant-count");
+    if (el) el.textContent = n + " variant" + (n === 1 ? "" : "s") + " shown";
+  }
+
+  function redraw() {
+    if (window.snvTableElem) $(window.snvTableElem).DataTable().draw();
+    if (window.svTableElem)  $(window.svTableElem).DataTable().draw();
+    updateCount();
+  }
+
+  $(document).ready(function () {
+    $("#panel-select").on("change", function () {
+      activePanel = this.value;
+      const isCustom = activePanel === "__custom__";
+      $("#custom-gene-panel").toggle(isCustom);
+      redraw();
+    });
+
+    let debounceTimer;
+    $("#custom-gene-input").on("input", function () {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function () {
+        customGenes = parseCustomGenes(document.getElementById("custom-gene-input").value);
+        redraw();
+      }, 300);
+    });
+
+    const waitForTables = setInterval(function () {
+      if (window.snvTableElem || window.svTableElem) {
+        clearInterval(waitForTables);
+        redraw();
+      }
+    }, 100);
+  });
+})();
+</script>
+```
