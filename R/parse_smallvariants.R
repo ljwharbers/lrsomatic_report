@@ -133,7 +133,8 @@ classify_mut = function(ref, alt) {
 
 # Build the small-variant display table:
 #   canonical rows from VEP text, per-caller VAFs joined on position.
-build_variant_table = function(vep_data, caller_list, gene_panel) {
+# gene_panel: character vector of HGNC symbols to keep, or NULL to return all variants.
+build_variant_table = function(vep_data, caller_list, gene_panel = NULL) {
   if (is.null(vep_data) || nrow(vep_data) == 0) return(NULL)
 
   # Impact ranking for deduplication
@@ -142,8 +143,12 @@ build_variant_table = function(vep_data, caller_list, gene_panel) {
   vep_data[is.na(impact_rank), impact_rank := 5L]
 
   # Filter to gene panel (by gene symbol or Ensembl ID fallback)
-  if (!is.null(gene_panel) && length(gene_panel) > 0) {
-    vep_data = vep_data[symbol %in% gene_panel | gene_id %in% gene_panel]
+  if (!is.null(gene_panel)) {
+    if (length(gene_panel) > 0) {
+      vep_data = vep_data[symbol %in% gene_panel | gene_id %in% gene_panel]
+    } else {
+      vep_data = vep_data[FALSE]  # Empty panel → empty result
+    }
   }
   if (nrow(vep_data) == 0) return(data.table())
 
