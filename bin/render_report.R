@@ -51,6 +51,15 @@ output     = if (!is.null(opt[["output"]])) opt[["output"]] else
 title      = if (!is.null(opt[["title"]])) opt[["title"]] else
              paste0("LRSomatic Report – ", sample_id)
 
+# ---- Load all available gene panels ----------------------------------------
+all_panels = load_all_gene_panels(file.path(repo_dir, "assets"))
+default_panel = if (file.exists(file.path(repo_dir, "assets", "gene_lists",
+                                            paste0(gene_panel, ".tsv")))) {
+  gene_panel
+} else {
+  if (length(all_panels) > 0) names(all_panels)[1] else "custom"
+}
+
 # ---- Auto-detect reference -----------------------------------------------
 reference = opt[["reference"]]
 if (reference == "auto") {
@@ -80,14 +89,16 @@ quarto::quarto_render(
   output_file    = basename(output),
   output_format  = "html",
   execute_params = list(
-    sample_id  = sample_id,
-    sample_dir = sample_dir,
-    reference  = reference,
-    sex        = sex,
-    gene_panel = gene_panel,
-    title      = title,
-    repo_dir   = repo_dir,
-    outputs    = outputs
+    sample_id     = sample_id,
+    sample_dir    = sample_dir,
+    reference     = reference,
+    sex           = sex,
+    gene_panel    = gene_panel,
+    default_panel = default_panel,
+    all_panels    = all_panels,
+    title         = title,
+    repo_dir      = repo_dir,
+    outputs       = outputs
   ),
   quiet = FALSE
 )
