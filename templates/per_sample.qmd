@@ -385,14 +385,34 @@ if (outputs$has_wakhan) {
   let activePanel = DEFAULT_PANEL;
   let customGenes = new Set();
 
+  // Cache the NHL_GENE_HITS column index for the SV table (looked up lazily on first use)
+  let svNhlColIdx = -1;
+  function getSvNhlColIdx() {
+    if (svNhlColIdx >= 0) return svNhlColIdx;
+    if (!window.svTableElem) return -1;
+    $(window.svTableElem).find('thead th').each(function (i) {
+      if ($(this).text().trim() === 'NHL_GENE_HITS') { svNhlColIdx = i; }
+    });
+    return svNhlColIdx;
+  }
+
   $.fn.dataTable.ext.search.push(function (settings, data) {
     const node = settings.nTable;
     if (node !== window.snvTableElem && node !== window.svTableElem) return true;
-    const gene = (data[0] || "").toUpperCase();
-    if (activePanel === "__all__")    return true;
-    if (activePanel === "__custom__") return customGenes.has(gene);
+    if (activePanel === "__all__") return true;
+
+    let hits;
+    if (node === window.snvTableElem) {
+      hits = [(data[0] || "").toUpperCase()];
+    } else {
+      const idx = getSvNhlColIdx();
+      if (idx < 0) return true;
+      hits = (data[idx] || "").toUpperCase().split(/[;,]+/).map(function (g) { return g.trim(); }).filter(function (g) { return g.length > 0; });
+    }
+
+    if (activePanel === "__custom__") return hits.some(function (g) { return customGenes.has(g); });
     const panel = GENE_PANELS[activePanel];
-    return panel ? panel.has(gene) : true;
+    return panel ? hits.some(function (g) { return panel.has(g); }) : true;
   });
 
   function parseCustomGenes(text) {
@@ -406,7 +426,7 @@ if (outputs$has_wakhan) {
     if (!snvTbl) return;
     const n = snvTbl.rows({ search: "applied" }).count();
     const el = document.getElementById("panel-variant-count");
-    if (el) el.textContent = n + " variant" + (n === 1 ? "" : "s") + " shown";
+    if (el) el.textContent = n + " SNV" + (n === 1 ? "" : "s") + " shown";
   }
 
   function redraw() {
@@ -432,10 +452,13 @@ if (outputs$has_wakhan) {
       }, 300);
     });
 
+    let _waitAttempts = 0;
     const waitForTables = setInterval(function () {
       if (window.snvTableElem || window.svTableElem) {
         clearInterval(waitForTables);
         redraw();
+      } else if (++_waitAttempts > 100) {
+        clearInterval(waitForTables);
       }
     }, 100);
   });
