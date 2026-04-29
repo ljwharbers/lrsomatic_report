@@ -52,6 +52,16 @@ resolve_gene_panel = function(panel_arg, assets_dir) {
   stop("Gene panel not found (tried builtin '", panel_arg, "' and as file path)")
 }
 
+# Load all gene panels from assets/gene_lists/*.tsv
+# Returns a named list (name = panel name, value = character vector of gene symbols)
+load_all_gene_panels = function(assets_dir) {
+  tsv_files = Sys.glob(file.path(assets_dir, "gene_lists", "*.tsv"))
+  if (length(tsv_files) == 0) return(list())
+  panels = lapply(tsv_files, load_gene_panel)
+  names(panels) = tools::file_path_sans_ext(basename(tsv_files))
+  panels
+}
+
 # Format a number for human-readable display
 fmt_bp = function(x) {
   x = as.numeric(x)
