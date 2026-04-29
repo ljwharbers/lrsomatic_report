@@ -83,15 +83,28 @@ parse_severus_gene_tsv = function(tsv_file) {
   dt
 }
 
-# Build the SV display table filtered to a gene panel.
-build_sv_table = function(sv_tsv, gene_panel) {
+# Build the SV display table.
+# gene_panel: character vector of HGNC symbols to keep, or NULL to return all SVs (one row each).
+build_sv_table = function(sv_tsv, gene_panel = NULL) {
   if (is.null(sv_tsv) || nrow(sv_tsv) == 0) return(data.table())
 
-  # Row index for reliable merge after exploding gene lists
   sv_tsv = copy(sv_tsv)
+
+  # When no panel is supplied, return one row per SV without explosion
+  if (is.null(gene_panel)) {
+    display_cols = intersect(
+      c("ID", "SVTYPE", "DETAILED_TYPE",
+        "START_CHROM", "START_POS", "END_CHROM", "END_POS",
+        "SV_LEN", "VAF", "NHL_GENE_HITS", "COSMIC_GENE_HITS",
+        "NHL_NEAREST_GENE_HITS_1MBWINDOW"),
+      names(sv_tsv)
+    )
+    return(sv_tsv[, ..display_cols])
+  }
+
+  # Panel-filtered path: explode multi-gene gene_hits, filter, return one row per gene×SV
   sv_tsv[, .ridx := .I]
 
-  # Explode multi-gene gene_hits column ("GENE1;GENE2" → separate rows)
   sv_long = sv_tsv[, {
     raw = as.character(gene_hits[1])
     genes = unique(trimws(unlist(strsplit(raw, "[;,]+"))))
@@ -102,12 +115,10 @@ build_sv_table = function(sv_tsv, gene_panel) {
 
   sv_long = merge(sv_long, sv_tsv, by = ".ridx")
   sv_long[, .ridx := NULL]
-  sv_tsv[,  .ridx := NULL]  # clean up source
+  sv_tsv[,  .ridx := NULL]
 
-  # Filter by gene panel
-  if (!is.null(gene_panel) && length(gene_panel) > 0) {
-    sv_long = sv_long[!is.na(gene) & gene %in% gene_panel]
-  }
+  # Filter by gene panel (always, even if panel is empty)
+  sv_long = sv_long[!is.na(gene) & gene %in% gene_panel]
   if (nrow(sv_long) == 0) return(data.table())
 
   display_cols = intersect(
