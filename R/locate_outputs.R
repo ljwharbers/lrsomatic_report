@@ -60,6 +60,15 @@ locate_outputs = function(sample_dir, sample_id) {
     file.path(d, "ascat", paste0(sample_id, ".purityploidy.txt")),
     glob1(file.path(d, "ascat/*.purityploidy.txt"))
   )
+  ascat_plots = list(
+    profile    = glob1(file.path(d, "ascat/*.tumour.ASCATprofile.png")),
+    rawprofile = glob1(file.path(d, "ascat/*.tumour.rawprofile.png")),
+    sunrise    = glob1(file.path(d, "ascat/*.tumour.sunrise.png")),
+    aspcf      = glob1(file.path(d, "ascat/*.tumour.ASPCF.png")),
+    before_gc  = glob1(file.path(d, "ascat/*.before_correction.*.tumour.tumour.png")),
+    after_gc   = glob1(file.path(d, "ascat/*.after_correction_gc.*.tumour.tumour.png")),
+    tumour_sep = glob1(file.path(d, "ascat/tumorSep*.tumour.png"))
+  )
 
   # --- QC -------------------------------------------------------------------
   mosdepth_summary = pick(
@@ -83,6 +92,28 @@ locate_outputs = function(sample_dir, sample_id) {
     glob1(file.path(d, "qc/tumor/samtools/*.stats"))
   )
 
+  # --- Normal-side QC (matched mode only) -----------------------------------
+  normal_mosdepth_summary = if (has_normal) pick(
+    file.path(d, "qc/normal/mosdepth", paste0(sample_id, ".mosdepth.summary.txt")),
+    glob1(file.path(d, "qc/normal/mosdepth/*.mosdepth.summary.txt"))
+  ) else NULL
+  normal_mosdepth_dist = if (has_normal) pick(
+    file.path(d, "qc/normal/mosdepth", paste0(sample_id, ".mosdepth.global.dist.txt")),
+    glob1(file.path(d, "qc/normal/mosdepth/*.mosdepth.global.dist.txt"))
+  ) else NULL
+  normal_cramino = if (has_normal) pick(
+    file.path(d, "qc/normal/cramino_aln", paste0(sample_id, "_cramino.txt")),
+    glob1(file.path(d, "qc/normal/cramino_aln/*_cramino.txt"))
+  ) else NULL
+  normal_flagstat = if (has_normal) pick(
+    file.path(d, "qc/normal/samtools", paste0(sample_id, ".flagstat")),
+    glob1(file.path(d, "qc/normal/samtools/*.flagstat"))
+  ) else NULL
+  normal_samtools_stats = if (has_normal) pick(
+    file.path(d, "qc/normal/samtools", paste0(sample_id, ".stats")),
+    glob1(file.path(d, "qc/normal/samtools/*.stats"))
+  ) else NULL
+
   # --- Wakhan (optional v2) -------------------------------------------------
   has_wakhan = dir.exists(file.path(d, "wakhan"))
 
@@ -101,6 +132,13 @@ locate_outputs = function(sample_dir, sample_id) {
     cramino          = cramino_aln,
     flagstat         = flagstat,
     samtools_stats   = samtools_stats,
+    has_normal       = has_normal,
+    ascat_plots      = ascat_plots,
+    normal_mosdepth_summary = normal_mosdepth_summary,
+    normal_mosdepth_dist    = normal_mosdepth_dist,
+    normal_cramino          = normal_cramino,
+    normal_flagstat         = normal_flagstat,
+    normal_samtools_stats   = normal_samtools_stats,
     has_wakhan       = has_wakhan
   )
 }

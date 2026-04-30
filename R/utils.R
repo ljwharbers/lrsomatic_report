@@ -69,3 +69,37 @@ fmt_bp = function(x) {
     ifelse(abs(x) >= 1e3, paste0(round(x / 1e3, 1), " kb"),
       paste0(x, " bp")))
 }
+
+# Embed a local PNG file as a self-contained base64 img tag
+embed_png = function(path, max_width = "900px") {
+  if (is.null(path) || !file.exists(path)) return(NULL)
+  b64 = base64enc::base64encode(path)
+  htmltools::tags$img(
+    src   = paste0("data:image/png;base64,", b64),
+    style = paste0("max-width:", max_width, "; display:block; margin:auto;")
+  )
+}
+
+# Compute coding TMB from a variant_table produced by build_variant_table().
+# consequence column may be comma-joined (e.g. "frameshift_variant,splice_region_variant").
+# denominator_mb: coding Mb used as divisor (default 30 Mb — canonical clinical denominator).
+compute_tmb = function(variant_table, denominator_mb = 30) {
+  nonsyn_terms = c(
+    "missense_variant", "frameshift_variant", "stop_gained", "stop_lost",
+    "start_lost", "inframe_insertion", "inframe_deletion",
+    "splice_acceptor_variant", "splice_donor_variant", "protein_altering_variant"
+  )
+  if (is.null(variant_table) || nrow(variant_table) == 0) {
+    return(list(n_nonsyn = NA_integer_, tmb = NA_real_, denominator_mb = denominator_mb))
+  }
+  is_nonsyn = vapply(variant_table$consequence, function(csq) {
+    if (is.na(csq) || csq == "") return(FALSE)
+    any(trimws(unlist(strsplit(csq, ","))) %in% nonsyn_terms)
+  }, logical(1))
+  n_nonsyn = sum(is_nonsyn, na.rm = TRUE)
+  list(
+    n_nonsyn       = n_nonsyn,
+    tmb            = round(n_nonsyn / denominator_mb, 2),
+    denominator_mb = denominator_mb
+  )
+}

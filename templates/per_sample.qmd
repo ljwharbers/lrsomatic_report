@@ -68,6 +68,11 @@ qc_mosdepth = parse_mosdepth_summary(outputs$mosdepth_summary)
 qc_mosdist  = parse_mosdepth_dist(outputs$mosdepth_dist)
 qc_cramino  = parse_cramino(outputs$cramino)
 qc_flagstat = parse_flagstat(outputs$flagstat)
+samtools_stats = parse_samtools_stats(outputs$samtools_stats)
+qc_normal_mosdepth = parse_mosdepth_summary(outputs$normal_mosdepth_summary)
+qc_normal_cramino  = parse_cramino(outputs$normal_cramino)
+qc_normal_flagstat = parse_flagstat(outputs$normal_flagstat)
+qc_normal_samtools_stats = parse_samtools_stats(outputs$normal_samtools_stats)
 
 # Parse VEP + raw callers
 vep_data = parse_vep_text(outputs$vep_somatic)
@@ -81,6 +86,7 @@ if (!is.null(outputs$deepsomatic_vcf))
   caller_list$deepsomatic = parse_caller_vcf(outputs$deepsomatic_vcf, "deepsomatic")
 
 variant_table = build_variant_table(vep_data, caller_list, gene_panel = NULL)
+tmb_info = compute_tmb(variant_table)
 
 # Parse Severus
 sev_vcf  = parse_severus_vcf(outputs$severus_vcf)
@@ -137,243 +143,27 @@ js_panels = paste0(
 cat("<script>\n", js_panels, "\n</script>\n", sep = "")
 ```
 
-## `r params$sample_id` {.unnumbered}
-
-```{r header-badges}
-mode_badge_col = if (outputs$mode == "matched") "#28a745" else "#fd7e14"
-badges = tagList(
-  tags$span(class = "badge",
-            style = paste0("background-color:", mode_badge_col, "; color:white; margin-right:6px; padding:4px 8px; border-radius:4px;"),
-            toupper(outputs$mode)),
-  tags$span(class = "badge",
-            style = "background-color:#6c757d; color:white; margin-right:6px; padding:4px 8px; border-radius:4px;",
-            toupper(params$reference)),
-  tags$span(class = "badge",
-            style = "background-color:#6c757d; color:white; padding:4px 8px; border-radius:4px;",
-            toupper(params$sex))
-)
-badges
-```
-
-```{r summary-cards}
-fmt_val = function(x, digits = 2) {
-  if (is.na(x)) return("N/A")
-  if (is.numeric(x) && !is.integer(x)) return(round(x, digits))
-  as.character(x)
-}
-
-card = function(label, value, colour = "#007bff") {
-  div(
-    style = paste0("display:inline-block; margin:6px; padding:12px 20px; ",
-                   "border-left:4px solid ", colour, "; background:#f8f9fa; ",
-                   "border-radius:4px; min-width:140px;"),
-    div(style = "font-size:0.75em; color:#6c757d; text-transform:uppercase;", label),
-    div(style = "font-size:1.4em; font-weight:bold;", value)
-  )
-}
-
-tagList(
-  card("Purity",         fmt_val(ascat_pp$purity),           "#d9534f"),
-  card("Ploidy",         fmt_val(ascat_pp$ploidy),           "#f0ad4e"),
-  card("Mean coverage",  paste0(fmt_val(qc_mosdepth$mean_depth), "×"), "#5bc0de"),
-  card("Read N50",       if (!is.na(qc_cramino$n50)) fmt_bp(qc_cramino$n50) else "N/A", "#5cb85c"),
-  card("Somatic SNVs",   fmt_val(n_snv, 0),                  "#9467bd"),
-  card("Somatic SVs",    fmt_val(n_sv, 0),                   "#8c564b"),
-  card("Panel variants", fmt_val(n_panel_vars, 0),            "#e377c2"),
-  card("Panel SVs",      fmt_val(n_panel_svs, 0),             "#17becf")
-)
-```
+{{< include sections/_header.qmd >}}
 
 ---
 
-## Circos overview
-
-> Tracks (outer → inner): **ideogram**, **somatic SNVs** (coloured by 6-class SBS category), **non-BND SVs** (DEL/DUP/INV/INS), **ASCAT copy number** (major = red, minor = blue, total = black). Translocation links shown inside.
-
-```{r circos-plot, fig.align='center'}
-if (!is.null(circos_tmp) && file.exists(circos_tmp)) {
-  img_b64 = base64enc::base64encode(circos_tmp)
-  tags$img(src  = paste0("data:image/svg+xml;base64,", img_b64),
-           style = "max-width:750px; display:block; margin:auto;")
-} else {
-  tags$div(class = "alert alert-warning",
-           "Circos plot could not be generated. Check that ASCAT and Severus output files are present.")
-}
-```
+{{< include sections/_circos.qmd >}}
 
 ---
 
-## Small variants in gene panel
-
-```{r gene-filter-ui, results='asis'}
-panel_opts = ""
-all_p = if (!is.null(params$all_panels) && length(params$all_panels) > 0)
-          params$all_panels else list()
-for (nm in names(all_p)) {
-  selected = if (nm == params$default_panel) " selected" else ""
-  label = paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
-  panel_opts = paste0(panel_opts,
-    '<option value="', nm, '"', selected, '>', label, '</option>\n')
-}
-panel_opts = paste0(panel_opts,
-  '<option value="__all__">All genes</option>\n',
-  '<option value="__custom__">Custom&hellip;</option>\n')
-
-cat(paste0('
-<div style="margin-bottom:12px;">
-  <label for="panel-select" style="font-weight:600; margin-right:8px;">Gene panel:</label>
-  <select id="panel-select" style="padding:4px 8px; border-radius:4px; border:1px solid #ced4da;">',
-    panel_opts,
-  '</select>
-  <span id="panel-variant-count" style="margin-left:12px; font-size:0.9em; color:#6c757d;"></span>
-</div>
-<div id="custom-gene-panel" style="display:none; margin-bottom:12px;">
-  <label style="font-weight:600; display:block; margin-bottom:4px;">
-    Custom genes (one per line, or comma/space separated, case-insensitive):
-  </label>
-  <textarea id="custom-gene-input"
-    rows="4" style="width:400px; font-family:monospace; padding:6px;
-                    border:1px solid #ced4da; border-radius:4px;"></textarea>
-</div>
-'))
-```
-
-```{r small-variant-table}
-if (!is.null(variant_table) && nrow(variant_table) > 0) {
-  # Format VAF columns as percentages
-  vaf_cols = grep("^vaf_", names(variant_table), value = TRUE)
-  dt_display = copy(variant_table)
-  for (vc in vaf_cols) {
-    dt_display[, (vc) := round(get(vc) * 100, 1)]
-  }
-  setnames(dt_display, vaf_cols,
-           sub("vaf_", "VAF% ", vaf_cols))
-
-  DT::datatable(
-    dt_display,
-    rownames    = FALSE,
-    filter      = "top",
-    elementId   = "snv-table",
-    extensions  = c("Buttons", "Scroller"),
-    options     = list(
-      dom        = "Bfrtip",
-      buttons    = c("copy", "csv", "excel"),
-      scrollX    = TRUE,
-      scrollY    = "400px",
-      scroller   = TRUE,
-      deferRender = TRUE,
-      pageLength = 25,
-      columnDefs = list(list(className = "dt-left", targets = "_all")),
-      initComplete = JS("function() { window.snvTableElem = this.api().table().node(); }")
-    )
-  ) |>
-    DT::formatStyle(
-      columns     = "impact",
-      target      = "cell",
-      backgroundColor = DT::styleEqual(
-        c("HIGH", "MODERATE", "LOW", "MODIFIER"),
-        c("#ffcccc", "#fff3cc", "#e6ffcc", "#f5f5f5")
-      )
-    )
-}
-```
+{{< include sections/_ascat.qmd >}}
 
 ---
 
-## Structural variants in gene panel
-
-```{r sv-info}
-if (is.null(sv_table) || nrow(sv_table) == 0) {
-  tags$div(class = "alert alert-info",
-    if (is.null(sev_tsv)) "Severus gene-annotated SV file not found."
-    else "No structural variants detected.")
-}
-```
-
-```{r sv-table}
-if (!is.null(sv_table) && nrow(sv_table) > 0) {
-  DT::datatable(
-    sv_table,
-    rownames   = FALSE,
-    filter     = "top",
-    elementId  = "sv-table",
-    extensions = c("Buttons", "Scroller"),
-    options    = list(
-      dom       = "Bfrtip",
-      buttons   = c("copy", "csv", "excel"),
-      scrollX   = TRUE,
-      scrollY   = "350px",
-      scroller  = TRUE,
-      deferRender = TRUE,
-      pageLength = 25,
-      initComplete = JS("function() { window.svTableElem = this.api().table().node(); }")
-    )
-  ) |>
-    DT::formatStyle(
-      columns = "SVTYPE",
-      target  = "cell",
-      backgroundColor = DT::styleEqual(
-        c("DEL", "DUP", "INV", "INS", "BND"),
-        c("#cce5ff", "#d4edda", "#fff3cd", "#f8d7da", "#e2e3e5")
-      )
-    )
-}
-```
+{{< include sections/_smallvariants.qmd >}}
 
 ---
 
-## QC details
+{{< include sections/_severus.qmd >}}
 
-::: {.callout-note collapse="true"}
-### Coverage summary
+---
 
-```{r coverage-table}
-if (!is.null(qc_mosdepth$table) && nrow(qc_mosdepth$table) > 0) {
-  DT::datatable(qc_mosdepth$table, rownames = FALSE,
-                options = list(pageLength = 30, dom = "ft", scrollY = "300px"))
-} else {
-  "Mosdepth summary not available."
-}
-```
-:::
-
-::: {.callout-note collapse="true"}
-### Alignment statistics (samtools flagstat)
-
-```{r flagstat-table}
-if (length(qc_flagstat) > 0) {
-  fs = data.frame(metric = names(qc_flagstat), value = unlist(qc_flagstat))
-  knitr::kable(fs, row.names = FALSE)
-} else {
-  "Flagstat file not available."
-}
-```
-:::
-
-::: {.callout-note collapse="true"}
-### Read quality (cramino)
-
-```{r cramino-table}
-cr = qc_cramino
-cr_df = data.frame(
-  metric = c("N50 (bp)", "Yield (Gb)", "% mapped", "# reads"),
-  value  = c(fmt_val(cr$n50, 0), fmt_val(cr$yield_gb), fmt_val(cr$mapped_pct), fmt_val(cr$n_reads, 0))
-)
-knitr::kable(cr_df, row.names = FALSE)
-```
-:::
-
-::: {.callout-note collapse="true"}
-### Wakhan (haplotype-resolved CN)
-
-```{r wakhan-status}
-if (outputs$has_wakhan) {
-  "Wakhan output directory found. Full Wakhan integration is planned for v2 of this report."
-} else {
-  "Wakhan was not run for this sample."
-}
-```
-:::
+{{< include sections/_qc.qmd >}}
 
 ---
 

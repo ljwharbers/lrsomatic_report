@@ -15,7 +15,9 @@ parse_mosdepth_summary = function(summary_file) {
 
   # Keep per-chromosome rows (exclude region-level and total)
   chr_rows = dt[grepl("^chr", chrom) & !grepl("_region", chrom)]
-  list(mean_depth = round(mean_depth, 2), table = chr_rows)
+  total_length = if (nrow(total_row) > 0) total_row$length[1] else NA_real_
+  total_bases  = if (nrow(total_row) > 0) total_row$bases[1]  else NA_real_
+  list(mean_depth = round(mean_depth, 2), total_length = total_length, total_bases = total_bases, table = chr_rows)
 }
 
 # Parse mosdepth global distribution (*.mosdepth.global.dist.txt)
@@ -78,4 +80,32 @@ parse_flagstat = function(flagstat_file) {
     if (grepl("duplicate", line))   out$duplicate = count
   }
   out
+}
+
+# Parse samtools stats (*.stats) — SN summary lines only (long-read relevant)
+# Returns list of summary metrics; NULL if file missing.
+parse_samtools_stats = function(stats_file) {
+  if (is.null(stats_file) || !file.exists(stats_file)) return(NULL)
+  lines = readLines(stats_file, warn = FALSE)
+  sn = lines[startsWith(lines, "SN\t")]
+  get_sn = function(key) {
+    hit = grep(paste0("^SN\t", key, ":\t"), sn, value = TRUE)
+    if (length(hit) == 0) return(NA_real_)
+    suppressWarnings(as.numeric(trimws(sub(paste0("^SN\t", key, ":\t([^\t#]+).*"), "\\1", hit[1]))))
+  }
+  reads_total  = get_sn("raw total sequences")
+  reads_mapped = get_sn("reads mapped")
+  mapped_pct   = if (!is.na(reads_total) && reads_total > 0)
+    round(reads_mapped / reads_total * 100, 2) else NA_real_
+  list(
+    reads_total  = reads_total,
+    reads_mapped = reads_mapped,
+    mapped_pct   = mapped_pct,
+    total_length = get_sn("total length"),
+    bases_mapped = get_sn("bases mapped \\(cigar\\)"),
+    error_rate   = get_sn("error rate"),
+    avg_length   = get_sn("average length"),
+    max_length   = get_sn("maximum length"),
+    avg_quality  = get_sn("average quality")
+  )
 }

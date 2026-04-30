@@ -1,0 +1,74 @@
+## Small variants in gene panel
+
+```{r gene-filter-ui, results='asis'}
+panel_opts = ""
+all_p = if (!is.null(params$all_panels) && length(params$all_panels) > 0)
+          params$all_panels else list()
+for (nm in names(all_p)) {
+  selected = if (nm == params$default_panel) " selected" else ""
+  label = paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
+  panel_opts = paste0(panel_opts,
+    '<option value="', nm, '"', selected, '>', label, '</option>\n')
+}
+panel_opts = paste0(panel_opts,
+  '<option value="__all__">All genes</option>\n',
+  '<option value="__custom__">Custom&hellip;</option>\n')
+
+cat(paste0('
+<div style="margin-bottom:12px;">
+  <label for="panel-select" style="font-weight:600; margin-right:8px;">Gene panel:</label>
+  <select id="panel-select" style="padding:4px 8px; border-radius:4px; border:1px solid #ced4da;">',
+    panel_opts,
+  '</select>
+  <span id="panel-variant-count" style="margin-left:12px; font-size:0.9em; color:#6c757d;"></span>
+</div>
+<div id="custom-gene-panel" style="display:none; margin-bottom:12px;">
+  <label style="font-weight:600; display:block; margin-bottom:4px;">
+    Custom genes (one per line, or comma/space separated, case-insensitive):
+  </label>
+  <textarea id="custom-gene-input"
+    rows="4" style="width:400px; font-family:monospace; padding:6px;
+                    border:1px solid #ced4da; border-radius:4px;"></textarea>
+</div>
+'))
+```
+
+```{r small-variant-table}
+if (!is.null(variant_table) && nrow(variant_table) > 0) {
+  # Format VAF columns as percentages
+  vaf_cols = grep("^vaf_", names(variant_table), value = TRUE)
+  dt_display = copy(variant_table)
+  for (vc in vaf_cols) {
+    dt_display[, (vc) := round(get(vc) * 100, 1)]
+  }
+  setnames(dt_display, vaf_cols,
+           sub("vaf_", "VAF% ", vaf_cols))
+
+  DT::datatable(
+    dt_display,
+    rownames    = FALSE,
+    filter      = "top",
+    elementId   = "snv-table",
+    extensions  = c("Buttons", "Scroller"),
+    options     = list(
+      dom        = "Bfrtip",
+      buttons    = c("copy", "csv", "excel"),
+      scrollX    = TRUE,
+      scrollY    = "400px",
+      scroller   = TRUE,
+      deferRender = TRUE,
+      pageLength = 25,
+      columnDefs = list(list(className = "dt-left", targets = "_all")),
+      initComplete = JS("function() { window.snvTableElem = this.api().table().node(); }")
+    )
+  ) |>
+    DT::formatStyle(
+      columns     = "impact",
+      target      = "cell",
+      backgroundColor = DT::styleEqual(
+        c("HIGH", "MODERATE", "LOW", "MODIFIER"),
+        c("#ffcccc", "#fff3cc", "#e6ffcc", "#f5f5f5")
+      )
+    )
+}
+```
