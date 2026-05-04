@@ -1,0 +1,520 @@
+// ============================================================
+// LRSomatic Report — custom SCSS theme
+// Clinical genomics colour palette + component styles
+//
+// Section structure follows Quarto convention:
+//   /*-- scss:defaults --*/  Bootstrap variable overrides (resolved before theme)
+//   /*-- scss:rules --*/     Custom CSS rules (resolved after theme)
+// ============================================================
+
+/*-- scss:defaults --*/
+
+// ── Core palette ──────────────────────────────────────────────
+$report-primary:       #1a5f7a; // deep teal — clinical primary
+$report-primary-light: #2d8ba5; // lighter teal
+$report-primary-muted: #e8f4f8; // near-white teal — card backgrounds
+
+$report-success:       #2d7d46; // darker clinical green
+$report-warning:       #b5651d; // amber-brown
+$report-danger:        #c0392b; // muted red
+
+$report-text:          #1e293b; // dark slate
+$report-text-muted:    #64748b;
+$report-bg:            #f8fafc; // very light cool grey
+$report-surface:       #ffffff;
+$report-border:        #e2e8f0;
+
+// ── Bootstrap SCSS variable overrides ─────────────────────────
+$primary:              $report-primary;
+$success:              $report-success;
+$warning:              $report-warning;
+$danger:               $report-danger;
+$body-bg:              $report-bg;
+$body-color:           $report-text;
+$border-color:         $report-border;
+
+$font-size-base:       0.9rem;
+$headings-color:       $report-primary;
+$headings-font-weight: 600;
+
+$border-radius:        6px;
+$border-radius-sm:     4px;
+$border-radius-lg:     8px;
+
+/*-- scss:rules --*/
+
+// ============================================================
+// CSS custom properties — light mode
+// ============================================================
+:root {
+  // Palette
+  --color-primary:        #{$report-primary};
+  --color-primary-light:  #{$report-primary-light};
+  --color-primary-muted:  #{$report-primary-muted};
+  --color-success:        #{$report-success};
+  --color-warning:        #{$report-warning};
+  --color-danger:         #{$report-danger};
+  --color-text:           #{$report-text};
+  --color-text-muted:     #{$report-text-muted};
+  --color-bg:             #{$report-bg};
+  --color-surface:        #{$report-surface};
+  --color-border:         #{$report-border};
+
+  // Typography — system stacks only (self-contained HTML)
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+
+  // Geometry
+  --card-radius:      6px;
+  --card-shadow:      0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --card-shadow-hover: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.06);
+
+  // Impact colour tokens — values match formatStyle calls in _smallvariants.qmd
+  // (DT inline styles override these in light mode; dark-mode CSS resets cell bg)
+  --impact-high:     #fde8e8;
+  --impact-moderate: #fef9e7;
+  --impact-low:      #e8f5e9;
+  --impact-modifier: #f8fafc;
+
+  // SV-type colour tokens — values match formatStyle calls in _severus.qmd
+  --sv-del:  #dbeafe;
+  --sv-dup:  #dcfce7;
+  --sv-inv:  #fef9c3;
+  --sv-ins:  #fee2e2;
+  --sv-bnd:  #f3e8ff;
+
+  // Metric-card accent colours
+  --metric-purity:     #{$report-danger};
+  --metric-ploidy:     #{$report-warning};
+  --metric-coverage:   #{$report-primary};
+  --metric-n50:        #{$report-success};
+  --metric-snvs:       #6d4b8a;
+  --metric-svs:        #2c4a6e;
+  --metric-panel-vars: #{$report-primary-light};
+  --metric-panel-svs:  #17a589;
+  --metric-tmb:        #{$report-success};
+  --metric-error:      #{$report-text-muted};
+}
+
+// ============================================================
+// Dark mode — custom component overrides
+// Bootstrap flatly components stay light-mode; the custom
+// components below (cards, badges, panel controls, DT tables)
+// fully adapt. Trade-off: impact/SVTYPE cell tints are reset
+// to a uniform dark surface in dark mode (data still readable).
+// ============================================================
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-primary:        #3ba6c8;
+    --color-primary-light:  #5bc4e0;
+    --color-primary-muted:  #1a3a4a;
+    --color-success:        #4ade80;
+    --color-warning:        #fbbf24;
+    --color-danger:         #f87171;
+    --color-text:           #e2e8f0;
+    --color-text-muted:     #94a3b8;
+    --color-bg:             #0f172a;
+    --color-surface:        #1e293b;
+    --color-border:         #334155;
+    --card-shadow:          0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --card-shadow-hover:    0 4px 6px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  body {
+    background: var(--color-bg) !important;
+    color: var(--color-text) !important;
+  }
+
+  // DT table dark-mode reset — overrides DT's inline background-color
+  // (!important beats inline styles per CSS cascade spec)
+  table.dataTable tbody tr {
+    background: var(--color-surface) !important;
+    td {
+      background-color: var(--color-surface) !important;
+      color: var(--color-text) !important;
+      border-color: var(--color-border) !important;
+    }
+    &:hover td { background-color: var(--color-primary-muted) !important; }
+  }
+
+  // Callout dark mode
+  .callout { background: var(--color-surface) !important; border-color: var(--color-border) !important; }
+  .callout-header { background: transparent !important; }
+
+  // Quarto page scaffolding
+  .quarto-title-block,
+  .quarto-title-meta { color: var(--color-text) !important; }
+
+  // TOC dark
+  #TOC { background: var(--color-surface) !important; }
+  .sidebar-navigation { background: var(--color-surface) !important; }
+}
+
+// ============================================================
+// Body + typography
+// ============================================================
+body {
+  font-family: var(--font-sans);
+}
+
+h2 {
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--color-border);
+  margin-top: 2rem;
+  margin-bottom: 1.2rem;
+  color: var(--color-primary);
+}
+
+h3 { color: var(--color-text); }
+
+code, pre {
+  font-family: var(--font-mono);
+}
+
+// ============================================================
+// Report header badges
+// ============================================================
+.report-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  margin-right: 6px;
+  margin-bottom: 4px;
+
+  &.is-matched     { background: var(--color-success); }
+  &.is-tumour-only { background: #d97706; }          // amber
+  &.is-meta        { background: var(--color-text-muted); }
+}
+
+// ============================================================
+// Metric cards grid
+// ============================================================
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 12px;
+  margin: 16px 0 28px;
+}
+
+.metric-card {
+  background: var(--color-surface);
+  border-radius: var(--card-radius);
+  padding: 14px 16px 12px;
+  box-shadow: var(--card-shadow);
+  border-top: 3px solid var(--color-primary);
+  transition: box-shadow 0.15s ease, transform 0.1s ease;
+
+  &:hover {
+    box-shadow: var(--card-shadow-hover);
+    transform: translateY(-1px);
+  }
+
+  // Accent colour modifiers
+  &.metric-purity     { border-top-color: var(--metric-purity); }
+  &.metric-ploidy     { border-top-color: var(--metric-ploidy); }
+  &.metric-coverage   { border-top-color: var(--metric-coverage); }
+  &.metric-n50        { border-top-color: var(--metric-n50); }
+  &.metric-snvs       { border-top-color: var(--metric-snvs); }
+  &.metric-svs        { border-top-color: var(--metric-svs); }
+  &.metric-panel-vars { border-top-color: var(--metric-panel-vars); }
+  &.metric-panel-svs  { border-top-color: var(--metric-panel-svs); }
+  &.metric-tmb        { border-top-color: var(--metric-tmb); }
+  &.metric-error      { border-top-color: var(--metric-error); }
+}
+
+.metric-card__label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 5px;
+}
+
+.metric-card__value {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-card__subtitle {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+// ============================================================
+// Panel controls (gene-panel selector)
+// ============================================================
+.panel-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 10px 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+}
+
+.panel-controls__label {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.panel-controls__select {
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  font-size: 0.875rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+
+  &:focus {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+    border-color: var(--color-primary);
+  }
+}
+
+.panel-controls__count {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.panel-controls__custom-area {
+  padding: 10px 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+  margin-bottom: 12px;
+
+  label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    display: block;
+    margin-bottom: 6px;
+    color: var(--color-text);
+  }
+
+  textarea {
+    width: 420px;
+    max-width: 100%;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    padding: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    resize: vertical;
+
+    &:focus {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 1px;
+      border-color: var(--color-primary);
+    }
+  }
+}
+
+// ============================================================
+// DT table theme
+// ============================================================
+table.dataTable {
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+
+  thead th {
+    background: var(--color-primary-muted) !important;
+    color: var(--color-text) !important;
+    border-bottom: 2px solid var(--color-border) !important;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 8px 10px !important;
+    white-space: nowrap;
+  }
+
+  // Filter inputs in thead
+  thead input, thead select {
+    border: 1px solid var(--color-border) !important;
+    border-radius: 4px !important;
+    font-size: 0.75rem !important;
+    padding: 2px 6px !important;
+    background: var(--color-bg) !important;
+    color: var(--color-text) !important;
+  }
+
+  tbody {
+    tr td {
+      font-size: 0.8rem;
+      padding: 6px 10px !important;
+      border-bottom: 1px solid var(--color-border) !important;
+      color: var(--color-text) !important;
+    }
+    tr.odd  td { background: var(--color-bg) !important; }
+    tr.even td { background: var(--color-surface) !important; }
+    tr:hover td { background: var(--color-primary-muted) !important; }
+  }
+}
+
+// DT Buttons toolbar
+div.dt-buttons {
+  margin-bottom: 8px !important;
+
+  button.dt-button {
+    background: var(--color-surface) !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: 4px !important;
+    color: var(--color-text) !important;
+    font-size: 0.78rem !important;
+    padding: 4px 12px !important;
+    margin-right: 4px !important;
+    box-shadow: none !important;
+    transition: background 0.15s, border-color 0.15s, color 0.15s !important;
+
+    &:hover {
+      background: var(--color-primary-muted) !important;
+      border-color: var(--color-primary) !important;
+      color: var(--color-primary) !important;
+    }
+  }
+}
+
+// DT info / pagination chrome
+.dataTables_info,
+.dataTables_length,
+.dataTables_paginate {
+  font-size: 0.78rem !important;
+  color: var(--color-text-muted) !important;
+}
+
+.dataTables_filter input {
+  border: 1px solid var(--color-border) !important;
+  border-radius: 4px !important;
+  font-size: 0.78rem !important;
+  padding: 3px 8px !important;
+  background: var(--color-bg) !important;
+  color: var(--color-text) !important;
+}
+
+// ============================================================
+// TOC / sidebar styling
+// ============================================================
+#TOC {
+  font-size: 0.82rem;
+  border-right: 1px solid var(--color-border);
+  padding-right: 12px;
+
+  ul { list-style: none; padding-left: 0; }
+
+  li {
+    margin: 2px 0;
+    border-left: 2px solid transparent;
+
+    &.active {
+      border-left-color: var(--color-primary);
+    }
+  }
+
+  a {
+    color: var(--color-text-muted);
+    text-decoration: none;
+    display: block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    transition: color 0.12s, background 0.12s;
+
+    &:hover  { color: var(--color-primary); background: var(--color-primary-muted); }
+    &.active { color: var(--color-primary); font-weight: 600; }
+  }
+}
+
+// ============================================================
+// Circos container — white card in dark mode
+// ============================================================
+.circos-container {
+  background: #ffffff;
+  border-radius: var(--card-radius);
+  padding: 20px;
+  display: inline-block;
+  box-shadow: var(--card-shadow);
+  text-align: center;
+}
+
+// ============================================================
+// Callout overrides
+// ============================================================
+.callout {
+  border-radius: var(--card-radius) !important;
+  border-left-width: 3px !important;
+  font-size: 0.88rem !important;
+}
+
+// ============================================================
+// Max-width guard for full-page-layout
+// ============================================================
+// page-layout: full stretches prose content on wide monitors.
+// Cap the content column so it remains readable.
+.page-full .quarto-title-block,
+.page-full > .column-body {
+  max-width: 1400px;
+}
+
+// ============================================================
+// Print stylesheet
+// ============================================================
+@media print {
+  // Hide interactive / navigation elements
+  #TOC,
+  .sidebar-navigation,
+  .quarto-sidebar,
+  .dt-buttons,
+  div.dt-buttons,
+  .panel-controls,
+  #custom-gene-panel,
+  .dataTables_filter,
+  .dataTables_length,
+  .dataTables_paginate,
+  .dataTables_info { display: none !important; }
+
+  // Expand DT scroll containers so all rows print
+  .dataTables_scrollBody {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  // Force light theme for printing
+  body { background: #fff !important; color: #000 !important; }
+
+  table.dataTable {
+    thead th { background: #f0f4f8 !important; color: #000 !important; }
+    tbody tr td { color: #000 !important; }
+  }
+
+  .metric-card {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+  }
+
+  .metric-grid { grid-template-columns: repeat(5, 1fr) !important; }
+
+  h2 { page-break-after: avoid; }
+  section { page-break-inside: avoid; }
+}
