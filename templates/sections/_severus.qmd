@@ -31,8 +31,8 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
       columns = "SVTYPE",
       target  = "cell",
       backgroundColor = DT::styleEqual(
-        c("DEL", "DUP", "INV", "INS", "BND"),
-        c("#cce5ff", "#d4edda", "#fff3cd", "#f8d7da", "#e2e3e5")
+        c("DEL",     "DUP",     "INV",     "INS",     "BND"),
+        c("#dbeafe", "#dcfce7", "#fef9c3", "#fee2e2", "#f3e8ff")
       )
     )
 }

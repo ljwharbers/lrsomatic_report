@@ -5,8 +5,10 @@
 ```{r circos-plot, fig.align='center'}
 if (!is.null(circos_tmp) && file.exists(circos_tmp)) {
   img_b64 = base64enc::base64encode(circos_tmp)
-  tags$img(src  = paste0("data:image/svg+xml;base64,", img_b64),
-           style = "max-width:750px; display:block; margin:auto;")
+  div(class = "circos-container",
+    tags$img(src   = paste0("data:image/svg+xml;base64,", img_b64),
+             style = "max-width:710px; display:block; margin:auto;")
+  )
 } else {
   tags$div(class = "alert alert-warning",
            "Circos plot could not be generated. Check that ASCAT and Severus output files are present.")

@@ -25,7 +25,7 @@ cat("\n### Raw logR + BAF\n\n")
 ```
 
 ```{r ascat-rawprofile, eval=has_any_ascat_plot}
-p = embed_png(outputs$ascat_plots$rawprofile)
+p = embed_png(outputs$ascat_plots$aspcf)
 if (!is.null(p)) p else htmltools::p("Plot not produced — ASCAT may have failed for this sample.")
 ```
 
@@ -47,7 +47,6 @@ cat("\n:::\n\n")
 
 ```{r ascat-diagnostics, eval=has_any_ascat_plot}
 plots = list(
-  "ASPCF segmentation"  = embed_png(outputs$ascat_plots$aspcf,      max_width = "700px"),
   "Pre-GC correction"   = embed_png(outputs$ascat_plots$before_gc,  max_width = "700px"),
   "Post-GC correction"  = embed_png(outputs$ascat_plots$after_gc,   max_width = "700px"),
   "Tumour separation"   = embed_png(outputs$ascat_plots$tumour_sep, max_width = "700px")

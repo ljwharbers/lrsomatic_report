@@ -1,19 +1,12 @@
 ## `r params$sample_id` {.unnumbered}
 
 ```{r header-badges}
-mode_badge_col = if (outputs$mode == "matched") "#28a745" else "#fd7e14"
-badges = tagList(
-  tags$span(class = "badge",
-            style = paste0("background-color:", mode_badge_col, "; color:white; margin-right:6px; padding:4px 8px; border-radius:4px;"),
-            toupper(outputs$mode)),
-  tags$span(class = "badge",
-            style = "background-color:#6c757d; color:white; margin-right:6px; padding:4px 8px; border-radius:4px;",
-            toupper(params$reference)),
-  tags$span(class = "badge",
-            style = "background-color:#6c757d; color:white; padding:4px 8px; border-radius:4px;",
-            toupper(params$sex))
+mode_css = if (outputs$mode == "matched") "is-matched" else "is-tumour-only"
+tagList(
+  tags$span(class = paste("report-badge", mode_css), toupper(outputs$mode)),
+  tags$span(class = "report-badge is-meta", toupper(params$reference)),
+  tags$span(class = "report-badge is-meta", toupper(params$sex))
 )
-badges
 ```
 
 ```{r summary-cards}
@@ -23,35 +16,33 @@ fmt_val = function(x, digits = 2) {
   as.character(x)
 }
 
-card = function(label, value, colour = "#007bff", subtitle = NULL) {
+card = function(label, value, css_class = "", subtitle = NULL) {
   div(
-    style = paste0("display:inline-block; margin:6px; padding:12px 20px; ",
-                   "border-left:4px solid ", colour, "; background:#f8f9fa; ",
-                   "border-radius:4px; min-width:140px;"),
-    div(style = "font-size:0.75em; color:#6c757d; text-transform:uppercase;", label),
-    div(style = "font-size:1.4em; font-weight:bold;", value),
+    class = paste("metric-card", css_class),
+    div(class = "metric-card__label",    label),
+    div(class = "metric-card__value",    value),
     if (!is.null(subtitle))
-      div(style = "font-size:0.7em; color:#6c757d; margin-top:2px;", subtitle)
+      div(class = "metric-card__subtitle", subtitle)
   )
 }
 
-tagList(
-  card("Purity",         fmt_val(ascat_pp$purity),           "#d9534f"),
-  card("Ploidy",         fmt_val(ascat_pp$ploidy),           "#f0ad4e"),
-  card("Mean coverage",  paste0(fmt_val(qc_mosdepth$mean_depth), "×"), "#5bc0de"),
-  card("Read N50",       if (!is.na(qc_cramino$n50)) fmt_bp(qc_cramino$n50) else "N/A", "#5cb85c"),
-  card("Somatic SNVs",   fmt_val(n_snv, 0),                  "#9467bd"),
-  card("Somatic SVs",    fmt_val(n_sv, 0),                   "#8c564b"),
-  card("Panel variants", fmt_val(n_panel_vars, 0),            "#e377c2"),
-  card("Panel SVs",      fmt_val(n_panel_svs, 0),             "#17becf"),
+div(class = "metric-grid",
+  card("Purity",        fmt_val(ascat_pp$purity),            "metric-purity"),
+  card("Ploidy",        fmt_val(ascat_pp$ploidy),            "metric-ploidy"),
+  card("Mean coverage", paste0(fmt_val(qc_mosdepth$mean_depth), "×"), "metric-coverage"),
+  card("Read N50",      if (!is.na(qc_cramino$n50)) fmt_bp(qc_cramino$n50) else "N/A", "metric-n50"),
+  card("Somatic SNVs",  fmt_val(n_snv, 0),                   "metric-snvs"),
+  card("Somatic SVs",   fmt_val(n_sv, 0),                    "metric-svs"),
+  card("Panel variants",fmt_val(n_panel_vars, 0),            "metric-panel-vars"),
+  card("Panel SVs",     fmt_val(n_panel_svs, 0),             "metric-panel-svs"),
   card("Coding TMB",
        if (!is.na(tmb_info$tmb)) paste0(fmt_val(tmb_info$tmb), " mut/Mb") else "N/A",
-       "#2ca02c",
+       "metric-tmb",
        subtitle = if (!is.na(tmb_info$n_nonsyn))
          paste0(tmb_info$n_nonsyn, " non-syn / ", tmb_info$denominator_mb, " Mb") else NULL),
   card("Error rate",
        if (!is.null(samtools_stats) && !is.na(samtools_stats$error_rate))
          paste0(formatC(samtools_stats$error_rate * 100, format = "f", digits = 3), "%") else "N/A",
-       "#bcbd22")
+       "metric-error")
 )
 ```
