@@ -63,7 +63,7 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
       target      = "cell",
       backgroundColor = DT::styleEqual(
         c("HIGH",     "MODERATE", "LOW",      "MODIFIER"),
-        c("#fde8e8",  "#fef9e7",  "#e8f5e9",  "#f8fafc")
+        c("#f7e3df",  "#f6edd6",  "#e4efe3",  "#f3f1ea")
       )
     )
 }
