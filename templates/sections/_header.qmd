@@ -1,11 +1,14 @@
-## `r params$sample_id` {.unnumbered}
-
-```{r header-badges}
+```{r report-hero}
 mode_css = if (outputs$mode == "matched") "is-matched" else "is-tumour-only"
-tagList(
-  tags$span(class = paste("report-badge", mode_css), toupper(outputs$mode)),
-  tags$span(class = "report-badge is-meta", toupper(params$reference)),
-  tags$span(class = "report-badge is-meta", toupper(params$sex))
+tags$header(
+  class = "report-hero",
+  div(class = "report-hero__eyebrow", "Somatic variant profile"),
+  div(class = "report-hero__title", params$sample_id),
+  div(class = "report-hero__badges",
+    tags$span(class = paste("report-badge", mode_css), toupper(outputs$mode)),
+    tags$span(class = "report-badge is-meta", toupper(params$reference)),
+    tags$span(class = "report-badge is-meta", toupper(params$sex))
+  )
 )
 ```
 

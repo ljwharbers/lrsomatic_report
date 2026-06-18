@@ -1,28 +1,39 @@
 suppressPackageStartupMessages({
   library(circlize)
-  library(ComplexHeatmap)
-  library(grid)
   library(data.table)
 })
 
-# 6-class SBS mutation colours (SigProfiler palette)
+# Colour palettes — keep in sync with --circos-* in assets/styles/report.scss
+
+# SBS-6 SNV palette (SigProfiler/COSMIC standard, softened slightly toward report ink/paper)
 SNV_COLOURS = c(
   "C>A" = "#2EBAED",
-  "C>G" = "#000000",
-  "C>T" = "#DE1C14",
-  "T>A" = "#D4D2D2",
+  "C>G" = "#1b1e22",
+  "C>T" = "#b3402f",
+  "T>A" = "#c7c2b8",
   "T>C" = "#ADCC54",
   "T>G" = "#F0D0CE"
 )
 
+# SV colours — saturated, hue-matched to --sv-* table tokens
 SV_COLOURS = c(
-  INS = "#f97e02",
-  DEL = "#020272",
-  INV = "#e7cc02",
-  DUP = "#e41a1c"
+  INS = "#cf5b46",
+  DEL = "#2f6db3",
+  INV = "#c08a1e",
+  DUP = "#3f7d4e"
 )
 
 SV_YPOS = c(INS = 1.0, DEL = 0.66, INV = 0.33, DUP = 0.05)
+
+# CNV colours — tied to the report spine
+CNV_COLOURS = c(
+  major = "#b3402f",  # brick = "more"
+  minor = "#0d5c75",  # teal  = "less"
+  total = "#1b1e22"   # ink
+)
+
+# BND/translocation link colour
+BND_COLOUR = "#8a5fa3"
 
 # Classify SNV into 6 SBS categories (C/T-ref normalised)
 .classify_mut = function(ref, alt) {
@@ -112,7 +123,7 @@ draw_circos = function(snv_data = NULL,
   circos.par(
     "start.degree" = 90,
     "gap.degree"   = gap_degrees,
-    "track.margin" = c(0.005, 0.005),
+    "track.margin" = c(0.008, 0.008),
     "cell.padding" = c(0, 0, 0, 0)
   )
 
@@ -124,20 +135,23 @@ draw_circos = function(snv_data = NULL,
   )
 
   circos.initializeWithIdeogram(cyto_list$df,
-                                chromosome.index = cyto_list$chromosome)
+                                chromosome.index = cyto_list$chromosome,
+                                labels.cex       = 0.7)
+
+  # Pre-compute jitter once so it varies per chromosome but stays reproducible
+  set.seed(42)
 
   # ---- Track 1: SNV dots (coloured by mutation category) ------------------
   circos.trackPlotRegion(
     factors      = chromosomes,
     ylim         = c(0, 1),
-    bg.border    = "black",
-    track.height = 0.14,
+    bg.border    = "#d8d3c8",
+    bg.col       = rep(c("#fcfbf7", "#f6f4ee"), length.out = n_chr),
+    track.height = 0.13,
     panel.fun    = function(region, value, ...) {
       chr = get.cell.meta.data("sector.index")
       sub_snv = snv[chrom == chr]
       if (nrow(sub_snv) == 0) return(invisible(NULL))
-      # Random y-jitter for visibility
-      set.seed(42)
       y_jitter = runif(nrow(sub_snv), 0.05, 0.95)
       circos.points(
         x   = sub_snv$pos,
@@ -153,8 +167,9 @@ draw_circos = function(snv_data = NULL,
   circos.trackPlotRegion(
     factors      = chromosomes,
     ylim         = c(0, 1),
-    bg.border    = "black",
-    track.height = 0.10,
+    bg.border    = "#d8d3c8",
+    bg.col       = rep(c("#f6f4ee", "#fcfbf7"), length.out = n_chr),
+    track.height = 0.11,
     panel.fun    = function(region, value, ...) {
       chr = get.cell.meta.data("sector.index")
       sub_sv = sv_nt[chrom == chr & !is.na(circos_pos)]
@@ -190,8 +205,9 @@ draw_circos = function(snv_data = NULL,
   circos.trackPlotRegion(
     factors      = chromosomes,
     ylim         = c(0, 4),
-    bg.border    = "black",
-    track.height = 0.16,
+    bg.border    = "#d8d3c8",
+    bg.col       = rep(c("#fcfbf7", "#f6f4ee"), length.out = n_chr),
+    track.height = 0.17,
     panel.fun    = function(region, value, ...) {
       chr = get.cell.meta.data("sector.index")
       sub_cnv = cnv[chr == get.cell.meta.data("sector.index")]
@@ -201,7 +217,7 @@ draw_circos = function(snv_data = NULL,
       if (!is.na(xmax)) {
         for (y_ref in c(1, 2, 3, 4)) {
           circos.lines(c(0, xmax), c(y_ref, y_ref),
-                       col = "grey80", lwd = 0.3, lty = "dotted")
+                       col = "#d8d3c8", lwd = 0.3, lty = "dotted")
         }
       }
 
@@ -216,18 +232,15 @@ draw_circos = function(snv_data = NULL,
 
       for (i in seq_len(nrow(sub_cnv))) {
         xl = sub_cnv$startpos[i]; xr = sub_cnv$endpos[i]
-        # Major allele (red, above midline)
         maj = sub_cnv$major_cn[i]
         circos.rect(xl, maj + 0.02, xr, maj + 0.12,
-                    col = "#B40426", border = "#B40426", lwd = 0.05)
-        # Minor allele (blue, below midline)
+                    col = CNV_COLOURS["major"], border = CNV_COLOURS["major"], lwd = 0.05)
         min_cn = sub_cnv$minor_cn[i]
         circos.rect(xl, min_cn - 0.12, xr, min_cn - 0.02,
-                    col = "#3B4CC0", border = "#3B4CC0", lwd = 0.05)
-        # Total CN (black dot)
+                    col = CNV_COLOURS["minor"], border = CNV_COLOURS["minor"], lwd = 0.05)
         tot = sub_cnv$total_cn[i]
         circos.rect(xl, tot - 0.03, xr, tot + 0.03,
-                    col = "black", border = "black", lwd = 0.05)
+                    col = CNV_COLOURS["total"], border = CNV_COLOURS["total"], lwd = 0.05)
       }
     }
   )
@@ -239,55 +252,13 @@ draw_circos = function(snv_data = NULL,
         circos.link(
           sector.index1 = sv_tr$chrom[i],  point1 = sv_tr$pos[i],
           sector.index2 = sv_tr$chrom2[i], point2 = sv_tr$pos2[i],
-          col = adjustcolor("black", alpha.f = 0.5),
+          col = adjustcolor(BND_COLOUR, alpha.f = 0.5),
           lwd = 0.8
         ),
         error = function(e) NULL
       )
     }
   }
-
-  # ---- Legends ------------------------------------------------------------
-  lgd_snv = Legend(
-    at            = names(SNV_COLOURS),
-    type          = "points",
-    pch           = 19,
-    legend_gp     = gpar(col = SNV_COLOURS),
-    title_position = "topleft",
-    title         = "SNV type",
-    labels_gp     = gpar(fontsize = 7),
-    title_gp      = gpar(fontsize = 8, fontface = "bold")
-  )
-  lgd_sv = Legend(
-    at            = names(SV_COLOURS),
-    type          = "lines",
-    legend_gp     = gpar(col = SV_COLOURS, lwd = 2),
-    title_position = "topleft",
-    title         = "Structural variant",
-    labels_gp     = gpar(fontsize = 7),
-    title_gp      = gpar(fontsize = 8, fontface = "bold")
-  )
-  lgd_cnv = Legend(
-    at            = c("Major", "Minor", "Total CN"),
-    type          = "lines",
-    legend_gp     = gpar(col = c("#B40426", "#3B4CC0", "black"), lwd = 2),
-    title_position = "topleft",
-    title         = "Copy number",
-    labels_gp     = gpar(fontsize = 7),
-    title_gp      = gpar(fontsize = 8, fontface = "bold")
-  )
-  lgd_bnd = Legend(
-    at            = "Translocation",
-    type          = "lines",
-    legend_gp     = gpar(col = "black", lwd = 1.5),
-    title_position = "topleft",
-    title         = "BND link",
-    labels_gp     = gpar(fontsize = 7),
-    title_gp      = gpar(fontsize = 8, fontface = "bold")
-  )
-
-  packed = packLegend(lgd_snv, lgd_sv, lgd_cnv, lgd_bnd, direction = "vertical")
-  draw(packed, x = unit(0.5, "cm"), y = unit(3.5, "cm"), just = c("left", "bottom"))
 
   circos.clear()
   dev.off()
