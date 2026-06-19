@@ -70,15 +70,3 @@ if (show_normal_cr) {
 }
 ```
 :::
-
-::: {.callout-note collapse="true"}
-### Wakhan (haplotype-resolved CN)
-
-```{r wakhan-status}
-if (outputs$has_wakhan) {
-  "Wakhan output directory found. Full Wakhan integration is planned for v2 of this report."
-} else {
-  "Wakhan was not run for this sample."
-}
-```
-:::
