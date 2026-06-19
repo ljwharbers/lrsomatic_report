@@ -147,9 +147,21 @@ $border-radius-lg:     12px;
     --color-border:         #31363d;
     --card-shadow:          0 1px 2px rgba(0,0,0,0.4), 0 10px 30px -18px rgba(0,0,0,0.7);
     --card-shadow-hover:    0 2px 6px rgba(0,0,0,0.5), 0 20px 44px -20px rgba(0,0,0,0.8);
+    // Circos legend swatches that would be invisible on dark bg — lighten to match --color-text
+    --circos-snv-cg:        #e8e6df;
+    --circos-cnv-total:     #e8e6df;
   }
 
   body { background: var(--color-bg) !important; color: var(--color-text) !important; }
+
+  // Bootstrap alert boxes — default light text is unreadable on dark bg
+  .alert {
+    background: var(--color-surface) !important;
+    color: var(--color-text) !important;
+    border-color: var(--color-border) !important;
+  }
+  .alert-info    { border-left: 3px solid var(--color-primary) !important; }
+  .alert-warning { border-left: 3px solid var(--color-warning) !important; }
 
   // DT dark-mode reset (overrides DT inline backgrounds)
   table.dataTable tbody tr {
@@ -443,6 +455,9 @@ blockquote {
     background: var(--_accent, var(--color-primary));
     flex: none;
   }
+
+  // Opt-out of uppercase for a single character (e.g. the trailing "s" in "SNVs")
+  .lc { text-transform: none; }
 }
 
 .metric-card__value {
