@@ -118,12 +118,21 @@ $border-radius-lg:     8px;
     --color-border:         #334155;
     --card-shadow:          0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
     --card-shadow-hover:    0 4px 6px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+    // Circos legend swatches that would be invisible on dark bg — lighten to match --color-text
+    --circos-snv-cg:        #e8e6df;
+    --circos-cnv-total:     #e8e6df;
   }
 
-  body {
-    background: var(--color-bg) !important;
+  body { background: var(--color-bg) !important; color: var(--color-text) !important; }
+
+  // Bootstrap alert boxes — default light text is unreadable on dark bg
+  .alert {
+    background: var(--color-surface) !important;
     color: var(--color-text) !important;
+    border-color: var(--color-border) !important;
   }
+  .alert-info    { border-left: 3px solid var(--color-primary) !important; }
+  .alert-warning { border-left: 3px solid var(--color-warning) !important; }
 
   // DT table dark-mode reset — overrides DT's inline background-color
   // (!important beats inline styles per CSS cascade spec)
@@ -234,6 +243,9 @@ code, pre {
   text-transform: uppercase;
   color: var(--color-text-muted);
   margin-bottom: 5px;
+
+  // Opt-out of uppercase for a single character (e.g. the trailing "s" in "SNVs")
+  .lc { text-transform: none; }
 }
 
 .metric-card__value {
