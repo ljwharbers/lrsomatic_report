@@ -43,8 +43,21 @@ source(file.path(repo_dir, "R/parse_ascat.R"))
 source(file.path(repo_dir, "R/parse_qc.R"))
 source(file.path(repo_dir, "R/circos.R"))
 
+source(file.path(repo_dir, "R/sections.R"))
+for (f in list.files(file.path(repo_dir, "R/sections"), pattern = "\\.R$", full.names = TRUE)) {
+  source(f)
+}
+
 outputs = params$outputs
 sample_id = params$sample_id
+sample_dir = params$sample_dir
+
+# Section-module contract: each registered section owns its own file
+# discovery (locate) and parsing (parse). See CLAUDE.md.
+SECTION_DATA = list()
+for (s in SECTIONS) {
+  SECTION_DATA[[s$id]] = s$parse(s$locate(sample_dir, sample_id), SECTION_DATA)
+}
 
 # Load reference data
 cytobands    = load_cytobands(params$reference, file.path(repo_dir, "assets"))
@@ -88,11 +101,6 @@ if (!is.null(outputs$deepsomatic_vcf))
 variant_table = build_variant_table(vep_data, caller_list, gene_panel = NULL)
 tmb_info = compute_tmb(variant_table)
 
-# Parse Severus
-sev_vcf  = parse_severus_vcf(outputs$severus_vcf)
-sev_tsv  = parse_severus_gene_tsv(outputs$severus_gene_tsv)
-sv_table = build_sv_table(sev_tsv, gene_panel = NULL)
-
 # SNV data for circos (from VEP file — contains all somatic variants)
 snv_circos = NULL
 if (!is.null(vep_data) && nrow(vep_data) > 0) {
@@ -104,8 +112,8 @@ circos_tmp = tempfile(fileext = ".svg")
 tryCatch({
   draw_circos(
     snv_data    = snv_circos,
-    sv_nontrans = sev_vcf$nontrans,
-    sv_trans    = sev_vcf$translocations,
+    sv_nontrans = SECTION_DATA$sv$circos$nontrans,
+    sv_trans    = SECTION_DATA$sv$circos$translocations,
     cnv_data    = ascat_segments,
     cytobands   = cytobands,
     chrom_lengths = chrom_lens,
@@ -118,11 +126,13 @@ tryCatch({
 })
 
 # Summary counts
+sv_table = SECTION_DATA$sv$table
 n_snv        = if (!is.null(vep_data)) nrow(unique(vep_data[, .(chrom, pos, ref, alt)])) else NA_integer_
-n_sv         = if (!is.null(sev_vcf)) nrow(sev_vcf$nontrans) + nrow(sev_vcf$translocations) else NA_integer_
+n_sv         = if (!is.null(SECTION_DATA$sv))
+                 nrow(SECTION_DATA$sv$circos$nontrans) + nrow(SECTION_DATA$sv$circos$translocations) else NA_integer_
 n_panel_vars = if (!is.null(variant_table) && length(panel_genes) > 0)
                  sum(variant_table$symbol %in% panel_genes, na.rm = TRUE) else 0L
-n_panel_svs  = if (!is.null(sv_table) && length(panel_genes) > 0 && "NHL_GENE_HITS" %in% names(sv_table))
+n_panel_svs  = if (!is.null(sv_table) && nrow(sv_table) > 0 && length(panel_genes) > 0 && "NHL_GENE_HITS" %in% names(sv_table))
                  sum(vapply(sv_table$NHL_GENE_HITS, function(h)
                    any(trimws(unlist(strsplit(as.character(h), "[;,]+"))) %in% panel_genes),
                    logical(1)), na.rm = TRUE) else 0L
@@ -159,7 +169,7 @@ cat("<script>\n", js_panels, "\n</script>\n", sep = "")
 
 ---
 
-{{< include sections/_severus.qmd >}}
+{{< include sections/_sv.qmd >}}
 
 ---
 
