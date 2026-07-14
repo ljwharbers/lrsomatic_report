@@ -41,8 +41,39 @@ Output defaults to `<sample-id>_report.html` in the current directory. `--refere
 | `parse_ascat.R` | ASCAT segments and purity/ploidy parsers |
 | `parse_qc.R` | mosdepth, cramino, samtools flagstat/stats parsers |
 | `circos.R` | `draw_circos()` — generates circos SVG using `circlize`; SBS 6-class colours hard-coded as `SNV_COLOURS` |
+| `sections.R` | Section-module contract: `register_section()`, `section_notice()` — see below |
+| `sections/*.R` | One file per migrated section (e.g. `sv.R`), each calling `register_section()` |
 
 **Assets:** `assets/references/{t2t,hg38}/` contains bundled cytobands and chromosome length TSVs — no network access needed at render time. Gene panels live in `assets/gene_lists/` as TSVs with a `gene` column.
+
+## Section-module contract
+
+Report sections are being migrated (opportunistically, one at a time) to a self-contained
+module pattern so a new tool output can be added without touching `locate_outputs.R` or the
+setup chunk of `per_sample.qmd`. `R/sections/sv.R` is the reference implementation.
+
+To add a new section:
+
+1. Create `R/sections/<id>.R` calling `register_section(list(...))` with:
+   - `id`, `title`
+   - `locate(sample_dir, sample_id)` — owns this section's own path discovery (globs/`pick()`),
+     returns a named list of inputs (e.g. a `callers` list if multiple tools produce this
+     output type, following the pattern in `sv.R`).
+   - `parse(inputs, section_data)` — returns one data object for this section, or an
+     empty/NULL-ish result if there's nothing to show. `section_data` holds already-parsed
+     sections (registration order = parse order), for sections that depend on another (e.g.
+     circos reads `SECTION_DATA$sv$circos`).
+2. Create `templates/sections/_<id>.qmd` — reads `SECTION_DATA[["<id>"]]`, renders it, and uses
+   `section_notice(msg)` (from `R/sections.R`) for the "nothing to show" case instead of a raw
+   `tags$div(...)`.
+3. Add `{{< include sections/_<id>.qmd >}}` to `templates/per_sample.qmd` in display order.
+
+`R/sections.R` holds the registry (`SECTIONS`, populated at source time) and `section_notice()`.
+The setup chunk in `per_sample.qmd` sources every file in `R/sections/`, then runs
+`SECTION_DATA[[s$id]] = s$parse(s$locate(sample_dir, sample_id), SECTION_DATA)` for each
+registered section. Sections not yet migrated (SNV, ASCAT, QC, circos) keep parsing directly
+from `outputs$<key>` in the setup chunk — migrate them the same way when they next need a
+change.
 
 ## Key design details
 
