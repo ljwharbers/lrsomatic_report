@@ -2,9 +2,10 @@
 
 ```{r sv-info}
 if (is.null(sv_table) || nrow(sv_table) == 0) {
-  tags$div(class = "alert alert-info",
-    if (is.null(sev_tsv)) "Severus gene-annotated SV file not found."
-    else "No structural variants detected.")
+  section_notice(
+    if (!isTRUE(SECTION_DATA$sv$gene_tsv_found)) "Severus gene-annotated SV file not found."
+    else "No structural variants detected."
+  )
 }
 ```
 

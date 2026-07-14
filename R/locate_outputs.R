@@ -41,15 +41,8 @@ locate_outputs = function(sample_dir, sample_id) {
   ) else NULL
   deepsomatic_vcf  = if (has_deepsomatic) glob1(file.path(d, "variants/deepsomatic/*.vcf.gz")) else NULL
 
-  # --- structural variants --------------------------------------------------
-  severus_somatic_vcf = pick(
-    file.path(d, "variants/severus/somatic_SVs/severus_somatic.vcf.gz"),
-    file.path(d, "variants/severus/severus_somatic.vcf.gz")
-  )
-  severus_gene_tsv = pick(
-    file.path(d, "variants/severus/somatic_SVs/filtered_SV2/SV_filtered_with_gene_annotations.tsv"),
-    file.path(d, "variants/severus/filtered_SV2/SV_filtered_with_gene_annotations.tsv")
-  )
+  # --- structural variants ---------------------------------------------------
+  # Severus paths are now located by R/sections/sv.R (section-module contract).
 
   # --- ASCAT ----------------------------------------------------------------
   ascat_segments_raw = pick(
@@ -123,8 +116,6 @@ locate_outputs = function(sample_dir, sample_id) {
     clairsto_somatic = clairsto_somatic,
     clairs_somatic   = clairs_somatic,
     deepsomatic_vcf  = deepsomatic_vcf,
-    severus_vcf      = severus_somatic_vcf,
-    severus_gene_tsv = severus_gene_tsv,
     ascat_segments   = ascat_segments_raw,
     ascat_purityploidy = ascat_purityploidy,
     mosdepth_summary = mosdepth_summary,
