@@ -19,9 +19,14 @@ parse_severus_vcf = function(vcf_file) {
   }
   close(con)
 
-  dt = fread(vcf_file, skip = skip_n + 1L, sep = "\t", header = FALSE,
-             select = 1:8,
-             col.names = c("CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO"))
+  # fread() errors (rather than returning 0 rows) when skip lands exactly on
+  # the last line of the file, i.e. a VCF with no variant records at all.
+  dt = tryCatch(
+    fread(vcf_file, skip = skip_n + 1L, sep = "\t", header = FALSE,
+          select = 1:8,
+          col.names = c("CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO")),
+    error = function(e) data.table()
+  )
   if (nrow(dt) == 0) {
     return(list(translocations = data.table(), nontrans = data.table()))
   }
