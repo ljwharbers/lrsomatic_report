@@ -3,6 +3,37 @@ suppressPackageStartupMessages({
   library(dplyr)
 })
 
+# Derive dbsnp/cosmic columns from a VEP "Existing_variation" column (semicolon- or
+# comma-joined list of IDs, e.g. "rs123&COSV456"). Shared by parse_vep_text/parse_vep_vcf.
+derive_dbsnp_cosmic = function(dt) {
+  dt[, dbsnp := sub("(rs[0-9]+).*", "\\1", existing)]
+  dt[!grepl("^rs", dbsnp, perl = TRUE), dbsnp := NA_character_]
+
+  dt[, cosmic := sub(".*(COS[VM][0-9]+).*", "\\1", existing)]
+  dt[!grepl("^COS", cosmic, perl = TRUE), cosmic := NA_character_]
+  dt
+}
+
+# Dispatch to the right VEP parser based on actual file contents — both forms ship as
+# "*_SOMATIC_VEP.vcf.gz" so the filename alone doesn't tell you which one you have.
+# - VEP default text output: "##"-commented header, column line starts with "#Uploaded_variation"
+# - genuine VCF w/ CSQ INFO field: "##fileformat=VCFv4.2", column line starts with "#CHROM"
+parse_vep = function(vep_file) {
+  if (is.null(vep_file) || !file.exists(vep_file)) return(NULL)
+
+  con = gzcon(file(vep_file, "rb"))
+  is_vcf = FALSE
+  repeat {
+    line = readLines(con, n = 1, warn = FALSE)
+    if (length(line) == 0) break
+    if (startsWith(line, "#Uploaded_variation")) break
+    if (startsWith(line, "#CHROM")) { is_vcf = TRUE; break }
+  }
+  close(con)
+
+  if (is_vcf) parse_vep_vcf(vep_file) else parse_vep_text(vep_file)
+}
+
 # Parse the VEP default text output (tab-delimited, ##-commented header, NOT a VCF).
 # Returns a data.table with one row per consequence per variant.
 parse_vep_text = function(vep_file) {
@@ -50,15 +81,95 @@ parse_vep_text = function(vep_file) {
   dt[, polyphen := extract_extra_key(Extra, "PolyPhen")]
   dt[, hgvsp    := extract_extra_key(Extra, "HGVSp")]
 
-  # dbSNP: first rs ID
-  dt[, dbsnp := sub("(rs[0-9]+).*", "\\1", existing)]
-  dt[!grepl("^rs", dbsnp, perl = TRUE), dbsnp := NA_character_]
-
-  # COSMIC: first COSV/COSM ID
-  dt[, cosmic := sub(".*(COS[VM][0-9]+).*", "\\1", existing)]
-  dt[!grepl("^COS", cosmic, perl = TRUE), cosmic := NA_character_]
+  # dbSNP / COSMIC IDs, derived from Existing_variation
+  dt = derive_dbsnp_cosmic(dt)
 
   dt
+}
+
+# Parse a genuine VCF carrying VEP annotation in a CSQ INFO field (VEP run with --vcf,
+# as opposed to the default text output handled by parse_vep_text()).
+# Returns a data.table with one row per gene/transcript annotation per variant, using the
+# same column contract as parse_vep_text(): chrom, pos, ref, alt, symbol, gene_id,
+# consequence, impact, hgvsp, existing, dbsnp, cosmic, sift, polyphen.
+parse_vep_vcf = function(vep_file) {
+  if (is.null(vep_file) || !file.exists(vep_file)) return(NULL)
+
+  # Skip header to #CHROM, capturing the CSQ field order from its INFO meta-line
+  # (e.g. "...Format: Allele|Consequence|IMPACT|SYMBOL|Gene|...")
+  con = gzcon(file(vep_file, "rb"))
+  skip_n = 0L
+  csq_format = NULL
+  repeat {
+    line = readLines(con, n = 1, warn = FALSE)
+    if (length(line) == 0) break
+    if (startsWith(line, "##INFO=<ID=CSQ")) {
+      m = regmatches(line, regexpr("Format: [^\"]+", line))
+      if (length(m) > 0) csq_format = strsplit(sub("^Format: ", "", m), "|", fixed = TRUE)[[1]]
+    }
+    if (startsWith(line, "#CHROM")) break
+    skip_n = skip_n + 1L
+  }
+  close(con)
+
+  if (is.null(csq_format)) {
+    message("Failed to parse VEP VCF: no CSQ Format found in header")
+    return(NULL)
+  }
+
+  dt = tryCatch(
+    fread(vep_file, skip = skip_n + 1L, sep = "\t", header = FALSE, select = 1:8,
+          col.names = c("CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO")),
+    error = function(e) {
+      message("Failed to parse VEP VCF: ", conditionMessage(e))
+      NULL
+    }
+  )
+  if (is.null(dt) || nrow(dt) == 0) return(NULL)
+
+  dt[, CSQ := sub(".*CSQ=", "", INFO)]
+  dt[, CSQ := sub(";.*$", "", CSQ)]
+
+  # One row per gene/transcript annotation (comma-separated CSQ entries)
+  dt_long = dt[, .(csq_entry = unlist(strsplit(CSQ, ",", fixed = TRUE))),
+               by = .(CHROM, POS, REF, ALT)]
+  if (nrow(dt_long) == 0) return(NULL)
+
+  # Split each entry on "|"; length() padding recovers pipe-delimited trailing empty
+  # fields that strsplit() otherwise silently drops.
+  split_list = strsplit(dt_long$csq_entry, "|", fixed = TRUE)
+  split_list = lapply(split_list, function(v) { length(v) = length(csq_format); v })
+  mat = do.call(rbind, split_list)
+
+  get_field = function(name) {
+    idx = match(name, csq_format)
+    if (is.na(idx)) rep(NA_character_, nrow(mat)) else mat[, idx]
+  }
+
+  dt_long[, consequence := gsub("&", ",", get_field("Consequence"))]
+  dt_long[, impact      := get_field("IMPACT")]
+  dt_long[, symbol      := get_field("SYMBOL")]
+  dt_long[, gene_id     := get_field("Gene")]
+  dt_long[, hgvsp       := get_field("HGVSp")]
+  dt_long[, existing    := get_field("Existing_variation")]
+  dt_long[, sift        := get_field("SIFT")]
+  dt_long[, polyphen    := get_field("PolyPhen")]
+
+  # Blank fields are "" in CSQ, not NA — normalise for consistency with parse_vep_text()
+  for (col in c("symbol", "impact", "hgvsp", "existing", "gene_id", "sift", "polyphen")) {
+    dt_long[get(col) == "", (col) := NA_character_]
+  }
+
+  dt_long[, chrom := ensure_chr_prefix(CHROM)]
+  dt_long[, pos   := as.integer(POS)]
+  dt_long[, ref   := REF]
+  dt_long[, alt   := ALT]
+
+  # dbSNP / COSMIC IDs, derived from Existing_variation
+  dt_long = derive_dbsnp_cosmic(dt_long)
+
+  dt_long[, .(chrom, pos, ref, alt, symbol, gene_id, consequence, impact, hgvsp,
+              existing, dbsnp, cosmic, sift, polyphen)]
 }
 
 # Parse a raw caller VCF for variant coordinates + VAF.
