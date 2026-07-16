@@ -88,7 +88,7 @@ qc_normal_flagstat = parse_flagstat(outputs$normal_flagstat)
 qc_normal_samtools_stats = parse_samtools_stats(outputs$normal_samtools_stats)
 
 # Parse VEP + raw callers
-vep_data = parse_vep_text(outputs$vep_somatic)
+vep_data = parse_vep(outputs$vep_somatic)
 
 caller_list = list()
 if (!is.null(outputs$clairsto_somatic))
