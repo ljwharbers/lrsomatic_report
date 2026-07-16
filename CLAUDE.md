@@ -36,7 +36,7 @@ Output defaults to `<sample-id>_report.html` in the current directory. `--refere
 | `utils.R` | Shared helpers: gene panel loading (`resolve_gene_panel`), VEP Extra field parser (`parse_extra_kv` / `extract_extra_key`), `fmt_bp` |
 | `references.R` | Load cytobands/chrom lengths from `assets/`, `detect_reference()`, `chromosomes_for_sex()` |
 | `locate_outputs.R` | `locate_outputs(sample_dir, sample_id)` — discovers all tool output files and infers run mode (`matched` vs `tumour-only`) |
-| `parse_smallvariants.R` | `parse_vep_text()` for VEP default text format (NOT VCF), `parse_caller_vcf()` for raw caller VCFs, `build_variant_table()` to join VEP + per-caller VAFs |
+| `parse_smallvariants.R` | `parse_vep()` dispatches to `parse_vep_text()` (VEP default text format) or `parse_vep_vcf()` (genuine VCF with a CSQ INFO field) based on sniffed file contents; `parse_caller_vcf()` for raw caller VCFs; `build_variant_table()` to join VEP + per-caller VAFs |
 | `parse_severus.R` | Severus VCF + gene annotation TSV parsers |
 | `parse_ascat.R` | ASCAT segments and purity/ploidy parsers |
 | `parse_qc.R` | mosdepth, cramino, samtools flagstat/stats parsers |
@@ -77,7 +77,10 @@ change.
 
 ## Key design details
 
-- **VEP file format:** `parse_vep_text()` reads VEP *default text output* (tab-delimited, `##`-commented header, column header line starts with `#Uploaded_variation`). This is NOT a VCF. The `Extra` column holds semicolon-delimited `KEY=VALUE` pairs parsed by `parse_extra_kv`.
+- **VEP file format:** `outputs$vep_somatic` (`*_SOMATIC_VEP.vcf.gz`) ships in either of two incompatible formats depending on the VEP invocation — the filename doesn't tell you which. `parse_vep()` sniffs the header (`#Uploaded_variation` vs `#CHROM`) and dispatches accordingly:
+  - `parse_vep_text()` — VEP *default text output* (tab-delimited, `##`-commented header, column header line starts with `#Uploaded_variation`, NOT a VCF). The `Extra` column holds semicolon-delimited `KEY=VALUE` pairs parsed by `parse_extra_kv`.
+  - `parse_vep_vcf()` — genuine VCF (`--vcf` VEP output) with annotations in a pipe-delimited `CSQ` INFO field; the field order is read from the `##INFO=<ID=CSQ,...Format: ...>` header line rather than hard-coded.
+  Both return the same column contract (`chrom, pos, ref, alt, symbol, gene_id, consequence, impact, hgvsp, existing, dbsnp, cosmic, sift, polyphen`); `derive_dbsnp_cosmic()` is shared between them.
 - **Missing files are graceful:** Every parser returns `NULL` if its input file is absent; the template shows a "not available" notice per section.
 - **Run mode detection:** `locate_outputs()` sets `mode = "matched"` if `variants/clairs/` exists, else `"tumour-only"`. This controls which VAF columns appear.
 - **Caller VAF join:** `build_variant_table()` joins per-caller VCFs to VEP rows on `chrom|pos|ref|alt`. Caller columns are named `vaf_clairsto`, `vaf_clairs`, `vaf_deepsomatic`.
