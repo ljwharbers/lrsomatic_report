@@ -9,29 +9,16 @@ register_section(list(
   locate = function(sample_dir, sample_id) {
     d = sample_dir
 
-    pick = function(...) {
-      candidates = c(...)
-      for (p in candidates) {
-        if (!is.null(p) && !is.na(p) && file.exists(p)) return(p)
-      }
-      NULL
-    }
-    glob1 = function(pattern) {
-      hits = Sys.glob(pattern)
+    find1 = function(pattern) {
+      hits = list.files(d, pattern = pattern, recursive = TRUE, full.names = TRUE)
       if (length(hits) > 0) hits[1] else NULL
     }
 
-    severus_vcf = pick(
-      file.path(d, "variants/severus/somatic_SVs/severus_somatic.vcf.gz"),
-      file.path(d, "variants/severus/severus_somatic.vcf.gz")
-    )
-    severus_gene_tsv = pick(
-      file.path(d, "variants/severus/somatic_SVs/filtered_SV2/SV_filtered_with_gene_annotations.tsv"),
-      file.path(d, "variants/severus/filtered_SV2/SV_filtered_with_gene_annotations.tsv")
-    )
+    severus_vcf      = find1("^severus_somatic\\.vcf\\.gz$")
+    severus_gene_tsv = find1("^SV_filtered_with_gene_annotations\\.tsv$")
     # VEP SV VCF (CSQ-annotated) is the more commonly produced annotation source; the
     # gene-annotated TSV above is a fallback for pipelines that produce it instead.
-    severus_vep_vcf = glob1(file.path(d, "vep/SVs/*_SV_VEP.vcf.gz"))
+    severus_vep_vcf  = find1("_SV_VEP\\.vcf\\.gz$")
 
     list(callers = list(
       severus = list(vcf = severus_vcf, gene_tsv = severus_gene_tsv, vep_vcf = severus_vep_vcf)

@@ -1,111 +1,65 @@
-# Discover the per-tool output files for a sample run and infer the run mode.
+# Discover the per-tool output files for a sample run. Discovery is recursive
+# under sample_dir: the pipeline may dump inputs flat rather than in a fixed
+# directory tree, so files are matched by their distinctive filename suffix.
 # Returns a named list; any missing optional file is NULL.
 
-locate_outputs = function(sample_dir, sample_id) {
+locate_outputs = function(sample_dir, sample_id, mode, somatic_vcf) {
   d = sample_dir  # shorthand
 
-  # --- helper ---------------------------------------------------------------
-  pick = function(...) {
-    candidates = c(...)
-    for (p in candidates) {
-      if (!is.null(p) && !is.na(p) && file.exists(p)) return(p)
-    }
-    NULL
-  }
-
-  # Glob the first file matching a pattern (for cases where exact name unknown)
-  glob1 = function(pattern) {
-    hits = Sys.glob(pattern)
+  # First recursive hit under `root` matching a filename pattern
+  find1 = function(pattern, root = d) {
+    hits = list.files(root, pattern = pattern, recursive = TRUE, full.names = TRUE)
     if (length(hits) > 0) hits[1] else NULL
   }
 
-  # --- run mode -------------------------------------------------------------
-  has_clairs = dir.exists(file.path(d, "variants/clairs")) &&
-    length(Sys.glob(file.path(d, "variants/clairs/*.vcf.gz"))) > 0
-  has_clairsto = file.exists(file.path(d, "variants/clairsto/somatic.vcf.gz"))
-  has_deepsomatic = length(Sys.glob(file.path(d, "variants/deepsomatic/*.vcf.gz"))) > 0
-  has_normal = dir.exists(file.path(d, "qc/normal"))
+  # Same, but excluding anything under a normal/ subtree (tumor-side QC)
+  find1_tumor = function(pattern) {
+    hits = list.files(d, pattern = pattern, recursive = TRUE, full.names = TRUE)
+    hits = hits[!grepl("/normal/", hits)]
+    if (length(hits) > 0) hits[1] else NULL
+  }
 
-  mode = if (has_clairs) "matched" else "tumour-only"
+  has_normal = dir.exists(file.path(d, "normal"))
+  normal_dir = file.path(d, "normal")
 
   # --- small variants -------------------------------------------------------
-  vep_somatic = pick(
-    file.path(d, "vep/somatic", paste0(sample_id, "_SOMATIC_VEP.vcf.gz")),
-    glob1(file.path(d, "vep/somatic/*_SOMATIC_VEP.vcf.gz"))
-  )
+  vep_somatic = find1("_SOMATIC_VEP\\.vcf\\.gz$")
 
-  clairsto_somatic = if (has_clairsto) file.path(d, "variants/clairsto/somatic.vcf.gz") else NULL
-  clairs_somatic   = if (has_clairs) pick(
-    file.path(d, "variants/clairs/somatic.vcf.gz"),
-    glob1(file.path(d, "variants/clairs/*somatic*.vcf.gz"))
-  ) else NULL
-  deepsomatic_vcf  = if (has_deepsomatic) glob1(file.path(d, "variants/deepsomatic/*.vcf.gz")) else NULL
+  # The caller VCF used for VAF is ambiguous by filename alone (e.g. a generic
+  # "somatic.vcf.gz" shared across callers) so it is passed in explicitly
+  # rather than discovered; which slot it fills depends on the run mode.
+  clairs_somatic   = if (mode == "matched")     somatic_vcf else NULL
+  clairsto_somatic = if (mode == "tumour-only") somatic_vcf else NULL
 
   # --- structural variants ---------------------------------------------------
   # Severus paths are now located by R/sections/sv.R (section-module contract).
 
   # --- ASCAT ----------------------------------------------------------------
-  ascat_segments_raw = pick(
-    file.path(d, "ascat", paste0(sample_id, ".segments_raw.txt")),
-    glob1(file.path(d, "ascat/*.segments_raw.txt"))
-  )
-  ascat_purityploidy = pick(
-    file.path(d, "ascat", paste0(sample_id, ".purityploidy.txt")),
-    glob1(file.path(d, "ascat/*.purityploidy.txt"))
-  )
+  ascat_segments_raw = find1("\\.segments_raw\\.txt$")
+  ascat_purityploidy = find1("\\.purityploidy\\.txt$")
   ascat_plots = list(
-    profile    = glob1(file.path(d, "ascat/*.tumour.ASCATprofile.png")),
-    rawprofile = glob1(file.path(d, "ascat/*.tumour.rawprofile.png")),
-    sunrise    = glob1(file.path(d, "ascat/*.tumour.sunrise.png")),
-    aspcf      = glob1(file.path(d, "ascat/*.tumour.ASPCF.png")),
-    before_gc  = glob1(file.path(d, "ascat/*.before_correction.*.tumour.tumour.png")),
-    after_gc   = glob1(file.path(d, "ascat/*.after_correction_gc.*.tumour.tumour.png")),
-    tumour_sep = glob1(file.path(d, "ascat/tumorSep*.tumour.png"))
+    profile    = find1("\\.tumour\\.ASCATprofile\\.png$"),
+    rawprofile = find1("\\.tumour\\.rawprofile\\.png$"),
+    sunrise    = find1("\\.tumour\\.sunrise\\.png$"),
+    aspcf      = find1("\\.tumour\\.ASPCF\\.png$"),
+    before_gc  = find1("\\.before_correction\\..*\\.tumour\\.tumour\\.png$"),
+    after_gc   = find1("\\.after_correction_gc\\..*\\.tumour\\.tumour\\.png$"),
+    tumour_sep = find1("^tumorSep.*\\.tumour\\.png$")
   )
 
-  # --- QC -------------------------------------------------------------------
-  mosdepth_summary = pick(
-    file.path(d, "qc/tumor/mosdepth", paste0(sample_id, ".mosdepth.summary.txt")),
-    glob1(file.path(d, "qc/tumor/mosdepth/*.mosdepth.summary.txt"))
-  )
-  mosdepth_dist = pick(
-    file.path(d, "qc/tumor/mosdepth", paste0(sample_id, ".mosdepth.global.dist.txt")),
-    glob1(file.path(d, "qc/tumor/mosdepth/*.mosdepth.global.dist.txt"))
-  )
-  cramino_aln = pick(
-    file.path(d, "qc/tumor/cramino_aln", paste0(sample_id, "_cramino.txt")),
-    glob1(file.path(d, "qc/tumor/cramino_aln/*_cramino.txt"))
-  )
-  flagstat = pick(
-    file.path(d, "qc/tumor/samtools", paste0(sample_id, ".flagstat")),
-    glob1(file.path(d, "qc/tumor/samtools/*.flagstat"))
-  )
-  samtools_stats = pick(
-    file.path(d, "qc/tumor/samtools", paste0(sample_id, ".stats")),
-    glob1(file.path(d, "qc/tumor/samtools/*.stats"))
-  )
+  # --- QC (tumor side) --------------------------------------------------------
+  mosdepth_summary = find1_tumor("\\.mosdepth\\.summary\\.txt$")
+  mosdepth_dist    = find1_tumor("\\.mosdepth\\.global\\.dist\\.txt$")
+  cramino_aln      = find1_tumor("_cramino\\.txt$")
+  flagstat         = find1_tumor("\\.flagstat$")
+  samtools_stats   = find1_tumor("\\.stats$")
 
   # --- Normal-side QC (matched mode only) -----------------------------------
-  normal_mosdepth_summary = if (has_normal) pick(
-    file.path(d, "qc/normal/mosdepth", paste0(sample_id, ".mosdepth.summary.txt")),
-    glob1(file.path(d, "qc/normal/mosdepth/*.mosdepth.summary.txt"))
-  ) else NULL
-  normal_mosdepth_dist = if (has_normal) pick(
-    file.path(d, "qc/normal/mosdepth", paste0(sample_id, ".mosdepth.global.dist.txt")),
-    glob1(file.path(d, "qc/normal/mosdepth/*.mosdepth.global.dist.txt"))
-  ) else NULL
-  normal_cramino = if (has_normal) pick(
-    file.path(d, "qc/normal/cramino_aln", paste0(sample_id, "_cramino.txt")),
-    glob1(file.path(d, "qc/normal/cramino_aln/*_cramino.txt"))
-  ) else NULL
-  normal_flagstat = if (has_normal) pick(
-    file.path(d, "qc/normal/samtools", paste0(sample_id, ".flagstat")),
-    glob1(file.path(d, "qc/normal/samtools/*.flagstat"))
-  ) else NULL
-  normal_samtools_stats = if (has_normal) pick(
-    file.path(d, "qc/normal/samtools", paste0(sample_id, ".stats")),
-    glob1(file.path(d, "qc/normal/samtools/*.stats"))
-  ) else NULL
+  normal_mosdepth_summary = if (has_normal) find1("\\.mosdepth\\.summary\\.txt$", root = normal_dir) else NULL
+  normal_mosdepth_dist    = if (has_normal) find1("\\.mosdepth\\.global\\.dist\\.txt$", root = normal_dir) else NULL
+  normal_cramino          = if (has_normal) find1("_cramino\\.txt$", root = normal_dir) else NULL
+  normal_flagstat         = if (has_normal) find1("\\.flagstat$", root = normal_dir) else NULL
+  normal_samtools_stats   = if (has_normal) find1("\\.stats$", root = normal_dir) else NULL
 
   # --- Wakhan (optional v2) -------------------------------------------------
   has_wakhan = dir.exists(file.path(d, "wakhan"))
@@ -118,7 +72,6 @@ locate_outputs = function(sample_dir, sample_id) {
     vep_somatic      = vep_somatic,
     clairsto_somatic = clairsto_somatic,
     clairs_somatic   = clairs_somatic,
-    deepsomatic_vcf  = deepsomatic_vcf,
     ascat_segments   = ascat_segments_raw,
     ascat_purityploidy = ascat_purityploidy,
     mosdepth_summary = mosdepth_summary,

@@ -1,0 +1,49 @@
+{% set version = "1.0.0" %}
+
+package:
+  name: lrsomatic-report
+  version: {{ version }}
+
+source:
+  url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: PLACEHOLDER_FILL_IN_AFTER_v1.0.0_TAG_IS_CUT
+
+build:
+  number: 0
+  noarch: generic
+  run_exports:
+    - {{ pin_subpackage("lrsomatic-report", max_pin="x") }}
+
+requirements:
+  run:
+    - r-base
+    - quarto
+    - r-quarto
+    - r-data.table
+    - r-dplyr
+    - r-dt
+    - r-htmltools
+    - r-optparse
+    - r-yaml
+    - r-ggplot2
+    - r-svglite
+    - r-knitr
+    - r-r.utils
+    - r-circlize
+    - r-base64enc
+
+test:
+  commands:
+    - render_report.R --help
+
+about:
+  home: https://github.com/ljwharbers/lrsomatic_report
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE
+  summary: Standalone R/Quarto reporting tool for the LRSomatic long-read somatic variant calling pipeline.
+  dev_url: https://github.com/ljwharbers/lrsomatic_report
+
+extra:
+  recipe-maintainers:
+    - ljwharbers
