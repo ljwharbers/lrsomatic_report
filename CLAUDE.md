@@ -10,13 +10,15 @@ Standalone R/Quarto reporting tool for the [LRSomatic](https://github.com/nf-cor
 
 ```bash
 Rscript bin/render_report.R \
-  --sample-dir /path/to/DLBCL3_pooled \
-  --sample-id  DLBCL3_pooled \
-  --sex        male \
-  --reference  auto
+  --sample-dir  /path/to/DLBCL3_pooled \
+  --sample-id   DLBCL3_pooled \
+  --sex         male \
+  --mode        matched \
+  --somatic-vcf /path/to/DLBCL3_pooled/variants/clairs/somatic.vcf.gz \
+  --reference   auto
 ```
 
-Output defaults to `<sample-id>_report.html` in the current directory. `--reference auto` reads `##contig` lines from the VEP somatic VCF to detect `t2t` vs `hg38`.
+Output defaults to `<sample-id>_report.html` in the current directory. `--reference auto` reads `##contig` lines from the VEP somatic VCF to detect `t2t` vs `hg38`. `--mode` (`matched` | `tumour-only`) and `--somatic-vcf` are required — see `locate_outputs()` below for why the caller VCF can't be auto-discovered.
 
 ## R conventions
 
@@ -35,7 +37,7 @@ Output defaults to `<sample-id>_report.html` in the current directory. `--refere
 |---|---|
 | `utils.R` | Shared helpers: gene panel loading (`resolve_gene_panel`), VEP Extra field parser (`parse_extra_kv` / `extract_extra_key`), `fmt_bp` |
 | `references.R` | Load cytobands/chrom lengths from `assets/`, `detect_reference()`, `chromosomes_for_sex()` |
-| `locate_outputs.R` | `locate_outputs(sample_dir, sample_id)` — discovers all tool output files and infers run mode (`matched` vs `tumour-only`) |
+| `locate_outputs.R` | `locate_outputs(sample_dir, sample_id, mode, somatic_vcf)` — recursively discovers all tool output files by filename suffix; `mode` and the ambiguous caller VCF are passed in rather than inferred |
 | `parse_smallvariants.R` | `parse_vep()` dispatches to `parse_vep_text()` (VEP default text format) or `parse_vep_vcf()` (genuine VCF with a CSQ INFO field) based on sniffed file contents; `parse_caller_vcf()` for raw caller VCFs; `build_variant_table()` to join VEP + per-caller VAFs |
 | `parse_severus.R` | Severus VCF + gene annotation TSV parsers |
 | `parse_ascat.R` | ASCAT segments and purity/ploidy parsers |
@@ -82,8 +84,8 @@ change.
   - `parse_vep_vcf()` — genuine VCF (`--vcf` VEP output) with annotations in a pipe-delimited `CSQ` INFO field; the field order is read from the `##INFO=<ID=CSQ,...Format: ...>` header line rather than hard-coded.
   Both return the same column contract (`chrom, pos, ref, alt, symbol, gene_id, consequence, impact, hgvsp, existing, dbsnp, cosmic, sift, polyphen`); `derive_dbsnp_cosmic()` is shared between them.
 - **Missing files are graceful:** Every parser returns `NULL` if its input file is absent; the template shows a "not available" notice per section.
-- **Run mode detection:** `locate_outputs()` sets `mode = "matched"` if `variants/clairs/` exists, else `"tumour-only"`. This controls which VAF columns appear.
-- **Caller VAF join:** `build_variant_table()` joins per-caller VCFs to VEP rows on `chrom|pos|ref|alt`. Caller columns are named `vaf_clairsto`, `vaf_clairs`, `vaf_deepsomatic`.
+- **Run mode:** passed explicitly to `locate_outputs()` as `--mode` (`matched` | `tumour-only`); no longer inferred from directory presence. This controls which VAF columns appear.
+- **Caller VAF join:** the somatic caller VCF is ambiguous by filename alone (generic `somatic.vcf.gz`, indistinguishable from other callers once dumped flat), so it's passed explicitly via `--somatic-vcf` and `locate_outputs()` slots it into `clairs_somatic` or `clairsto_somatic` depending on `mode`. `build_variant_table()` then joins it to VEP rows on `chrom|pos|ref|alt`; caller columns are named `vaf_clairsto`, `vaf_clairs`.
 
 ## R package requirements
 
