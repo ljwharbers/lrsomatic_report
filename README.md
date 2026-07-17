@@ -4,7 +4,7 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 
 - **Summary header**: purity, ploidy, coverage, N50, variant counts
 - **Circos plot**: somatic SNVs (6-class SBS colours), non-BND SVs, ASCAT copy number, translocation links
-- **Interactive variant table**: VEP-annotated somatic small variants filtered to a gene panel of interest, with per-caller VAF columns (ClairS-TO / ClairS / DeepSomatic)
+- **Interactive variant table**: VEP-annotated somatic small variants filtered to a gene panel of interest, with a per-caller VAF column (ClairS-TO / ClairS)
 - **Interactive SV table**: Severus structural variants annotated with gene overlaps, filtered to the gene panel
 - **QC details**: mosdepth coverage, samtools flagstat, cramino read stats
 
@@ -12,10 +12,12 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 
 ```bash
 Rscript bin/render_report.R \
-  --sample-dir /path/to/DLBCL3_pooled \
-  --sample-id  DLBCL3_pooled \
-  --sex        male \
-  --reference  auto            # auto-detects t2t vs hg38 from VCF headers
+  --sample-dir  /path/to/DLBCL3_pooled \
+  --sample-id   DLBCL3_pooled \
+  --sex         male \
+  --mode        matched \
+  --somatic-vcf /path/to/DLBCL3_pooled/variants/clairs/somatic.vcf.gz \
+  --reference   auto            # auto-detects t2t vs hg38 from VCF headers
 ```
 
 The output file `DLBCL3_pooled_report.html` will be written to the current directory.
@@ -27,6 +29,8 @@ The output file `DLBCL3_pooled_report.html` will be written to the current direc
 --sample-id    Sample identifier (default: directory name)
 --reference    t2t | hg38 | auto  (default: auto)
 --sex          male | female | XY | XX  (required)
+--mode         matched | tumour-only  (required)
+--somatic-vcf  Path to the somatic small-variant caller VCF used for VAF (required)
 --gene-panel   Builtin panel name (e.g. lymphoid) or path to a custom TSV  (default: lymphoid)
 --output       Output HTML path  (default: <sample-id>_report.html in current dir)
 --title        Report title
@@ -48,22 +52,24 @@ To use a custom panel:
 
 ## Expected input layout
 
-The `--sample-dir` must be the root of a single-sample LRSomatic output (typically `outdir/<sample_id>/`):
+The `--sample-dir` must be the root of a single-sample LRSomatic output. Files are discovered
+**recursively** by their distinctive filename suffix, so they can be nested in any directory
+structure underneath it — for example:
 
 ```
 DLBCL3_pooled/
-├── ascat/          *.segments_raw.txt, *.purityploidy.txt
-├── variants/
-│   ├── clairsto/   somatic.vcf.gz              (tumour-only mode)
-│   ├── clairs/     somatic.vcf.gz              (matched mode)
-│   ├── deepsomatic/ *.vcf.gz
-│   └── severus/
-│       ├── somatic_SVs/severus_somatic.vcf.gz
-│       └── somatic_SVs/filtered_SV2/SV_filtered_with_gene_annotations.tsv
-├── vep/
-│   └── somatic/    <id>_SOMATIC_VEP.vcf.gz     (VEP default text format)
-└── qc/tumor/       mosdepth/, samtools/, cramino_aln/
+├── *_SOMATIC_VEP.vcf.gz                                 VEP-annotated somatic small variants
+├── severus_somatic.vcf.gz                               Severus SV calls
+├── SV_filtered_with_gene_annotations.tsv                Severus SV gene annotations
+├── *.segments_raw.txt, *.purityploidy.txt               ASCAT
+├── *.mosdepth.summary.txt, *.mosdepth.global.dist.txt    mosdepth (tumor)
+├── *_cramino.txt, *.flagstat, *.stats                    cramino / samtools (tumor)
+└── normal/                                               same QC file set, normal side (matched mode only)
 ```
+
+The somatic small-variant caller VCF used for VAF (ClairS-TO / ClairS) has an ambiguous, generic
+filename and can't be discovered reliably, so it's passed explicitly via `--somatic-vcf`; which
+column it populates is determined by `--mode`.
 
 Missing files are handled gracefully: the corresponding report section shows a "not available" notice.
 
