@@ -6,7 +6,7 @@ package:
 
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: PLACEHOLDER_FILL_IN_AFTER_v1.0.0_TAG_IS_CUT
+  sha256: eea70f0c9ace0b4017e9823cf4eeda93f890aee9f4f10891c3408b0fa67a54f6
 
 build:
   number: 0
