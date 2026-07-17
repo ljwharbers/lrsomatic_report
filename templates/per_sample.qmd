@@ -76,6 +76,9 @@ panel_genes = tryCatch(
 ascat_segments = parse_ascat_segments(outputs$ascat_segments)
 ascat_pp       = parse_ascat_purityploidy(outputs$ascat_purityploidy)
 
+# Parse Wakhan (lightweight: ranked purity/ploidy solutions table only)
+wakhan_solutions = parse_wakhan_solutions(outputs$wakhan_solutions)
+
 # Parse QC
 qc_mosdepth = parse_mosdepth_summary(outputs$mosdepth_summary)
 qc_mosdist  = parse_mosdepth_dist(outputs$mosdepth_dist)
@@ -132,8 +135,11 @@ n_sv         = if (!is.null(SECTION_DATA$sv))
                  nrow(SECTION_DATA$sv$circos$nontrans) + nrow(SECTION_DATA$sv$circos$translocations) else NA_integer_
 n_panel_vars = if (!is.null(variant_table) && length(panel_genes) > 0)
                  sum(variant_table$symbol %in% panel_genes, na.rm = TRUE) else 0L
-n_panel_svs  = if (!is.null(sv_table) && nrow(sv_table) > 0 && length(panel_genes) > 0 && "NHL_GENE_HITS" %in% names(sv_table))
-                 sum(vapply(sv_table$NHL_GENE_HITS, function(h)
+# Gene-hits column differs by annotation source: "gene_hits" (VEP path) vs
+# "NHL_GENE_HITS" (gene-annotated TSV fallback path)
+sv_gene_col  = intersect(c("gene_hits", "NHL_GENE_HITS"), names(sv_table))
+n_panel_svs  = if (!is.null(sv_table) && nrow(sv_table) > 0 && length(panel_genes) > 0 && length(sv_gene_col) > 0)
+                 sum(vapply(sv_table[[sv_gene_col[1]]], function(h)
                    any(trimws(unlist(strsplit(as.character(h), "[;,]+"))) %in% panel_genes),
                    logical(1)), na.rm = TRUE) else 0L
 ```
@@ -185,13 +191,16 @@ cat("<script>\n", js_panels, "\n</script>\n", sep = "")
   let activePanel = DEFAULT_PANEL;
   let customGenes = new Set();
 
-  // Cache the NHL_GENE_HITS column index for the SV table (looked up lazily on first use)
+  // Cache the gene-hits column index for the SV table (looked up lazily on first use).
+  // Column name differs by annotation source: "gene_hits" (VEP path) vs "NHL_GENE_HITS"
+  // (gene-annotated TSV fallback path).
   let svNhlColIdx = -1;
   function getSvNhlColIdx() {
     if (svNhlColIdx >= 0) return svNhlColIdx;
     if (!window.svTableElem) return -1;
     $(window.svTableElem).find('thead th').each(function (i) {
-      if ($(this).text().trim() === 'NHL_GENE_HITS') { svNhlColIdx = i; }
+      const h = $(this).text().trim();
+      if (h === 'gene_hits' || h === 'NHL_GENE_HITS') { svNhlColIdx = i; }
     });
     return svNhlColIdx;
   }
