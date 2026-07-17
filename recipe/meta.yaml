@@ -11,26 +11,26 @@ source:
 build:
   number: 0
   noarch: generic
+  run_exports:
+    - {{ pin_subpackage("lrsomatic-report", max_pin="x") }}
 
 requirements:
   run:
-    - r-base 4.4.*
+    - r-base
     - quarto
+    - r-quarto
     - r-data.table
     - r-dplyr
-    - r-tidyr
     - r-dt
     - r-htmltools
     - r-optparse
-    - r-quarto
     - r-yaml
     - r-ggplot2
     - r-svglite
     - r-knitr
     - r-r.utils
     - r-circlize
-    - bioconductor-complexheatmap
-    - bioconductor-genomicranges
+    - r-base64enc
 
 test:
   commands:
@@ -39,6 +39,7 @@ test:
 about:
   home: https://github.com/ljwharbers/lrsomatic_report
   license: MIT
+  license_family: MIT
   license_file: LICENSE
   summary: Standalone R/Quarto reporting tool for the LRSomatic long-read somatic variant calling pipeline.
   dev_url: https://github.com/ljwharbers/lrsomatic_report
