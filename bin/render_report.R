@@ -5,9 +5,13 @@ suppressPackageStartupMessages({
   library(yaml)
 })
 
-# Locate the repository root relative to this script
-script_dir = normalizePath(dirname(sub("--file=", "", commandArgs()[grep("--file=", commandArgs())])))
-repo_dir   = normalizePath(file.path(script_dir, ".."))
+# Locate the repository root relative to this script. normalizePath() must be
+# applied to the script *file* path (resolving a bin/ symlink to its real
+# target) before taking dirname() -- doing it the other way around resolves
+# the symlink's containing directory instead, which is a no-op when that
+# directory isn't itself a symlink (e.g. $PREFIX/bin from the bioconda recipe).
+script_file = normalizePath(sub("--file=", "", commandArgs()[grep("--file=", commandArgs())]))
+repo_dir    = normalizePath(file.path(dirname(script_file), ".."))
 
 # Source helpers (needed for detect_reference and locate_outputs below)
 source(file.path(repo_dir, "R/utils.R"))
