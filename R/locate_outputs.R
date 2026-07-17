@@ -63,6 +63,9 @@ locate_outputs = function(sample_dir, sample_id, mode, somatic_vcf) {
 
   # --- Wakhan (optional v2) -------------------------------------------------
   has_wakhan = dir.exists(file.path(d, "wakhan"))
+  wakhan_solutions   = if (has_wakhan) pick(file.path(d, "wakhan/solutions_ranks.tsv")) else NULL
+  wakhan_cn_coverage = if (has_wakhan) glob1(file.path(d, "wakhan/coverage_data/cn_coverage.png")) else NULL
+  wakhan_cn_peaks    = if (has_wakhan) glob1(file.path(d, "wakhan/coverage_data/cn_peaks.png")) else NULL
 
   list(
     mode             = mode,
@@ -83,6 +86,9 @@ locate_outputs = function(sample_dir, sample_id, mode, somatic_vcf) {
     normal_cramino          = normal_cramino,
     normal_flagstat         = normal_flagstat,
     normal_samtools_stats   = normal_samtools_stats,
-    has_wakhan       = has_wakhan
+    has_wakhan       = has_wakhan,
+    wakhan_solutions   = wakhan_solutions,
+    wakhan_cn_coverage = wakhan_cn_coverage,
+    wakhan_cn_peaks    = wakhan_cn_peaks
   )
 }

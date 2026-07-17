@@ -33,3 +33,13 @@ parse_ascat_purityploidy = function(pp_file) {
     ploidy = round(as.numeric(dt$ploidy[1]), 3)
   )
 }
+
+# Parse Wakhan's ranked purity/ploidy solutions table (wakhan/solutions_ranks.tsv).
+# Columns: repository_name, dna_purity, cell_purity, ploidy, confidence, solution_rank
+parse_wakhan_solutions = function(tsv_file) {
+  if (is.null(tsv_file) || !file.exists(tsv_file)) return(NULL)
+  dt = fread(tsv_file, sep = "\t", header = TRUE)
+  if (nrow(dt) == 0) return(NULL)
+  setorder(dt, solution_rank)
+  dt
+}
