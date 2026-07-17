@@ -74,13 +74,32 @@ cat("\n### Wakhan\n\n")
 ```
 
 ```{r wakhan-status}
-if (outputs$has_wakhan) {
-  htmltools::div(class = "alert alert-info",
-                 "Wakhan output directory found. Full Wakhan integration is planned for v2 of this report.")
-} else {
-  htmltools::div(class = "alert alert-info",
-                 "Wakhan was not run for this sample.")
+if (!outputs$has_wakhan) {
+  section_notice("Wakhan was not run for this sample.")
+} else if (is.null(wakhan_solutions) && is.null(outputs$wakhan_cn_coverage) && is.null(outputs$wakhan_cn_peaks)) {
+  section_notice("Wakhan output directory found, but no recognised solutions table or plots inside it.")
 }
+```
+
+```{r wakhan-solutions-table}
+if (!is.null(wakhan_solutions)) {
+  DT::datatable(
+    wakhan_solutions,
+    rownames = FALSE,
+    options  = list(dom = "t", pageLength = nrow(wakhan_solutions))
+  )
+}
+```
+
+```{r wakhan-plots}
+plots = list(
+  "Coverage" = embed_png(outputs$wakhan_cn_coverage, max_width = "700px"),
+  "CN peaks" = embed_png(outputs$wakhan_cn_peaks,    max_width = "700px")
+)
+htmltools::tagList(lapply(names(plots), function(nm) {
+  if (is.null(plots[[nm]])) return(NULL)
+  htmltools::tagList(htmltools::tags$p(htmltools::tags$strong(nm)), plots[[nm]])
+}))
 ```
 
 ```{r cn-outer-tabset-close, results='asis'}
