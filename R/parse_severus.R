@@ -71,6 +71,98 @@ parse_severus_vcf = function(vcf_file) {
   list(translocations = translocations, nontrans = nontrans)
 }
 
+# Parse the somatic Severus VCF into one row per SV (id, svtype, coords, length, VAF).
+# Used as the input to build_sv_table_from_vep() — a lighter-weight companion to
+# parse_severus_vcf() above, which instead returns circos-ready translocation/non-BND tracks.
+parse_severus_somatic_records = function(vcf_file) {
+  if (is.null(vcf_file) || !file.exists(vcf_file)) return(data.table())
+
+  con = gzcon(file(vcf_file, "rb"))
+  skip_n = 0L
+  repeat {
+    line = readLines(con, n = 1, warn = FALSE)
+    if (length(line) == 0) break
+    if (startsWith(line, "#CHROM")) break
+    skip_n = skip_n + 1L
+  }
+  close(con)
+
+  dt = tryCatch(
+    fread(vcf_file, skip = skip_n + 1L, sep = "\t", header = FALSE, select = 1:10,
+          col.names = c("CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO",
+                        "FORMAT", "SAMPLE1")),
+    error = function(e) data.table()
+  )
+  if (nrow(dt) == 0) return(data.table())
+
+  dt[, CHROM := ensure_chr_prefix(CHROM)]
+
+  .info_val = function(info_vec, key) {
+    pattern = paste0("(?:^|;)", key, "=([^;]+)")
+    m = regmatches(info_vec, regexpr(pattern, info_vec, perl = TRUE))
+    ifelse(nchar(m) > 0, sub(paste0(".*="), "", m), NA_character_)
+  }
+
+  dt[, SVTYPE := .info_val(INFO, "SVTYPE")]
+  dt[grepl("END=",   INFO, fixed = TRUE), END   := as.integer(.info_val(INFO[grepl("END=",   INFO, fixed = TRUE)], "END"))]
+  dt[grepl("SVLEN=", INFO, fixed = TRUE), SVLEN := as.integer(.info_val(INFO[grepl("SVLEN=", INFO, fixed = TRUE)], "SVLEN"))]
+
+  # Insertions and BNDs have no END — use POS
+  dt[SVTYPE %in% c("INS", "BND") | is.na(END), END := POS]
+
+  # VAF from FORMAT/SAMPLE1 (format string is uniform for Severus output, but split
+  # format-group by format-group defensively, as in parse_caller_vcf())
+  fmt_groups = unique(dt$FORMAT)
+  vaf_list = vector("numeric", nrow(dt))
+  for (fmt in fmt_groups) {
+    idx_rows = which(dt$FORMAT == fmt)
+    fields = strsplit(fmt, ":", fixed = TRUE)[[1]]
+    vaf_idx = match("VAF", fields)
+    split_s = strsplit(dt$SAMPLE1[idx_rows], ":", fixed = TRUE)
+    vaf_list[idx_rows] = if (!is.na(vaf_idx)) {
+      vapply(split_s, function(x)
+        if (length(x) >= vaf_idx) suppressWarnings(as.numeric(x[vaf_idx])) else NA_real_,
+        numeric(1))
+    } else NA_real_
+  }
+  dt[, VAF := vaf_list]
+
+  dt[, .(id = ID, svtype = SVTYPE, chrom = CHROM, start = POS, end = END,
+         sv_len = SVLEN, vaf = VAF)]
+}
+
+# Build the SV display table by joining VEP CSQ gene annotations (from the SV VEP VCF,
+# `parse_vep_vcf()` from R/parse_smallvariants.R) onto the somatic Severus SVs by locus.
+# This is the primary path when a VEP SV VCF is available; build_sv_table() below (fed by
+# the gene-annotated TSV) is the fallback for pipelines that don't produce a VEP SV VCF.
+build_sv_table_from_vep = function(somatic_vcf, vep_sv_vcf) {
+  somatic = parse_severus_somatic_records(somatic_vcf)
+  if (nrow(somatic) == 0) return(data.table())
+
+  vep = parse_vep_vcf(vep_sv_vcf)
+  if (is.null(vep) || nrow(vep) == 0) {
+    somatic[, `:=`(gene_hits = NA_character_, consequence = NA_character_, impact = NA_character_)]
+    return(somatic[, .(id, gene_hits, svtype, chrom, start, end, sv_len, vaf, consequence, impact)])
+  }
+
+  # Keep the highest-impact annotation per locus, and collapse all distinct gene symbols
+  # hit at that locus into one comma-joined column.
+  impact_rank = c(HIGH = 1L, MODERATE = 2L, LOW = 3L, MODIFIER = 4L)
+  vep[, impact_rank := impact_rank[impact]]
+  vep[is.na(impact_rank), impact_rank := 5L]
+  setorder(vep, impact_rank)
+
+  agg = vep[, .(
+    gene_hits   = paste(unique(symbol[!is.na(symbol) & nzchar(symbol)]), collapse = ","),
+    consequence = consequence[1],
+    impact      = impact[1]
+  ), by = .(chrom, pos)]
+  agg[!nzchar(gene_hits), gene_hits := NA_character_]
+
+  merged = merge(somatic, agg, by.x = c("chrom", "start"), by.y = c("chrom", "pos"), all.x = TRUE)
+  merged[, .(id, gene_hits, svtype, chrom, start, end, sv_len, vaf, consequence, impact)]
+}
+
 # Parse the gene-annotated Severus TSV (filtered_SV2/SV_filtered_with_gene_annotations.tsv)
 parse_severus_gene_tsv = function(tsv_file) {
   if (is.null(tsv_file) || !file.exists(tsv_file)) return(NULL)
