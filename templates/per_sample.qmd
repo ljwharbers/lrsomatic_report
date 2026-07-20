@@ -76,8 +76,9 @@ panel_genes = tryCatch(
 ascat_segments = parse_ascat_segments(outputs$ascat_segments)
 ascat_pp       = parse_ascat_purityploidy(outputs$ascat_purityploidy)
 
-# Parse Wakhan (lightweight: ranked purity/ploidy solutions table only)
+# Parse Wakhan
 wakhan_solutions = parse_wakhan_solutions(outputs$wakhan_solutions)
+wakhan_cn_plots  = locate_wakhan_cn_plots(outputs$wakhan_dir, wakhan_solutions)
 
 # Parse QC
 qc_mosdepth = parse_mosdepth_summary(outputs$mosdepth_summary)
@@ -171,6 +172,10 @@ cat("<script>\n", js_panels, "\n</script>\n", sep = "")
 
 ---
 
+{{< include sections/_gene_filter.qmd >}}
+
+---
+
 {{< include sections/_smallvariants.qmd >}}
 
 ---
@@ -231,11 +236,17 @@ cat("<script>\n", js_panels, "\n</script>\n", sep = "")
   }
 
   function updateCount() {
-    const snvTbl = window.snvTableElem ? $(window.snvTableElem).DataTable() : null;
-    if (!snvTbl) return;
-    const n = snvTbl.rows({ search: "applied" }).count();
+    const parts = [];
+    if (window.snvTableElem) {
+      const n = $(window.snvTableElem).DataTable().rows({ search: "applied" }).count();
+      parts.push(n + " small variant" + (n === 1 ? "" : "s"));
+    }
+    if (window.svTableElem) {
+      const n = $(window.svTableElem).DataTable().rows({ search: "applied" }).count();
+      parts.push(n + " SV" + (n === 1 ? "" : "s"));
+    }
     const el = document.getElementById("panel-variant-count");
-    if (el) el.textContent = n + " SNV" + (n === 1 ? "" : "s") + " shown";
+    if (el) el.textContent = parts.length ? parts.join(" · ") + " shown" : "";
   }
 
   function redraw() {

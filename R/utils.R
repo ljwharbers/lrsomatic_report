@@ -80,6 +80,17 @@ embed_png = function(path, max_width = "900px") {
   )
 }
 
+# Embed a self-contained HTML file (e.g. a standalone Plotly plot) as an inline iframe.
+embed_html_iframe = function(path, height = "780px") {
+  if (is.null(path) || !file.exists(path)) return(NULL)
+  b64 = base64enc::base64encode(path)
+  htmltools::tags$iframe(
+    src   = paste0("data:text/html;base64,", b64),
+    style = paste0("width:100%; height:", height, "; border:none;"),
+    loading = "lazy"
+  )
+}
+
 # Compute coding TMB from a variant_table produced by build_variant_table().
 # consequence column may be comma-joined (e.g. "frameshift_variant,splice_region_variant").
 # denominator_mb: coding Mb used as divisor (default 30 Mb — canonical clinical denominator).
