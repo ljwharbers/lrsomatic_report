@@ -1,0 +1,32 @@
+## Gene panel filter
+
+_Applies to both the small-variant and structural-variant tables below._
+
+```{r gene-filter-ui, results='asis'}
+panel_opts = ""
+all_p = if (!is.null(params$all_panels) && length(params$all_panels) > 0)
+          params$all_panels else list()
+for (nm in names(all_p)) {
+  selected = if (nm == params$default_panel) " selected" else ""
+  label = paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
+  panel_opts = paste0(panel_opts,
+    '<option value="', nm, '"', selected, '>', label, '</option>\n')
+}
+panel_opts = paste0(panel_opts,
+  '<option value="__all__">All genes</option>\n',
+  '<option value="__custom__">Custom&hellip;</option>\n')
+
+cat(paste0('
+<div class="panel-controls">
+  <label class="panel-controls__label" for="panel-select">Gene panel:</label>
+  <select id="panel-select" class="panel-controls__select">',
+    panel_opts,
+  '</select>
+  <span id="panel-variant-count" class="panel-controls__count"></span>
+</div>
+<div id="custom-gene-panel" class="panel-controls__custom-area" style="display:none;">
+  <label>Custom genes (one per line, or comma/space separated, case-insensitive):</label>
+  <textarea id="custom-gene-input" rows="4"></textarea>
+</div>
+'))
+```

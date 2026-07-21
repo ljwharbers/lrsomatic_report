@@ -76,7 +76,7 @@ cat("\n### Wakhan\n\n")
 ```{r wakhan-status}
 if (!outputs$has_wakhan) {
   section_notice("Wakhan was not run for this sample.")
-} else if (is.null(wakhan_solutions) && is.null(outputs$wakhan_cn_coverage) && is.null(outputs$wakhan_cn_peaks)) {
+} else if (is.null(wakhan_solutions) && is.null(outputs$wakhan_heatmap) && length(wakhan_cn_plots) == 0) {
   section_notice("Wakhan output directory found, but no recognised solutions table or plots inside it.")
 }
 ```
@@ -91,15 +91,17 @@ if (!is.null(wakhan_solutions)) {
 }
 ```
 
-```{r wakhan-plots}
-plots = list(
-  "Coverage" = embed_png(outputs$wakhan_cn_coverage, max_width = "700px"),
-  "CN peaks" = embed_png(outputs$wakhan_cn_peaks,    max_width = "700px")
-)
-htmltools::tagList(lapply(names(plots), function(nm) {
-  if (is.null(plots[[nm]])) return(NULL)
-  htmltools::tagList(htmltools::tags$p(htmltools::tags$strong(nm)), plots[[nm]])
-}))
+```{r wakhan-heatmap}
+p = embed_html_iframe(outputs$wakhan_heatmap, height = "600px")
+if (!is.null(p)) htmltools::tagList(htmltools::tags$p(htmltools::tags$strong("Ploidy × purity solutions")), p)
+```
+
+```{r wakhan-cn-plots-header, results='asis', eval=length(wakhan_cn_plots) > 0}
+cat('\n<p><strong>Genome copy number + breakpoints</strong></p>\n\n')
+```
+
+```{r wakhan-cn-plots, eval=length(wakhan_cn_plots) > 0}
+render_wakhan_cn_tabs(wakhan_cn_plots)
 ```
 
 ```{r cn-outer-tabset-close, results='asis'}

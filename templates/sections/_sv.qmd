@@ -22,7 +22,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
     extensions = c("Buttons", "Scroller"),
     options    = list(
       dom       = "Bfrtip",
-      buttons   = c("copy", "csv", "excel"),
+      buttons   = c("copy", "csv"),
       scrollX   = TRUE,
       scrollY   = "350px",
       scroller  = TRUE,
