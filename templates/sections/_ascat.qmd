@@ -96,21 +96,12 @@ p = embed_html_iframe(outputs$wakhan_heatmap, height = "600px")
 if (!is.null(p)) htmltools::tagList(htmltools::tags$p(htmltools::tags$strong("Ploidy × purity solutions")), p)
 ```
 
-```{r wakhan-cn-plots-open, results='asis', eval=length(wakhan_cn_plots) > 0}
+```{r wakhan-cn-plots-header, results='asis', eval=length(wakhan_cn_plots) > 0}
 cat('\n<p><strong>Genome copy number + breakpoints</strong></p>\n\n')
-cat("::: {.panel-tabset}\n\n")
 ```
 
-```{r wakhan-cn-plots, results='asis', eval=length(wakhan_cn_plots) > 0}
-for (p in wakhan_cn_plots) {
-  cat("\n#### Rank ", p$rank, " — purity ", p$purity, ", ploidy ", p$ploidy, "\n\n", sep = "")
-  print(htmltools::tagList(embed_html_iframe(p$plot)))
-  cat("\n\n")
-}
-```
-
-```{r wakhan-cn-plots-close, results='asis', eval=length(wakhan_cn_plots) > 0}
-cat("\n:::\n\n")
+```{r wakhan-cn-plots, eval=length(wakhan_cn_plots) > 0}
+render_wakhan_cn_tabs(wakhan_cn_plots)
 ```
 
 ```{r cn-outer-tabset-close, results='asis'}

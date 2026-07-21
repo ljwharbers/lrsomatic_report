@@ -80,14 +80,121 @@ embed_png = function(path, max_width = "900px") {
   )
 }
 
+# Build a data: URI for a Wakhan Plotly HTML file, with a small responsive-resize
+# script injected before </body> so the plot fills the iframe's width instead of
+# rendering at Plotly's fixed native layout.width (which causes horizontal scroll
+# inside the iframe). Runs on the iframe's own `load` event so it fires after
+# Plotly.newPlot() has already drawn the figure.
+wakhan_plot_datauri = function(path) {
+  html = paste(readLines(path, warn = FALSE), collapse = "\n")
+  # Wakhan's Plotly divs carry an inline fixed width/height (e.g. style=\"width:1380px\")
+  # set by Plotly at export time, in addition to a fixed layout.width. autosize/relayout
+  # alone resizes against that fixed div, so the div's own inline size must be cleared
+  # to 100% first, then relayout({autosize:true}) + Plots.resize() recomputes against
+  # the now-flexible container (i.e. the iframe).
+  resize_script = "
+<script>
+window.addEventListener('load', function () {
+  function resizeAll() {
+    if (!window.Plotly) return;
+    document.querySelectorAll('.plotly-graph-div').forEach(function (gd) {
+      gd.style.width = '100%';
+      gd.style.height = '100%';
+      Plotly.relayout(gd, {autosize: true});
+      Plotly.Plots.resize(gd);
+    });
+  }
+  resizeAll();
+  window.addEventListener('resize', resizeAll);
+});
+</script>
+"
+  if (grepl("</body>", html, fixed = TRUE)) {
+    html = sub("</body>", paste0(resize_script, "</body>"), html, fixed = TRUE)
+  } else {
+    html = paste0(html, resize_script)
+  }
+  paste0("data:text/html;base64,", base64enc::base64encode(charToRaw(html)))
+}
+
 # Embed a self-contained HTML file (e.g. a standalone Plotly plot) as an inline iframe.
 embed_html_iframe = function(path, height = "780px") {
   if (is.null(path) || !file.exists(path)) return(NULL)
-  b64 = base64enc::base64encode(path)
   htmltools::tags$iframe(
-    src   = paste0("data:text/html;base64,", b64),
-    style = paste0("width:100%; height:", height, "; border:none;"),
-    loading = "lazy"
+    src   = wakhan_plot_datauri(path),
+    style = paste0("width:100%; height:", height, "; border:none;")
+  )
+}
+
+# Render Wakhan's ranked copy-number plots as a self-contained tab widget (not a
+# Quarto .panel-tabset): Quarto's panel-tabset relies on Pandoc parsing `####`
+# ATX headings out of a results='asis' stream, which breaks when raw iframe HTML
+# for one rank is emitted immediately before the next rank's heading (Pandoc
+# absorbs the heading into the preceding raw-HTML block, so only the first tab
+# ever registers). This widget also defers loading: only the first pane's
+# iframe gets a real `src`; the rest carry `data-src` and are populated on
+# first click, so hidden ranks' plotly.js payloads aren't parsed at page load.
+render_wakhan_cn_tabs = function(plots) {
+  if (length(plots) == 0) return(NULL)
+
+  ids = paste0("wakhan-cn-pane-", seq_along(plots))
+
+  buttons = lapply(seq_along(plots), function(i) {
+    p = plots[[i]]
+    htmltools::tags$button(
+      class = if (i == 1) "wakhan-cn-tab active" else "wakhan-cn-tab",
+      `data-target` = ids[i],
+      paste0("Rank ", p$rank, " — purity ", p$purity, ", ploidy ", p$ploidy)
+    )
+  })
+
+  panes = lapply(seq_along(plots), function(i) {
+    p = plots[[i]]
+    uri = wakhan_plot_datauri(p$plot)
+    iframe = if (i == 1) {
+      htmltools::tags$iframe(src = uri, style = "width:100%; height:780px; border:none;")
+    } else {
+      htmltools::tags$iframe(`data-src` = uri, style = "width:100%; height:780px; border:none;")
+    }
+    htmltools::tags$div(
+      class = if (i == 1) "wakhan-cn-pane active" else "wakhan-cn-pane",
+      id    = ids[i],
+      iframe
+    )
+  })
+
+  htmltools::tagList(
+    htmltools::tags$style("
+      .wakhan-cn-tabs__nav { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+      .wakhan-cn-tab {
+        border:1px solid var(--color-border, #ccc); background:var(--color-bg, #fff);
+        border-radius:5px; padding:5px 10px; font-size:0.85rem; cursor:pointer;
+      }
+      .wakhan-cn-tab.active { background:var(--color-primary, #333); color:#fff; }
+      .wakhan-cn-pane { display:none; }
+      .wakhan-cn-pane.active { display:block; }
+    "),
+    htmltools::tags$div(class = "wakhan-cn-tabs__nav", buttons),
+    htmltools::tags$div(class = "wakhan-cn-tabs__panes", panes),
+    htmltools::tags$script(htmltools::HTML("
+      document.querySelectorAll('.wakhan-cn-tabs__nav').forEach(function (nav) {
+        nav.querySelectorAll('.wakhan-cn-tab').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            const container = nav.nextElementSibling;
+            nav.querySelectorAll('.wakhan-cn-tab').forEach(function (b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            container.querySelectorAll('.wakhan-cn-pane').forEach(function (p) { p.classList.remove('active'); });
+            const pane = document.getElementById(btn.dataset.target);
+            pane.classList.add('active');
+            const iframe = pane.querySelector('iframe[data-src]');
+            if (iframe) {
+              iframe.src = iframe.dataset.src;
+              iframe.removeAttribute('data-src');
+            }
+          });
+        });
+      });
+    "))
   )
 }
 
