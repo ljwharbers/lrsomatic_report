@@ -21,7 +21,7 @@ derive_dbsnp_cosmic = function(dt) {
 parse_vep = function(vep_file) {
   if (is.null(vep_file) || !file.exists(vep_file)) return(NULL)
 
-  con = gzcon(file(vep_file, "rb"))
+  con = gzfile(vep_file, "rb")
   is_vcf = FALSE
   repeat {
     line = readLines(con, n = 1, warn = FALSE)
@@ -40,7 +40,7 @@ parse_vep_text = function(vep_file) {
   if (is.null(vep_file) || !file.exists(vep_file)) return(NULL)
 
   # Count meta-lines (start with ##) to find the column-header line
-  con = gzcon(file(vep_file, "rb"))
+  con = gzfile(vep_file, "rb")
   skip_n = 0L
   repeat {
     line = readLines(con, n = 1, warn = FALSE)
@@ -97,7 +97,7 @@ parse_vep_vcf = function(vep_file) {
 
   # Skip header to #CHROM, capturing the CSQ field order from its INFO meta-line
   # (e.g. "...Format: Allele|Consequence|IMPACT|SYMBOL|Gene|...")
-  con = gzcon(file(vep_file, "rb"))
+  con = gzfile(vep_file, "rb")
   skip_n = 0L
   csq_format = NULL
   repeat {
@@ -127,23 +127,28 @@ parse_vep_vcf = function(vep_file) {
   )
   if (is.null(dt) || nrow(dt) == 0) return(NULL)
 
-  dt[, CSQ := sub(".*CSQ=", "", INFO)]
-  dt[, CSQ := sub(";.*$", "", CSQ)]
+  # Fixed-string splits (no regex backtracking) — much faster than sub() on the full
+  # semicolon-delimited INFO field across millions of rows.
+  dt[, CSQ := tstrsplit(INFO, "CSQ=", fixed = TRUE, keep = 2L)[[1]]]
+  dt[, CSQ := tstrsplit(CSQ,  ";",    fixed = TRUE, keep = 1L)[[1]]]
 
   # One row per gene/transcript annotation (comma-separated CSQ entries)
   dt_long = dt[, .(csq_entry = unlist(strsplit(CSQ, ",", fixed = TRUE))),
                by = .(CHROM, POS, REF, ALT)]
   if (nrow(dt_long) == 0) return(NULL)
 
-  # Split each entry on "|"; length() padding recovers pipe-delimited trailing empty
-  # fields that strsplit() otherwise silently drops.
-  split_list = strsplit(dt_long$csq_entry, "|", fixed = TRUE)
-  split_list = lapply(split_list, function(v) { length(v) = length(csq_format); v })
-  mat = do.call(rbind, split_list)
+  # Split each entry on "|", materialising only the fields actually used below
+  # (tstrsplit returns columns in the order requested via `keep`).
+  need = c("Consequence", "IMPACT", "SYMBOL", "Gene", "HGVSp",
+           "Existing_variation", "SIFT", "PolyPhen")
+  keep_idx = match(need, csq_format)
+  ok = !is.na(keep_idx)
+  parts = tstrsplit(dt_long$csq_entry, "|", fixed = TRUE, fill = NA_character_,
+                    keep = keep_idx[ok])
+  names(parts) = need[ok]
 
   get_field = function(name) {
-    idx = match(name, csq_format)
-    if (is.na(idx)) rep(NA_character_, nrow(mat)) else mat[, idx]
+    if (is.null(parts[[name]])) rep(NA_character_, nrow(dt_long)) else parts[[name]]
   }
 
   dt_long[, consequence := gsub("&", ",", get_field("Consequence"))]
@@ -178,7 +183,7 @@ parse_caller_vcf = function(vcf_file, caller_name = "unknown") {
   if (is.null(vcf_file) || !file.exists(vcf_file)) return(NULL)
 
   # Count header lines
-  con = gzcon(file(vcf_file, "rb"))
+  con = gzfile(vcf_file, "rb")
   skip_n = 0L
   repeat {
     line = readLines(con, n = 1, warn = FALSE)
