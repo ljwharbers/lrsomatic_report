@@ -30,7 +30,7 @@ detect_reference = function(vcf_file) {
     message("Cannot auto-detect reference: file not found, defaulting to t2t")
     return("t2t")
   }
-  con = gzcon(file(vcf_file, "rb"))
+  con = gzfile(vcf_file, "rb")
   on.exit(close(con))
   header_lines = character(0)
   for (i in seq_len(2000)) {
