@@ -9,7 +9,7 @@ parse_severus_vcf = function(vcf_file) {
     return(list(translocations = data.table(), nontrans = data.table()))
   }
 
-  con = gzcon(file(vcf_file, "rb"))
+  con = gzfile(vcf_file, "rb")
   skip_n = 0L
   repeat {
     line = readLines(con, n = 1, warn = FALSE)
@@ -77,7 +77,7 @@ parse_severus_vcf = function(vcf_file) {
 parse_severus_somatic_records = function(vcf_file) {
   if (is.null(vcf_file) || !file.exists(vcf_file)) return(data.table())
 
-  con = gzcon(file(vcf_file, "rb"))
+  con = gzfile(vcf_file, "rb")
   skip_n = 0L
   repeat {
     line = readLines(con, n = 1, warn = FALSE)
