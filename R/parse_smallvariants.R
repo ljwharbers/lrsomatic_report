@@ -3,6 +3,13 @@ suppressPackageStartupMessages({
   library(dplyr)
 })
 
+# Values of LRSomatic's INFO/CALLER tag that denote a somatic caller. The pipeline's
+# *_SOMATIC_VEP.vcf.gz is a merged multi-caller VCF in which germline callers
+# (deepvariant, clair3) supply the overwhelming majority of records, so the somatic
+# table has to be filtered on this tag. ClairS is tagged "clairs" in matched mode and
+# "clairs-to" in tumour-only mode.
+SOMATIC_CALLERS = c("clairs", "clairs-to", "clairsto", "deepsomatic")
+
 # Derive dbsnp/cosmic columns from a VEP "Existing_variation" column (semicolon- or
 # comma-joined list of IDs, e.g. "rs123&COSV456"). Shared by parse_vep_text/parse_vep_vcf.
 derive_dbsnp_cosmic = function(dt) {
@@ -84,6 +91,10 @@ parse_vep_text = function(vep_file) {
   # dbSNP / COSMIC IDs, derived from Existing_variation
   dt = derive_dbsnp_cosmic(dt)
 
+  # No per-variant caller in the text format; keep the column for contract parity
+  # with parse_vep_vcf().
+  dt[, caller := NA_character_]
+
   dt
 }
 
@@ -91,15 +102,17 @@ parse_vep_text = function(vep_file) {
 # as opposed to the default text output handled by parse_vep_text()).
 # Returns a data.table with one row per gene/transcript annotation per variant, using the
 # same column contract as parse_vep_text(): chrom, pos, ref, alt, symbol, gene_id,
-# consequence, impact, hgvsp, existing, dbsnp, cosmic, sift, polyphen.
+# consequence, impact, hgvsp, existing, dbsnp, cosmic, sift, polyphen, caller.
 parse_vep_vcf = function(vep_file) {
   if (is.null(vep_file) || !file.exists(vep_file)) return(NULL)
 
   # Skip header to #CHROM, capturing the CSQ field order from its INFO meta-line
-  # (e.g. "...Format: Allele|Consequence|IMPACT|SYMBOL|Gene|...")
+  # (e.g. "...Format: Allele|Consequence|IMPACT|SYMBOL|Gene|...") and noting whether
+  # the file carries a per-record CALLER tag.
   con = gzfile(vep_file, "rb")
   skip_n = 0L
   csq_format = NULL
+  has_caller_info = FALSE
   repeat {
     line = readLines(con, n = 1, warn = FALSE)
     if (length(line) == 0) break
@@ -107,6 +120,7 @@ parse_vep_vcf = function(vep_file) {
       m = regmatches(line, regexpr("Format: [^\"]+", line))
       if (length(m) > 0) csq_format = strsplit(sub("^Format: ", "", m), "|", fixed = TRUE)[[1]]
     }
+    if (startsWith(line, "##INFO=<ID=CALLER")) has_caller_info = TRUE
     if (startsWith(line, "#CHROM")) break
     skip_n = skip_n + 1L
   }
@@ -127,14 +141,34 @@ parse_vep_vcf = function(vep_file) {
   )
   if (is.null(dt) || nrow(dt) == 0) return(NULL)
 
+  # Drop records the callers themselves rejected (RefCall / LowQual / GERMLINE).
+  dt = dt[FILTER %in% c("PASS", ".")]
+  if (nrow(dt) == 0) return(NULL)
+
   # Fixed-string splits (no regex backtracking) — much faster than sub() on the full
   # semicolon-delimited INFO field across millions of rows.
   dt[, CSQ := tstrsplit(INFO, "CSQ=", fixed = TRUE, keep = 2L)[[1]]]
   dt[, CSQ := tstrsplit(CSQ,  ";",    fixed = TRUE, keep = 1L)[[1]]]
 
+  # Keep only somatic-caller records. Older single-caller VEP VCFs carry no CALLER tag
+  # at all, and filtering those on it would empty the table, so it is skipped for them.
+  if (has_caller_info) {
+    dt[, caller := tstrsplit(INFO, "CALLER=", fixed = TRUE, keep = 2L)[[1]]]
+    dt[, caller := tstrsplit(caller, ";", fixed = TRUE, keep = 1L)[[1]]]
+    dt = dt[caller %in% SOMATIC_CALLERS]
+    if (nrow(dt) == 0) return(NULL)
+  } else {
+    dt[, caller := NA_character_]
+  }
+
+  # A variant reported by two somatic callers appears as two records; collapse to one
+  # row per variant so the CSQ expansion below doesn't duplicate every annotation.
+  dt = dt[, .(CSQ = CSQ[1], caller = paste(sort(unique(caller)), collapse = ",")),
+          by = .(CHROM, POS, REF, ALT)]
+
   # One row per gene/transcript annotation (comma-separated CSQ entries)
   dt_long = dt[, .(csq_entry = unlist(strsplit(CSQ, ",", fixed = TRUE))),
-               by = .(CHROM, POS, REF, ALT)]
+               by = .(CHROM, POS, REF, ALT, caller)]
   if (nrow(dt_long) == 0) return(NULL)
 
   # Split each entry on "|", materialising only the fields actually used below
@@ -160,8 +194,10 @@ parse_vep_vcf = function(vep_file) {
   dt_long[, sift        := get_field("SIFT")]
   dt_long[, polyphen    := get_field("PolyPhen")]
 
-  # Blank fields are "" in CSQ, not NA — normalise for consistency with parse_vep_text()
-  for (col in c("symbol", "impact", "hgvsp", "existing", "gene_id", "sift", "polyphen")) {
+  # Blank fields are "" in CSQ, not NA — normalise for consistency with parse_vep_text().
+  # `caller` collapses to "" when the file had no CALLER tag, so it normalises here too.
+  for (col in c("symbol", "impact", "hgvsp", "existing", "gene_id", "sift", "polyphen",
+                "caller")) {
     dt_long[get(col) == "", (col) := NA_character_]
   }
 
@@ -174,13 +210,21 @@ parse_vep_vcf = function(vep_file) {
   dt_long = derive_dbsnp_cosmic(dt_long)
 
   dt_long[, .(chrom, pos, ref, alt, symbol, gene_id, consequence, impact, hgvsp,
-              existing, dbsnp, cosmic, sift, polyphen)]
+              existing, dbsnp, cosmic, sift, polyphen, caller)]
 }
 
 # Parse a raw caller VCF for variant coordinates + VAF.
+# `vcf_file` may be several paths, in which case they are read and stacked into one
+# table — ClairS splits its matched-mode output into snvs.vcf.gz + indel.vcf.gz.
 # Returns data.table with: chrom, pos, ref, alt, vaf, dp, caller
 parse_caller_vcf = function(vcf_file, caller_name = "unknown") {
-  if (is.null(vcf_file) || !file.exists(vcf_file)) return(NULL)
+  if (is.null(vcf_file)) return(NULL)
+  if (length(vcf_file) > 1) {
+    parts = lapply(vcf_file, parse_caller_vcf, caller_name = caller_name)
+    parts = parts[!vapply(parts, is.null, logical(1))]
+    return(if (length(parts) > 0) rbindlist(parts) else NULL)
+  }
+  if (!file.exists(vcf_file)) return(NULL)
 
   # Count header lines
   con = gzfile(vcf_file, "rb")
@@ -290,10 +334,13 @@ build_variant_table = function(vep_data, caller_list, gene_panel = NULL) {
     setnames(vep_data, "vaf", vaf_col)
   }
 
-  # Summarise which callers reported each variant
+  # Summarise which callers reported each variant. A merged VEP VCF states this outright
+  # in INFO/CALLER; otherwise fall back to inferring it from which VAF joins landed.
   vaf_cols = paste0("vaf_", names(caller_list))
   vaf_cols = vaf_cols[vaf_cols %in% names(vep_data)]
-  if (length(vaf_cols) > 0) {
+  if ("caller" %in% names(vep_data) && any(!is.na(vep_data$caller))) {
+    vep_data[, callers := caller]
+  } else if (length(vaf_cols) > 0) {
     vep_data[, callers := {
       .sd = .SD
       apply(.sd, 1, function(r) paste(names(caller_list)[!is.na(r)], collapse = ","))
