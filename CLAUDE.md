@@ -9,16 +9,17 @@ Standalone R/Quarto reporting tool for the [LRSomatic](https://github.com/nf-cor
 ## Running the report
 
 ```bash
+S=/path/to/CCS15-ONT
 Rscript bin/render_report.R \
-  --sample-dir  /path/to/DLBCL3_pooled \
-  --sample-id   DLBCL3_pooled \
+  --sample-dir  $S \
+  --sample-id   CCS15-ONT \
   --sex         male \
   --mode        matched \
-  --somatic-vcf /path/to/DLBCL3_pooled/variants/clairs/somatic.vcf.gz \
+  --somatic-vcf $S/variants/clairs/snvs.vcf.gz,$S/variants/clairs/indel.vcf.gz \
   --reference   auto
 ```
 
-Output defaults to `<sample-id>_report.html` in the current directory. `--reference auto` reads `##contig` lines from the VEP somatic VCF to detect `t2t` vs `hg38`. `--mode` (`matched` | `tumour-only`) and `--somatic-vcf` are required — see `locate_outputs()` below for why the caller VCF can't be auto-discovered.
+Output defaults to `<sample-id>_report.html` in the current directory. `--reference auto` reads `##contig` lines from the VEP somatic VCF to detect `t2t` vs `hg38`. `--mode` (`matched` | `tumour-only`) and `--somatic-vcf` are required — see `locate_outputs()` below for why the caller VCF can't be auto-discovered. `--somatic-vcf` takes a comma-separated list because matched-mode ClairS splits into `snvs.vcf.gz` + `indel.vcf.gz`; tumour-only ClairS-TO still writes a single `clairsto/somatic.vcf.gz`.
 
 ## R conventions
 
@@ -82,10 +83,12 @@ change.
 - **VEP file format:** `outputs$vep_somatic` (`*_SOMATIC_VEP.vcf.gz`) ships in either of two incompatible formats depending on the VEP invocation — the filename doesn't tell you which. `parse_vep()` sniffs the header (`#Uploaded_variation` vs `#CHROM`) and dispatches accordingly:
   - `parse_vep_text()` — VEP *default text output* (tab-delimited, `##`-commented header, column header line starts with `#Uploaded_variation`, NOT a VCF). The `Extra` column holds semicolon-delimited `KEY=VALUE` pairs parsed by `parse_extra_kv`.
   - `parse_vep_vcf()` — genuine VCF (`--vcf` VEP output) with annotations in a pipe-delimited `CSQ` INFO field; the field order is read from the `##INFO=<ID=CSQ,...Format: ...>` header line rather than hard-coded.
-  Both return the same column contract (`chrom, pos, ref, alt, symbol, gene_id, consequence, impact, hgvsp, existing, dbsnp, cosmic, sift, polyphen`); `derive_dbsnp_cosmic()` is shared between them.
+  Both return the same column contract (`chrom, pos, ref, alt, symbol, gene_id, consequence, impact, hgvsp, existing, dbsnp, cosmic, sift, polyphen, caller`); `derive_dbsnp_cosmic()` is shared between them.
+- **The "somatic" VEP VCF is a merged multi-caller VCF.** LRSomatic writes germline calls (DeepVariant, Clair3) into `*_SOMATIC_VEP.vcf.gz` alongside the somatic ones — on a real sample that's ~99% of the records — distinguished only by an `INFO/CALLER` tag. `parse_vep_vcf()` therefore keeps only `FILTER` ∈ {`PASS`, `.`} records whose caller is in `SOMATIC_CALLERS` (`clairs`, `clairs-to`, `clairsto`, `deepsomatic` — ClairS is tagged `clairs` in matched mode and `clairs-to` in tumour-only). The caller filter is applied **only when a `##INFO=<ID=CALLER` header line is present**, so older single-caller VEP VCFs aren't filtered to nothing. This filter is also what keeps the parse tractable: unfiltered it is ~5.4M variants and ~7 minutes.
 - **Missing files are graceful:** Every parser returns `NULL` if its input file is absent; the template shows a "not available" notice per section.
 - **Run mode:** passed explicitly to `locate_outputs()` as `--mode` (`matched` | `tumour-only`); no longer inferred from directory presence. This controls which VAF columns appear.
-- **Caller VAF join:** the somatic caller VCF is ambiguous by filename alone (generic `somatic.vcf.gz`, indistinguishable from other callers once dumped flat), so it's passed explicitly via `--somatic-vcf` and `locate_outputs()` slots it into `clairs_somatic` or `clairsto_somatic` depending on `mode`. `build_variant_table()` then joins it to VEP rows on `chrom|pos|ref|alt`; caller columns are named `vaf_clairsto`, `vaf_clairs`.
+- **Caller VAF join:** the ClairS VCF is ambiguous by filename alone (generic `somatic.vcf.gz`, indistinguishable from other callers once dumped flat), so it's passed explicitly via `--somatic-vcf` — as a comma-separated list, since matched-mode ClairS splits into `snvs.vcf.gz` + `indel.vcf.gz` — and `locate_outputs()` slots it into `clairs_somatic` or `clairsto_somatic` depending on `mode`. DeepSomatic *is* discoverable (its `<sample>.vcf.gz` is disambiguated by the `deepsomatic/` directory), so `locate_outputs()` finds it by path and sets `deepsomatic_vcf`. `build_variant_table()` then joins each to VEP rows on `chrom|pos|ref|alt`; caller columns are named `vaf_clairsto`, `vaf_clairs`, `vaf_deepsomatic`. The displayed `callers` column prefers the VEP `caller` tag and falls back to inferring it from which VAF joins landed.
+- **Normal-side QC is found by path, not by a fixed root:** `find1_normal()` keeps recursive hits containing `/normal/` (mirroring `find1_tumor()`, which drops them), because the pipeline has moved this from a top-level `normal/` to `qc/normal/`. `has_normal` is derived from what was actually found rather than from `dir.exists()`.
 
 ## R package requirements
 

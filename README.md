@@ -11,16 +11,26 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 ## Quick start
 
 ```bash
+S=/path/to/CCS15-ONT
+
+# matched — ClairS splits its output, so pass both files
 Rscript bin/render_report.R \
-  --sample-dir  /path/to/DLBCL3_pooled \
-  --sample-id   DLBCL3_pooled \
+  --sample-dir  $S \
+  --sample-id   CCS15-ONT \
   --sex         male \
   --mode        matched \
-  --somatic-vcf /path/to/DLBCL3_pooled/variants/clairs/somatic.vcf.gz \
+  --somatic-vcf $S/variants/clairs/snvs.vcf.gz,$S/variants/clairs/indel.vcf.gz \
   --reference   auto            # auto-detects t2t vs hg38 from VCF headers
+
+# tumour-only — ClairS-TO writes a single combined VCF
+Rscript bin/render_report.R \
+  --sample-dir  $S-TO --sample-id CCS15-ONT-TO --sex male \
+  --mode        tumour-only \
+  --somatic-vcf $S-TO/variants/clairsto/somatic.vcf.gz \
+  --reference   auto
 ```
 
-The output file `DLBCL3_pooled_report.html` will be written to the current directory.
+The output file `CCS15-ONT_report.html` will be written to the current directory.
 
 ## All options
 
@@ -30,7 +40,9 @@ The output file `DLBCL3_pooled_report.html` will be written to the current direc
 --reference    t2t | hg38 | auto  (default: auto)
 --sex          male | female | XY | XX  (required)
 --mode         matched | tumour-only  (required)
---somatic-vcf  Path to the somatic small-variant caller VCF used for VAF (required)
+--somatic-vcf  Path to the ClairS somatic small-variant VCF used for VAF (required).
+               Comma-separate several paths when the caller splits its output.
+               DeepSomatic is discovered automatically and needs no flag.
 --gene-panel   Builtin panel name (e.g. lymphoid) or path to a custom TSV  (default: lymphoid)
 --output       Output HTML path  (default: <sample-id>_report.html in current dir)
 --title        Report title
@@ -57,19 +69,28 @@ The `--sample-dir` must be the root of a single-sample LRSomatic output. Files a
 structure underneath it — for example:
 
 ```
-DLBCL3_pooled/
+CCS15-ONT/
 ├── *_SOMATIC_VEP.vcf.gz                                 VEP-annotated somatic small variants
 ├── severus_somatic.vcf.gz                               Severus SV calls
-├── SV_filtered_with_gene_annotations.tsv                Severus SV gene annotations
+├── *_SV_VEP.vcf.gz                                      VEP-annotated SVs
+├── deepsomatic/*.vcf.gz                                 DeepSomatic calls (matched on directory)
 ├── *.segments_raw.txt, *.purityploidy.txt               ASCAT
-├── *.mosdepth.summary.txt, *.mosdepth.global.dist.txt    mosdepth (tumor)
-├── *_cramino.txt, *.flagstat, *.stats                    cramino / samtools (tumor)
-└── normal/                                               same QC file set, normal side (matched mode only)
+├── *.mosdepth.summary.txt, *.mosdepth.global.dist.txt   mosdepth (tumour)
+├── *_cramino.txt, *.flagstat, *.stats                   cramino / samtools (tumour)
+├── wakhan/                                              Wakhan copy-number solutions
+└── **/normal/**                                         same QC file set, normal side
+                                                         (matched mode; e.g. qc/normal/)
 ```
 
-The somatic small-variant caller VCF used for VAF (ClairS-TO / ClairS) has an ambiguous, generic
-filename and can't be discovered reliably, so it's passed explicitly via `--somatic-vcf`; which
-column it populates is determined by `--mode`.
+Normal-side QC is picked up from any `normal/` directory in the tree, wherever the pipeline
+nests it. The ClairS / ClairS-TO VCF used for VAF has an ambiguous, generic filename and can't
+be discovered reliably, so it's passed explicitly via `--somatic-vcf`; which column it populates
+is determined by `--mode`.
+
+`*_SOMATIC_VEP.vcf.gz` is a *merged* multi-caller VCF — it carries germline calls
+(DeepVariant, Clair3) alongside somatic ones, tagged in `INFO/CALLER`. The report keeps only
+`PASS` records from a somatic caller (ClairS, ClairS-TO, DeepSomatic). Single-caller VEP VCFs
+with no `CALLER` tag are used as-is.
 
 Missing files are handled gracefully: the corresponding report section shows a "not available" notice.
 
