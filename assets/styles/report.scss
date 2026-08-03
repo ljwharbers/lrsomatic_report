@@ -126,6 +126,7 @@ $border-radius-lg:     12px;
   --metric-panel-svs:  #17877a;
   --metric-tmb:        #{$report-success};
   --metric-error:      #{$report-text-muted};
+  --metric-phased:     #4a6d8a;
 }
 
 // ============================================================
@@ -418,6 +419,7 @@ blockquote {
   &.metric-panel-svs  { --_accent: var(--metric-panel-svs); }
   &.metric-tmb        { --_accent: var(--metric-tmb); }
   &.metric-error      { --_accent: var(--metric-error); }
+  &.metric-phased     { --_accent: var(--metric-phased); }
 
   // staggered reveal
   &:nth-child(1) { animation-delay: 0.02s; }
@@ -430,6 +432,7 @@ blockquote {
   &:nth-child(8) { animation-delay: 0.30s; }
   &:nth-child(9) { animation-delay: 0.34s; }
   &:nth-child(10){ animation-delay: 0.38s; }
+  &:nth-child(11){ animation-delay: 0.42s; }
 }
 
 @keyframes metric-rise {

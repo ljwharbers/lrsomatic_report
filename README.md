@@ -4,8 +4,9 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 
 - **Summary header**: purity, ploidy, coverage, N50, variant counts
 - **Circos plot**: somatic SNVs (6-class SBS colours), non-BND SVs, ASCAT copy number, translocation links
-- **Interactive variant table**: VEP-annotated somatic small variants filtered to a gene panel of interest, with a per-caller VAF column (ClairS-TO / ClairS)
+- **Interactive variant table**: VEP-annotated somatic small variants filtered to a gene panel of interest, with VAF, depth and phasing
 - **Interactive SV table**: Severus structural variants annotated with gene overlaps, filtered to the gene panel
+- **Phasing**: per-chromosome WhatsHap statistics (germline)
 - **QC details**: mosdepth coverage, samtools flagstat, cramino read stats
 
 ## Quick start
@@ -13,24 +14,17 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 ```bash
 S=/path/to/CCS15-ONT
 
-# matched — ClairS splits its output, so pass both files
 Rscript bin/render_report.R \
   --sample-dir  $S \
   --sample-id   CCS15-ONT \
   --sex         male \
-  --mode        matched \
-  --somatic-vcf $S/variants/clairs/snvs.vcf.gz,$S/variants/clairs/indel.vcf.gz \
   --reference   auto            # auto-detects t2t vs hg38 from VCF headers
-
-# tumour-only — ClairS-TO writes a single combined VCF
-Rscript bin/render_report.R \
-  --sample-dir  $S-TO --sample-id CCS15-ONT-TO --sex male \
-  --mode        tumour-only \
-  --somatic-vcf $S-TO/variants/clairsto/somatic.vcf.gz \
-  --reference   auto
 ```
 
 The output file `CCS15-ONT_report.html` will be written to the current directory.
+
+Matched and tumour-only runs take the same command: the run mode and every input file
+are discovered from the sample directory.
 
 ## All options
 
@@ -39,14 +33,14 @@ The output file `CCS15-ONT_report.html` will be written to the current directory
 --sample-id    Sample identifier (default: directory name)
 --reference    t2t | hg38 | auto  (default: auto)
 --sex          male | female | XY | XX  (required)
---mode         matched | tumour-only  (required)
---somatic-vcf  Path to the ClairS somatic small-variant VCF used for VAF (required).
-               Comma-separate several paths when the caller splits its output.
-               DeepSomatic is discovered automatically and needs no flag.
 --gene-panel   Builtin panel name (e.g. lymphoid) or path to a custom TSV  (default: lymphoid)
 --output       Output HTML path  (default: <sample-id>_report.html in current dir)
 --title        Report title
 ```
+
+> **Changed:** `--mode` and `--somatic-vcf` were removed. Run mode is derived from whether
+> normal-side QC is present, and the VCF supplying VAF is now discovered (see below), so
+> neither needs to be declared. Scripts passing them will fail on an unknown option.
 
 ## Gene panels
 
@@ -71,28 +65,49 @@ structure underneath it — for example:
 ```
 CCS15-ONT/
 ├── *_SOMATIC_VEP.vcf.gz                                 VEP-annotated somatic small variants
+├── variants/phased/somatic_smallvariants.vcf.gz         VAF / depth / phasing source
 ├── severus_somatic.vcf.gz                               Severus SV calls
 ├── *_SV_VEP.vcf.gz                                      VEP-annotated SVs
-├── deepsomatic/*.vcf.gz                                 DeepSomatic calls (matched on directory)
 ├── *.segments_raw.txt, *.purityploidy.txt               ASCAT
 ├── *.mosdepth.summary.txt, *.mosdepth.global.dist.txt   mosdepth (tumour)
 ├── *_cramino.txt, *.flagstat, *.stats                   cramino / samtools (tumour)
+├── qc/whatshap_stats/*_whatshap_stats.tsv               phasing statistics (germline)
 ├── wakhan/                                              Wakhan copy-number solutions
 └── **/normal/**                                         same QC file set, normal side
                                                          (matched mode; e.g. qc/normal/)
 ```
 
 Normal-side QC is picked up from any `normal/` directory in the tree, wherever the pipeline
-nests it. The ClairS / ClairS-TO VCF used for VAF has an ambiguous, generic filename and can't
-be discovered reliably, so it's passed explicitly via `--somatic-vcf`; which column it populates
-is determined by `--mode`.
+nests it, and is also what determines the run mode.
 
-`*_SOMATIC_VEP.vcf.gz` is a *merged* multi-caller VCF — it carries germline calls
-(DeepVariant, Clair3) alongside somatic ones, tagged in `INFO/CALLER`. The report keeps only
-`PASS` records from a somatic caller (ClairS, ClairS-TO, DeepSomatic). Single-caller VEP VCFs
-with no `CALLER` tag are used as-is.
+**Small variants come from the VEP annotation only.** `*_SOMATIC_VEP.vcf.gz` defines the
+variant set; VAF, depth, genotype and phase set are joined from the VCF that VEP annotated —
+`variants/phased/somatic_smallvariants.vcf.gz`. Runs predating `variants/phased/` fall back to
+`variants/clairs{,to}/somatic.vcf.gz` (then any non-germline VCF in those directories), which
+yields VAF and depth but no phase set. If none is found the table still renders, without
+those columns.
+
+VEP writes indels at a different position and sometimes in a different allele notation than
+the VCF it was given, so the join is made on a normalised key — see `variant_key()` in
+`R/parse_smallvariants.R`.
+
+`*_SOMATIC_VEP.vcf.gz` ships in two formats. Usually it is VEP *default text output* despite
+the `.vcf.gz` name. If VEP was run with `--vcf` it is a genuine VCF with a `CSQ` field, and
+may be a *merged* multi-caller VCF carrying germline calls (DeepVariant, Clair3) alongside
+somatic ones, tagged in `INFO/CALLER`; the report then keeps only `PASS` records from a
+somatic caller (ClairS, ClairS-TO, DeepSomatic). Both formats are detected automatically.
 
 Missing files are handled gracefully: the corresponding report section shows a "not available" notice.
+
+### Not covered: methylation
+
+There is no methylation section. The only methylation output the pipeline publishes is
+`methylation/<type>/modkit_pileup/<id>.bed.gz` — measured at 38–42 GB gzipped per sample,
+unfiltered and with no tabix index, which cannot be read at render time.
+
+`modkit pileup` already runs with `--bgzf`, so emitting a `tabix -p bed` index next to the
+`.bed.gz` would be enough to unblock this: region queries on an indexed pileup measured
+~0.16 s per Mb, making a binned genome-wide profile or per-locus lookup practical.
 
 ## Supported references
 
