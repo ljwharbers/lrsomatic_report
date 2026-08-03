@@ -24,12 +24,6 @@ option_list = list(
               help = "Reference genome: t2t | hg38 | auto (default: auto)"),
   make_option("--sex",         type = "character", default = NULL,
               help = "Biological sex: male | female | XY | XX (required)"),
-  make_option("--mode",        type = "character", default = NULL,
-              help = "Run mode: matched | tumour-only (required)"),
-  make_option("--somatic-vcf", type = "character", default = NULL,
-              help = paste("Path to the ClairS somatic small-variant VCF used for VAF",
-                           "(required). Comma-separate several paths when the caller",
-                           "splits its output, e.g. snvs.vcf.gz,indel.vcf.gz")),
   make_option("--gene-panel",  type = "character", default = "lymphoid",
               help = "Gene panel: builtin name (lymphoid) or path to TSV (default: lymphoid)"),
   make_option("--output",      type = "character", default = NULL,
@@ -45,18 +39,11 @@ abort = function(...) { cat("ERROR:", ..., "\n"); quit(status = 1) }
 
 if (is.null(opt[["sample-dir"]])) abort("--sample-dir is required")
 if (is.null(opt[["sex"]]))        abort("--sex is required")
-if (is.null(opt[["mode"]]))       abort("--mode is required (matched | tumour-only)")
-if (!opt[["mode"]] %in% c("matched", "tumour-only"))
-  abort("--mode must be 'matched' or 'tumour-only'")
-if (is.null(opt[["somatic-vcf"]])) abort("--somatic-vcf is required")
 
 sample_dir  = normalizePath(opt[["sample-dir"]], mustWork = TRUE)
 sample_id   = if (!is.null(opt[["sample-id"]])) opt[["sample-id"]] else basename(sample_dir)
 sex         = tolower(trimws(opt[["sex"]]))
 sex         = switch(sex, xy = "male", xx = "female", sex)  # normalise XY/XX
-mode        = opt[["mode"]]
-somatic_vcf = normalizePath(trimws(strsplit(opt[["somatic-vcf"]], ",", fixed = TRUE)[[1]]),
-                            mustWork = TRUE)
 
 gene_panel = opt[["gene-panel"]]
 output     = if (!is.null(opt[["output"]])) opt[["output"]] else
@@ -75,9 +62,11 @@ default_panel = if (file.exists(file.path(repo_dir, "assets", "gene_lists",
 
 # ---- Locate per-tool outputs ---------------------------------------------
 message("Locating outputs in: ", sample_dir)
-outputs = locate_outputs(sample_dir, sample_id, mode, somatic_vcf)
+outputs = locate_outputs(sample_dir, sample_id)
 message("Run mode: ", outputs$mode)
 message("VEP somatic: ", ifelse(is.null(outputs$vep_somatic), "NOT FOUND", outputs$vep_somatic))
+message("Somatic VAF VCF: ", ifelse(is.null(outputs$somatic_vaf_vcf), "NOT FOUND",
+                                    paste(outputs$somatic_vaf_vcf, collapse = ", ")))
 message("ASCAT segments: ", ifelse(is.null(outputs$ascat_segments), "NOT FOUND", outputs$ascat_segments))
 
 # ---- Auto-detect reference -----------------------------------------------

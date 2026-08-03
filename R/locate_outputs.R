@@ -3,7 +3,7 @@
 # directory tree, so files are matched by their distinctive filename suffix.
 # Returns a named list; any missing optional file is NULL.
 
-locate_outputs = function(sample_dir, sample_id, mode, somatic_vcf) {
+locate_outputs = function(sample_dir, sample_id) {
   d = sample_dir  # shorthand
 
   # First recursive hit under `root` matching a filename pattern
@@ -31,19 +31,20 @@ locate_outputs = function(sample_dir, sample_id, mode, somatic_vcf) {
   # --- small variants -------------------------------------------------------
   vep_somatic = find1("_SOMATIC_VEP\\.vcf\\.gz$")
 
-  # The ClairS VCF used for VAF is ambiguous by filename alone (e.g. a generic
-  # "somatic.vcf.gz" shared across callers) so it is passed in explicitly rather than
-  # discovered; which slot it fills depends on the run mode. It may be several paths,
-  # since matched-mode ClairS splits into snvs.vcf.gz + indel.vcf.gz.
-  clairs_somatic   = if (mode == "matched")     somatic_vcf else NULL
-  clairsto_somatic = if (mode == "tumour-only") somatic_vcf else NULL
-
-  # DeepSomatic, by contrast, is discoverable: its output is named "<sample>.vcf.gz",
-  # which only the containing directory disambiguates — so match on the full path.
-  deepsomatic_vcf = {
-    hits = list.files(d, pattern = "\\.vcf\\.gz$", recursive = TRUE, full.names = TRUE)
-    hits = hits[grepl("/deepsomatic/", hits, fixed = TRUE)]
-    if (length(hits) > 0) hits[1] else NULL
+  # VAF, depth and phasing come from the VCF that VEP annotated, not from a separate
+  # caller VCF. Preferred is the phased somatic VCF, which is what the pipeline feeds to
+  # VEP and which additionally carries FORMAT/PS. Runs predating variants/phased/ fall back
+  # to the raw ClairS(-TO) output, matched on the containing directory because the
+  # basename ("somatic.vcf.gz") is shared across callers. The clairs*/ fallback may return
+  # several paths — parse_caller_vcf() stacks them.
+  somatic_vaf_vcf = {
+    phased = file.path(d, "variants", "phased", "somatic_smallvariants.vcf.gz")
+    if (file.exists(phased)) phased else {
+      vcfs = list.files(d, pattern = "\\.vcf\\.gz$", recursive = TRUE, full.names = TRUE)
+      named = vcfs[grepl("/clairs(to)?/somatic\\.vcf\\.gz$", vcfs)]
+      any_c = vcfs[grepl("/clairs(to)?/", vcfs) & !grepl("/germline\\.vcf\\.gz$", vcfs)]
+      if (length(named) > 0) named[1] else if (length(any_c) > 0) any_c else NULL
+    }
   }
 
   # --- structural variants ---------------------------------------------------
@@ -80,6 +81,10 @@ locate_outputs = function(sample_dir, sample_id, mode, somatic_vcf) {
   # the QC section renders a tumour/normal comparison only if there is normal data.
   has_normal = !is.null(normal_mosdepth_summary) || !is.null(normal_cramino)
 
+  # Run mode is derived from the same evidence rather than declared by the caller; its
+  # only consumer is the hero badge in templates/sections/_header.qmd.
+  mode = if (has_normal) "matched" else "tumour-only"
+
   # --- Wakhan (optional) -----------------------------------------------------
   wakhan_dir = file.path(d, "wakhan")
   has_wakhan = dir.exists(wakhan_dir)
@@ -95,9 +100,7 @@ locate_outputs = function(sample_dir, sample_id, mode, somatic_vcf) {
   list(
     mode             = mode,
     vep_somatic      = vep_somatic,
-    clairsto_somatic = clairsto_somatic,
-    clairs_somatic   = clairs_somatic,
-    deepsomatic_vcf  = deepsomatic_vcf,
+    somatic_vaf_vcf  = somatic_vaf_vcf,
     ascat_segments   = ascat_segments_raw,
     ascat_purityploidy = ascat_purityploidy,
     mosdepth_summary = mosdepth_summary,

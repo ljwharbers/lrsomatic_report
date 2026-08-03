@@ -52,6 +52,12 @@ div(class = "metric-grid",
   card("Error rate",
        if (!is.null(samtools_stats) && !is.na(samtools_stats$error_rate))
          paste0(formatC(samtools_stats$error_rate * 100, format = "f", digits = 3), "%") else "N/A",
-       "metric-error")
+       "metric-error"),
+  card("Phased variants",
+       { w = SECTION_DATA$whatshap$all
+         if (!is.null(w) && !is.na(w$phased_fraction))
+           paste0(fmt_val(w$phased_fraction * 100, 1), "%") else "N/A" },
+       "metric-phased",
+       subtitle = "germline, WhatsHap")
 )
 ```
