@@ -31,7 +31,9 @@ option_list = list(
   make_option("--mode",        type = "character", default = NULL,
               help = "Run mode: matched | tumour-only (required)"),
   make_option("--somatic-vcf", type = "character", default = NULL,
-              help = "Path to the somatic small-variant caller VCF used for VAF (required)"),
+              help = paste("Path to the ClairS somatic small-variant VCF used for VAF",
+                           "(required). Comma-separate several paths when the caller",
+                           "splits its output, e.g. snvs.vcf.gz,indel.vcf.gz")),
   make_option("--gene-panel",  type = "character", default = "lymphoid",
               help = "Gene panel: builtin name (lymphoid) or path to TSV (default: lymphoid)"),
   make_option("--output",      type = "character", default = NULL,
@@ -57,7 +59,8 @@ sample_id   = if (!is.null(opt[["sample-id"]])) opt[["sample-id"]] else basename
 sex         = tolower(trimws(opt[["sex"]]))
 sex         = switch(sex, xy = "male", xx = "female", sex)  # normalise XY/XX
 mode        = opt[["mode"]]
-somatic_vcf = normalizePath(opt[["somatic-vcf"]], mustWork = TRUE)
+somatic_vcf = normalizePath(trimws(strsplit(opt[["somatic-vcf"]], ",", fixed = TRUE)[[1]]),
+                            mustWork = TRUE)
 
 gene_panel = opt[["gene-panel"]]
 output     = if (!is.null(opt[["output"]])) opt[["output"]] else
