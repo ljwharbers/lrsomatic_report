@@ -71,12 +71,21 @@ parse_vep_text = function(vep_file) {
   setnames(dt, old = "Gene",              new = "gene_id",     skip_absent = TRUE)
   setnames(dt, old = "Consequence",       new = "consequence", skip_absent = TRUE)
 
-  # Parse Location → chrom, pos (format: "chr1:3506" or "chr1:3506-3510")
-  dt[, chrom := sub(":.*", "", Location)]
-  dt[, pos   := as.integer(sub(".*:(\\d+).*", "\\1", Location))]
+  # Coordinates and alleles both come from variant_id ("chr1_3506_A/G") wherever it has
+  # that canonical shape, which is what VEP synthesises for VCF input without an ID.
+  # Mixing the two sources is not safe: for an insertion reported in VEP's dash form,
+  # Location's start is one base left of the position variant_id names
+  # ("chr1_197488_-/G" has Location "chr1:197487-197488"), which then fails to join to
+  # anything. Location remains the fallback for rows carrying a real VCF ID instead.
+  vid = "^.+_[0-9]+_[^_]+/[^_]+$"
+  dt[, from_vid := grepl(vid, variant_id)]
+
+  dt[, chrom := ifelse(from_vid, sub("_[0-9]+_[^_]+$", "", variant_id),
+                                 sub(":.*", "", Location))]
+  dt[, pos   := as.integer(ifelse(from_vid, sub(".*_([0-9]+)_[^_]+$", "\\1", variant_id),
+                                            sub(".*:(\\d+).*", "\\1", Location)))]
   dt[, chrom := ensure_chr_prefix(chrom)]
 
-  # Parse variant_id → ref, alt ("chr1_3506_A/G")
   dt[, ref := sub(".*_([^/]+)/.*", "\\1", variant_id)]
   dt[, alt := sub(".*/", "", variant_id)]
 
@@ -213,10 +222,10 @@ parse_vep_vcf = function(vep_file) {
               existing, dbsnp, cosmic, sift, polyphen, caller)]
 }
 
-# Parse a raw caller VCF for variant coordinates + VAF.
+# Parse a raw caller VCF for variant coordinates, VAF, depth and phasing.
 # `vcf_file` may be several paths, in which case they are read and stacked into one
 # table — ClairS splits its matched-mode output into snvs.vcf.gz + indel.vcf.gz.
-# Returns data.table with: chrom, pos, ref, alt, vaf, dp, caller
+# Returns data.table with: chrom, pos, ref, alt, vaf, dp, gt, ps, caller
 parse_caller_vcf = function(vcf_file, caller_name = "unknown") {
   if (is.null(vcf_file)) return(NULL)
   if (length(vcf_file) > 1) {
@@ -245,40 +254,82 @@ parse_caller_vcf = function(vcf_file, caller_name = "unknown") {
 
   dt[, CHROM := ensure_chr_prefix(CHROM)]
 
-  # Extract AF and DP from FORMAT + SAMPLE1 columns
-  # Work format-group by format-group to avoid splitting every single row redundantly
+  # Extract AF, DP, GT and PS from the FORMAT + SAMPLE1 columns.
+  # Work format-group by format-group to avoid splitting every single row redundantly.
   fmt_groups = unique(dt$FORMAT)
-  vaf_list = vector("numeric", nrow(dt))
-  dp_list  = vector("integer", nrow(dt))
+  vaf_list = rep(NA_real_,      nrow(dt))
+  dp_list  = rep(NA_integer_,   nrow(dt))
+  gt_list  = rep(NA_character_, nrow(dt))
+  ps_list  = rep(NA_character_, nrow(dt))
 
   for (fmt in fmt_groups) {
     idx_rows = which(dt$FORMAT == fmt)
-    fields = strsplit(fmt, ":", fixed = TRUE)[[1]]
-    af_idx = match("AF", fields)
-    dp_idx = match("DP", fields)
-    samples = dt$SAMPLE1[idx_rows]
-    split_s = strsplit(samples, ":", fixed = TRUE)
+    fields  = strsplit(fmt, ":", fixed = TRUE)[[1]]
+    split_s = strsplit(dt$SAMPLE1[idx_rows], ":", fixed = TRUE)
 
-    if (!is.na(af_idx)) {
-      vaf_list[idx_rows] = vapply(split_s, function(x)
-        if (length(x) >= af_idx) suppressWarnings(as.numeric(x[af_idx])) else NA_real_,
-        numeric(1))
-    } else {
-      vaf_list[idx_rows] = NA_real_
+    # One FORMAT field, by name, across this group's rows
+    field = function(name) {
+      i = match(name, fields)
+      if (is.na(i)) return(rep(NA_character_, length(split_s)))
+      vapply(split_s, function(x) if (length(x) >= i) x[i] else NA_character_,
+             character(1))
     }
-    if (!is.na(dp_idx)) {
-      dp_list[idx_rows] = vapply(split_s, function(x)
-        if (length(x) >= dp_idx) suppressWarnings(as.integer(x[dp_idx])) else NA_integer_,
-        integer(1))
-    } else {
-      dp_list[idx_rows] = NA_integer_
-    }
+
+    vaf_list[idx_rows] = suppressWarnings(as.numeric(field("AF")))
+    dp_list[idx_rows]  = suppressWarnings(as.integer(field("DP")))
+    gt_list[idx_rows]  = field("GT")
+    ps_list[idx_rows]  = field("PS")
   }
 
-  dt[, vaf    := vaf_list]
-  dt[, dp     := dp_list]
-  dt[, caller := caller_name]
-  dt[, .(chrom = CHROM, pos = POS, ref = REF, alt = ALT, vaf, dp, caller)]
+  # Unphased records carry "." for PS and a "/"-separated GT. Blank the placeholders so
+  # the report shows an empty cell rather than a bare ".".
+  ps_list[!is.na(ps_list) & ps_list == "."] = NA_character_
+  gt_list[!is.na(gt_list) & gt_list %in% c(".", "./.")] = NA_character_
+
+  data.table(chrom = dt$CHROM, pos = dt$POS, ref = dt$REF, alt = dt$ALT,
+             vaf = vaf_list, dp = dp_list, gt = gt_list, ps = ps_list,
+             caller = caller_name)
+}
+
+# Canonical variant key, used to join VEP annotation rows to the VCF they came from.
+#
+# VEP always reports an indel one base to the right of the VCF anchor, and writes the
+# alleles either as the raw VCF pair or in its own trimmed form with a dash for the empty
+# side — which of the two depends on the VEP version:
+#
+#   VCF record            VEP Uploaded_variation   allele notation
+#   chr1 1871654 TG  T    chr1_1871655_TG/T        raw
+#   chr1 14553006 G  GA   chr1_14553007_G/GA       raw
+#   chr1 192936 GAATA G   chr1_192937_AATA/-       trimmed + dash
+#   chr1 197487 A    AG   chr1_197488_-/G          trimmed + dash
+#
+# All four reconcile in one space: trimmed alleles (anchor base dropped, empty side
+# written "-") at the VCF anchor position + 1. SNVs and equal-length MNVs have no anchor
+# base and are keyed verbatim.
+#
+# This relies on `pos` coming from VEP's variant_id, which is consistently the shifted
+# position — the Location column is not (see parse_vep_text()).
+#
+# `space` is "vcf" for records read from a VCF, "vep" for rows read from VEP output.
+variant_key = function(chrom, pos, ref, alt, space = c("vcf", "vep")) {
+  space = match.arg(space)
+  ref = toupper(as.character(ref)); alt = toupper(as.character(alt))
+  pos = as.integer(pos)
+
+  trim = function(x) { t = substr(x, 2L, nchar(x)); ifelse(t == "", "-", t) }
+
+  dash     = ref == "-" | alt == "-"   # already trimmed by VEP
+  is_indel = dash | nchar(ref) != nchar(alt)
+
+  # Raw allele pairs still need the anchor base dropped; dash forms are already trimmed.
+  need_trim = is_indel & !dash
+
+  # Only the VCF side needs shifting — VEP has already done it.
+  key_pos = ifelse(space == "vcf" & is_indel, pos + 1L, pos)
+  key_ref = ifelse(need_trim, trim(ref), ref)
+  key_alt = ifelse(need_trim, trim(alt), alt)
+
+  paste(chrom, key_pos, key_ref, key_alt, sep = "|")
 }
 
 # Classify SNV into 6 SBS mutation categories (C/T-ref normalised)
@@ -291,10 +342,11 @@ classify_mut = function(ref, alt) {
   paste0(norm_ref, ">", norm_alt)
 }
 
-# Build the small-variant display table:
-#   canonical rows from VEP text, per-caller VAFs joined on position.
+# Build the small-variant display table: canonical rows from the VEP annotation, with
+# VAF / depth / phasing joined from the VCF that VEP annotated (see `somatic_vaf_vcf` in
+# locate_outputs.R).
 # gene_panel: character vector of HGNC symbols to keep, or NULL to return all variants.
-build_variant_table = function(vep_data, caller_list, gene_panel = NULL) {
+build_variant_table = function(vep_data, vaf_data, gene_panel = NULL) {
   if (is.null(vep_data) || nrow(vep_data) == 0) return(NULL)
 
   # Impact ranking for deduplication
@@ -317,34 +369,24 @@ build_variant_table = function(vep_data, caller_list, gene_panel = NULL) {
   setorder(vep_data, impact_rank)
   vep_data = unique(vep_data, by = key_cols)
 
-  # Join key for caller data
-  vep_data[, join_key := paste(chrom, pos, ref, alt, sep = "|")]
+  # Join VEP rows to the VCF they were produced from, via the canonical key that
+  # reconciles the two sides' indel representations (see variant_key()).
+  vep_data[, join_key := variant_key(chrom, pos, ref, alt, space = "vep")]
 
-  # Left-join per-caller VAFs
-  for (nm in names(caller_list)) {
-    cdt = caller_list[[nm]]
-    vaf_col = paste0("vaf_", nm)
-    if (is.null(cdt) || nrow(cdt) == 0) {
-      vep_data[, (vaf_col) := NA_real_]
-      next
-    }
-    cdt_sub = cdt[, .(join_key = paste(chrom, pos, ref, alt, sep = "|"), vaf)]
-    cdt_sub = unique(cdt_sub, by = "join_key")
-    vep_data = merge(vep_data, cdt_sub, by = "join_key", all.x = TRUE)
-    setnames(vep_data, "vaf", vaf_col)
+  if (!is.null(vaf_data) && nrow(vaf_data) > 0) {
+    vdt = vaf_data[, .(join_key = variant_key(chrom, pos, ref, alt, space = "vcf"),
+                       vaf, dp, gt, ps)]
+    vdt = unique(vdt, by = "join_key")
+    vep_data = merge(vep_data, vdt, by = "join_key", all.x = TRUE)
+  } else {
+    vep_data[, `:=`(vaf = NA_real_, dp = NA_integer_,
+                    gt  = NA_character_, ps = NA_character_)]
   }
 
-  # Summarise which callers reported each variant. A merged VEP VCF states this outright
-  # in INFO/CALLER; otherwise fall back to inferring it from which VAF joins landed.
-  vaf_cols = paste0("vaf_", names(caller_list))
-  vaf_cols = vaf_cols[vaf_cols %in% names(vep_data)]
+  # Which caller reported each variant. A merged multi-caller VEP VCF states this outright
+  # in INFO/CALLER; the VEP text format carries no per-variant caller, leaving this empty.
   if ("caller" %in% names(vep_data) && any(!is.na(vep_data$caller))) {
     vep_data[, callers := caller]
-  } else if (length(vaf_cols) > 0) {
-    vep_data[, callers := {
-      .sd = .SD
-      apply(.sd, 1, function(r) paste(names(caller_list)[!is.na(r)], collapse = ","))
-    }, .SDcols = vaf_cols]
   } else {
     vep_data[, callers := ""]
   }
@@ -355,7 +397,8 @@ build_variant_table = function(vep_data, caller_list, gene_panel = NULL) {
 
   display_cols = c("symbol", "chrom", "pos", "ref", "alt",
                    "consequence", "impact", "hgvsp",
-                   vaf_cols, "callers", "cosmic", "dbsnp", "sift", "polyphen")
+                   "vaf", "dp", "gt", "ps",
+                   "callers", "cosmic", "dbsnp", "sift", "polyphen")
   display_cols = display_cols[display_cols %in% names(vep_data)]
   vep_data[, ..display_cols]
 }
