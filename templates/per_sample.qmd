@@ -15,8 +15,8 @@ params:
   sample_dir:    ""
   reference:     "t2t"
   sex:           "female"
-  gene_panel:    "lymphoid"
-  default_panel: "lymphoid"
+  gene_panel:    "none"     # "none" | builtin panel name | path to a TSV
+  default_panel: "__all__"  # panel selected on load; "__all__" = no filter
   all_panels:    NULL   # named list from load_all_gene_panels()
   title:         "LRSomatic Report"
   repo_dir:      "."
@@ -65,11 +65,13 @@ chrom_lens   = load_chrom_lengths(params$reference, file.path(repo_dir, "assets"
 chromosomes  = chromosomes_for_sex(params$sex)
 chromosomes  = chromosomes[chromosomes %in% unique(cytobands$chrom)]
 
-# Load gene panel
+# Load the gene panel selected on load (NULL when --gene-panel none, i.e. no
+# filtering). Only the "Panel variants"/"Panel SVs" summary cards use it — the
+# tables themselves are built unfiltered and filtered client-side.
 panel_arg = params$gene_panel
 panel_genes = tryCatch(
   resolve_gene_panel(panel_arg, file.path(repo_dir, "assets")),
-  error = function(e) { message("Gene panel error: ", e$message); character(0) }
+  error = function(e) { message("Gene panel error: ", e$message); NULL }
 )
 
 # Parse ASCAT
@@ -128,12 +130,17 @@ sv_table = SECTION_DATA$sv$table
 n_snv        = if (!is.null(vep_data)) nrow(unique(vep_data[, .(chrom, pos, ref, alt)])) else NA_integer_
 n_sv         = if (!is.null(SECTION_DATA$sv))
                  nrow(SECTION_DATA$sv$circos$nontrans) + nrow(SECTION_DATA$sv$circos$translocations) else NA_integer_
-n_panel_vars = if (!is.null(variant_table) && length(panel_genes) > 0)
+# No panel selected on load → the panel cards have nothing to count, so they read
+# "N/A" rather than a "0" that looks like "no panel genes hit".
+have_panel   = length(panel_genes) > 0
+n_panel_vars = if (!have_panel) NA_integer_ else
+               if (!is.null(variant_table))
                  sum(variant_table$symbol %in% panel_genes, na.rm = TRUE) else 0L
 # Gene-hits column differs by annotation source: "gene_hits" (VEP path) vs
 # "NHL_GENE_HITS" (gene-annotated TSV fallback path)
 sv_gene_col  = intersect(c("gene_hits", "NHL_GENE_HITS"), names(sv_table))
-n_panel_svs  = if (!is.null(sv_table) && nrow(sv_table) > 0 && length(panel_genes) > 0 && length(sv_gene_col) > 0)
+n_panel_svs  = if (!have_panel) NA_integer_ else
+               if (!is.null(sv_table) && nrow(sv_table) > 0 && length(sv_gene_col) > 0)
                  sum(vapply(sv_table[[sv_gene_col[1]]], function(h)
                    any(trimws(unlist(strsplit(as.character(h), "[;,]+"))) %in% panel_genes),
                    logical(1)), na.rm = TRUE) else 0L
@@ -186,7 +193,7 @@ cat("<script>\n", js_panels, "\n</script>\n", sep = "")
 
 ---
 
-*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.0*
+*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.1.0*
 
 ```{=html}
 <script>

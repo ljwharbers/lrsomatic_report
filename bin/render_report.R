@@ -28,8 +28,8 @@ option_list = list(
               help = "Reference genome: t2t | hg38 | auto (default: auto)"),
   make_option("--sex",         type = "character", default = NULL,
               help = "Biological sex: male | female | XY | XX (required)"),
-  make_option("--gene-panel",  type = "character", default = "lymphoid",
-              help = "Gene panel: builtin name (lymphoid) or path to TSV (default: lymphoid)"),
+  make_option("--gene-panel",  type = "character", default = "none",
+              help = "Gene panel applied on load: none | builtin name (lymphoid) | path to TSV (default: none, i.e. unfiltered)"),
   make_option("--output",      type = "character", default = NULL,
               help = "Output HTML path (default: <sample-id>_report.html in current dir)"),
   make_option("--title",       type = "character", default = NULL,
@@ -56,12 +56,31 @@ title      = if (!is.null(opt[["title"]])) opt[["title"]] else
              paste0("LRSomatic Report – ", sample_id)
 
 # ---- Load all available gene panels ----------------------------------------
+# The rendered report always ships every builtin panel so the reader can switch
+# panels client-side; --gene-panel only decides which one is selected on load.
+# "__all__" is the sentinel the report's JS uses for "no filter" — it must stay
+# in sync with templates/sections/_gene_filter.qmd and the search hook in
+# templates/per_sample.qmd.
 all_panels = load_all_gene_panels(file.path(repo_dir, "assets"))
-default_panel = if (file.exists(file.path(repo_dir, "assets", "gene_lists",
-                                            paste0(gene_panel, ".tsv")))) {
+default_panel = if (is_no_gene_panel(gene_panel)) {
+  gene_panel = "none"
+  "__all__"
+} else if (file.exists(file.path(repo_dir, "assets", "gene_lists",
+                                 paste0(gene_panel, ".tsv")))) {
   gene_panel
+} else if (file.exists(gene_panel)) {
+  # A user-supplied TSV: register it alongside the builtins so it can be
+  # selected on load (and switched away from and back to) in the report.
+  nm = tools::file_path_sans_ext(basename(gene_panel))
+  if (nm %in% names(all_panels)) nm = paste0(nm, "-custom")
+  all_panels[[nm]] = load_gene_panel(gene_panel)
+  # Absolute, because the template resolves it again from Quarto's own working
+  # directory (the copied template dir), not from where this script was invoked.
+  gene_panel = normalizePath(gene_panel)
+  nm
 } else {
-  if (length(all_panels) > 0) names(all_panels)[1] else "custom"
+  abort(paste0("--gene-panel not found: tried builtin '", gene_panel,
+               "' and as a file path. Use 'none' for no filtering."))
 }
 
 # ---- Locate per-tool outputs ---------------------------------------------
