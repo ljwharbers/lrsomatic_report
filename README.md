@@ -4,8 +4,8 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 
 - **Summary header**: purity, ploidy, coverage, N50, variant counts
 - **Circos plot**: somatic SNVs (6-class SBS colours), non-BND SVs, ASCAT copy number, translocation links
-- **Interactive variant table**: VEP-annotated somatic small variants filtered to a gene panel of interest, with VAF, depth and phasing
-- **Interactive SV table**: Severus structural variants annotated with gene overlaps, filtered to the gene panel
+- **Interactive variant table**: VEP-annotated somatic small variants, optionally filtered to a gene panel, with VAF, depth and phasing
+- **Interactive SV table**: Severus structural variants annotated with gene overlaps, sharing the same gene-panel filter
 - **Phasing**: per-chromosome WhatsHap statistics (germline)
 - **QC details**: mosdepth coverage, samtools flagstat, cramino read stats
 
@@ -26,6 +26,9 @@ The output file `CCS15-ONT_report.html` will be written to the current directory
 Matched and tumour-only runs take the same command: the run mode and every input file
 are discovered from the sample directory.
 
+Tables render unfiltered. Add `--gene-panel lymphoid` (or a path to your own TSV) to have a
+panel selected when the report opens — see [Gene panels](#gene-panels).
+
 ## All options
 
 ```
@@ -33,16 +36,24 @@ are discovered from the sample directory.
 --sample-id    Sample identifier (default: directory name)
 --reference    t2t | hg38 | auto  (default: auto)
 --sex          male | female | XY | XX  (required)
---gene-panel   Builtin panel name (e.g. lymphoid) or path to a custom TSV  (default: lymphoid)
+--gene-panel   none | builtin panel name (e.g. lymphoid) | path to a custom TSV
+               (default: none — tables render unfiltered)
 --output       Output HTML path  (default: <sample-id>_report.html in current dir)
 --title        Report title
 ```
 
-> **Changed:** `--mode` and `--somatic-vcf` were removed. Run mode is derived from whether
-> normal-side QC is present, and the VCF supplying VAF is now discovered (see below), so
-> neither needs to be declared. Scripts passing them will fail on an unknown option.
+> **Changed in v1.1.0:**
+> - `--mode` and `--somatic-vcf` were removed. Run mode is derived from whether normal-side
+>   QC is present, and the VCF supplying VAF is now discovered (see below), so neither needs
+>   to be declared. Scripts passing them will fail on an unknown option.
+> - `--gene-panel` now defaults to `none` instead of `lymphoid`: reports open unfiltered
+>   unless a panel is asked for. Pass `--gene-panel lymphoid` to restore the old default.
 
 ## Gene panels
+
+Reports are **unfiltered by default**. `--gene-panel` only chooses which panel is selected when
+the report opens; the rendered HTML always contains every variant and every builtin panel, so a
+reader can switch panels (or paste a custom gene list) in the browser without re-rendering.
 
 Built-in panels live in `assets/gene_lists/`. Each is a TSV with a `gene` column (HGNC symbols).
 
@@ -50,11 +61,13 @@ Built-in panels live in `assets/gene_lists/`. Each is a TSV with a `gene` column
 |---|---|
 | `lymphoid` | ~70 recurrently mutated genes in B-cell lymphomas (DLBCL, FL, CLL, MCL, BL, MALT) |
 
-To use a custom panel:
-
 ```bash
+--gene-panel lymphoid                # open with the builtin lymphoid panel applied
 --gene-panel /path/to/my_genes.tsv   # must have a 'gene' column or be a single-column file
 ```
+
+A `--gene-panel` value that is neither `none`, a builtin name, nor an existing file is an error —
+a typo will not silently produce an unfiltered report.
 
 ## Expected input layout
 
