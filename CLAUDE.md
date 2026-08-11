@@ -97,6 +97,7 @@ reference auto-detection into the change. Migrate it only together with a plan f
 - **Phasing statistics are germline.** `R/sections/whatshap.R` reads `qc/whatshap_stats/*_whatshap_stats.tsv`, which the pipeline generates from the phased *germline* VCF — every row's `file_name` is `germline_smallvariants.vcf.gz`. The header line starts with `#`, so `setnames(dt, sub("^#", "", names(dt)))` is required after `fread`, and `bp_per_block_sum` arrives as `integer64` and must be widened. `phased_fraction` is a 0–1 fraction. `qc/whatshap_stats/` is *not* `<type>`-scoped, unlike the rest of `qc/`, so a plain recursive match is correct.
 - **No methylation section, by decision.** The only methylation output the pipeline publishes is `methylation/<type>/modkit_pileup/<id>.bed.gz` — 38–42 GB gzipped per sample, unfiltered, no tabix index — which cannot be read at render time. `modkit pileup` already runs `--bgzf`, so publishing a `tabix -p bed` index alongside it would unblock this (region queries measured ~0.16 s/Mb on an indexed pileup). The ~1 GB indexed pileups and `*_island_methylation_summary*.tsv` files present under some sample dirs are **ad-hoc analysis outputs, not pipeline outputs** — inconsistent filenames, ambiguous suffix variants, partial coverage — so they are deliberately not wired up. A per-gene methylation view would additionally need a gene-coordinate asset for both references; `assets/references/` has only cytobands and chromosome lengths.
 - **Normal-side QC is found by path, not by a fixed root:** `find1_normal()` keeps recursive hits containing `/normal/` (mirroring `find1_tumor()`, which drops them), because the pipeline has moved this from a top-level `normal/` to `qc/normal/`. `has_normal` is derived from what was actually found rather than from `dir.exists()`.
+- **Gene-panel filtering is opt-in, and only client-side.** `--gene-panel` defaults to `none` — LRSomatic is a general somatic pipeline, so hiding non-panel variants on load is wrong for most runs. Three-way resolution in `resolve_gene_panel()`: the `none` sentinel returns `NULL`, a builtin name or an existing TSV path loads, and **anything else is an error** so a typo can't silently produce an unfiltered report. `filter_by_gene_panel(dt, NULL)` returns `dt` untouched, while an empty character vector still means a genuinely empty panel — the distinction matters, so don't collapse `NULL` and `character(0)`. Tables are always *built* unfiltered and filtered in the browser; `--gene-panel` only picks which option is selected on load, and a user-supplied TSV is registered alongside the builtins so it can be selected (previously the fallback silently reselected `lymphoid` for any non-builtin value). The `"__all__"` no-filter sentinel is shared by `bin/render_report.R`, `templates/sections/_gene_filter.qmd`, and the search hook in `per_sample.qmd` — change it in all three or none. The "Panel variants"/"Panel SVs" cards read `N/A` when no panel is applied, rather than a `0` that reads as "no panel genes hit".
 
 ## R package requirements
 
@@ -110,4 +111,14 @@ Tested with R 4.4.1 and Quarto 1.5.57.
 
 ## Tests
 
-`tests/` directory exists but is empty. Framework planned: `testthat`.
+`testthat`, in `tests/testthat/`: `test-utils.R`, `test-severus.R`,
+`test-smallvariants.R`. `setup.R` sources the `R/` files under test.
+
+```bash
+Rscript -e 'testthat::test_dir("tests/testthat")'
+```
+
+Run it from the repository root — `setup.R` derives `repo_root` from
+`dirname(dirname(getwd()))`, so it relies on testthat setting the working
+directory to `tests/testthat`. There is no CI; this and a full render are the
+only checks.

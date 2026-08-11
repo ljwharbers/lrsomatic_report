@@ -20,20 +20,20 @@ make_vep = function() {
 
 test_that("build_variant_table with NULL panel returns all variants", {
   vep = make_vep()
-  result = build_variant_table(vep, list(), gene_panel = NULL)
+  result = build_variant_table(vep, NULL, gene_panel = NULL)
   expect_equal(nrow(result), 3L)
   expect_true(all(c("MYC", "TP53", "KRAS") %in% result$symbol))
 })
 
 test_that("build_variant_table with panel filters to panel genes", {
   vep = make_vep()
-  result = build_variant_table(vep, list(), gene_panel = c("MYC", "TP53"))
+  result = build_variant_table(vep, NULL, gene_panel = c("MYC", "TP53"))
   expect_equal(nrow(result), 2L)
   expect_false("KRAS" %in% result$symbol)
 })
 
 test_that("build_variant_table with empty panel returns empty table", {
   vep = make_vep()
-  result = build_variant_table(vep, list(), gene_panel = character(0))
+  result = build_variant_table(vep, NULL, gene_panel = character(0))
   expect_equal(nrow(result), 0L)
 })

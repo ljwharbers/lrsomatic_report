@@ -39,13 +39,25 @@ load_gene_panel = function(path) {
   unique(dt[[gene_col]])
 }
 
-# Filter a data frame to rows where the gene column matches the panel
+# Filter a data frame to rows where the gene column matches the panel.
+# panel_genes = NULL means "no panel" and returns dt untouched; an empty
+# character vector is a genuinely empty panel and filters everything out.
 filter_by_gene_panel = function(dt, panel_genes, gene_col = "gene") {
+  if (is.null(panel_genes)) return(dt)
   dt[dt[[gene_col]] %in% panel_genes, ]
 }
 
-# Resolve a --gene-panel arg: either a builtin name ("lymphoid") or a file path
+# Is a --gene-panel argument the "no filtering" sentinel?
+is_no_gene_panel = function(panel_arg) {
+  is.null(panel_arg) || length(panel_arg) != 1 || is.na(panel_arg) ||
+    identical(tolower(trimws(panel_arg)), "none")
+}
+
+# Resolve a --gene-panel arg: the "none" sentinel (no filtering, returns NULL),
+# a builtin name ("lymphoid"), or a path to a TSV. A value that is neither is an
+# error rather than a silent fall-through to unfiltered output.
 resolve_gene_panel = function(panel_arg, assets_dir) {
+  if (is_no_gene_panel(panel_arg)) return(NULL)
   builtin_path = file.path(assets_dir, "gene_lists", paste0(panel_arg, ".tsv"))
   if (file.exists(builtin_path)) return(load_gene_panel(builtin_path))
   if (file.exists(panel_arg)) return(load_gene_panel(panel_arg))
