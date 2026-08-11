@@ -94,15 +94,9 @@ qc_normal_samtools_stats = parse_samtools_stats(outputs$normal_samtools_stats)
 # Parse VEP + raw callers
 vep_data = parse_vep(outputs$vep_somatic)
 
-caller_list = list()
-if (!is.null(outputs$clairsto_somatic))
-  caller_list$clairsto = parse_caller_vcf(outputs$clairsto_somatic, "clairsto")
-if (!is.null(outputs$clairs_somatic))
-  caller_list$clairs   = parse_caller_vcf(outputs$clairs_somatic, "clairs")
-if (!is.null(outputs$deepsomatic_vcf))
-  caller_list$deepsomatic = parse_caller_vcf(outputs$deepsomatic_vcf, "deepsomatic")
+vaf_data = parse_caller_vcf(outputs$somatic_vaf_vcf, "somatic")
 
-variant_table = build_variant_table(vep_data, caller_list, gene_panel = NULL)
+variant_table = build_variant_table(vep_data, vaf_data, gene_panel = NULL)
 tmb_info = compute_tmb(variant_table)
 
 # SNV data for circos (from VEP file — contains all somatic variants)
@@ -181,6 +175,10 @@ cat("<script>\n", js_panels, "\n</script>\n", sep = "")
 ---
 
 {{< include sections/_sv.qmd >}}
+
+---
+
+{{< include sections/_whatshap.qmd >}}
 
 ---
 

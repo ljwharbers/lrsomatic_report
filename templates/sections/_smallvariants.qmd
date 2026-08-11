@@ -2,14 +2,12 @@
 
 ```{r small-variant-table}
 if (!is.null(variant_table) && nrow(variant_table) > 0) {
-  # Format VAF columns as percentages
-  vaf_cols = grep("^vaf_", names(variant_table), value = TRUE)
+  # Format the VAF as a percentage
   dt_display = copy(variant_table)
-  for (vc in vaf_cols) {
-    dt_display[, (vc) := round(get(vc) * 100, 1)]
+  if ("vaf" %in% names(dt_display)) {
+    dt_display[, vaf := round(vaf * 100, 1)]
+    setnames(dt_display, "vaf", "VAF%")
   }
-  setnames(dt_display, vaf_cols,
-           sub("vaf_", "VAF% ", vaf_cols))
 
   DT::datatable(
     dt_display,
