@@ -23,7 +23,7 @@ option_list = list(
   make_option("--sample-dir",  type = "character", default = NULL,
               help = "Path to the sample output directory (required)"),
   make_option("--sample-id",   type = "character", default = NULL,
-              help = "Sample identifier, e.g. DLBCL3_pooled (required)"),
+              help = "Sample identifier, e.g. SAMPLE_ID (required)"),
   make_option("--reference",   type = "character", default = "auto",
               help = "Reference genome: t2t | hg38 | auto (default: auto)"),
   make_option("--sex",         type = "character", default = NULL,

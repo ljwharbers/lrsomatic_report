@@ -12,16 +12,16 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 ## Quick start
 
 ```bash
-S=/path/to/CCS15-ONT
+S=/path/to/sample-dir
 
 Rscript bin/render_report.R \
   --sample-dir  $S \
-  --sample-id   CCS15-ONT \
+  --sample-id   SAMPLE_ID \
   --sex         male \
   --reference   auto            # auto-detects t2t vs hg38 from VCF headers
 ```
 
-The output file `CCS15-ONT_report.html` will be written to the current directory.
+The output file `SAMPLE_ID_report.html` will be written to the current directory.
 
 Matched and tumour-only runs take the same command: the run mode and every input file
 are discovered from the sample directory.
@@ -76,7 +76,7 @@ The `--sample-dir` must be the root of a single-sample LRSomatic output. Files a
 structure underneath it — for example:
 
 ```
-CCS15-ONT/
+<sample-dir>/
 ├── *_SOMATIC_VEP.vcf.gz                                 VEP-annotated somatic small variants
 ├── variants/phased/somatic_smallvariants.vcf.gz         VAF / depth / phasing source
 ├── severus_somatic.vcf.gz                               Severus SV calls

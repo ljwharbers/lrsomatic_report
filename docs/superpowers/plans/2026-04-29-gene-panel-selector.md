@@ -755,21 +755,21 @@ git commit -m "feat: interactive gene panel dropdown with JS client-side filteri
 
 This task has no automated test (it requires a browser). Run manually against a real sample.
 
-- [ ] **Step 1: Render a report against the DLBCL3_pooled sample**
+- [ ] **Step 1: Render a report against a real sample**
 
 ```bash
 Rscript bin/render_report.R \
-  --sample-dir /staging/leuven/stg_00096/home/averham/LR_SOMATIC_T2T/DLBCL3_pooled \
-  --sample-id  DLBCL3_pooled \
+  --sample-dir /path/to/sample-dir \
+  --sample-id  SAMPLE_ID \
   --sex        male \
   --reference  auto \
-  --output     /tmp/DLBCL3_pooled_report.html
+  --output     "$TMPDIR/SAMPLE_ID_report.html"
 ```
 
 - [ ] **Step 2: Check HTML file size**
 
 ```bash
-du -sh /tmp/DLBCL3_pooled_report.html
+du -sh "$TMPDIR/SAMPLE_ID_report.html"
 ```
 
 If the file exceeds 150 MB, the report may be slow to open. In that case, open a follow-up plan to cap "All genes" to the union of all built-in panels rather than all 135k VEP rows.

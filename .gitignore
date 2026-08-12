@@ -1,1 +1,7 @@
 .worktrees/
+.claude/worktrees/
+
+# Rendered reports. These embed real sample data (sample IDs, variant tables),
+# and this repository is public -- never commit them.
+*.html
+._render/

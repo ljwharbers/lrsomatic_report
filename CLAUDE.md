@@ -9,10 +9,10 @@ Standalone R/Quarto reporting tool for the [LRSomatic](https://github.com/nf-cor
 ## Running the report
 
 ```bash
-S=/path/to/CCS15-ONT
+S=/path/to/sample-dir
 Rscript bin/render_report.R \
   --sample-dir  $S \
-  --sample-id   CCS15-ONT \
+  --sample-id   SAMPLE_ID \
   --sex         male \
   --reference   auto
 ```
