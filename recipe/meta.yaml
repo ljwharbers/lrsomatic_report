@@ -6,9 +6,7 @@ package:
 
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
-  # STALE — this is the v1.0.0 digest. Recompute once the v1.1.0 tag exists:
-  #   curl -sL https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v1.1.0.tar.gz | sha256sum
-  sha256: eea70f0c9ace0b4017e9823cf4eeda93f890aee9f4f10891c3408b0fa67a54f6
+  sha256: 67ddfbe8fcd0bf0bf5525d7cc93612e3ca9a02ef4976085c60c31fa41854102a
 
 build:
   number: 0

@@ -1,7 +1,15 @@
-sleep $(( $(date -d '17:30 today' +%s) - $(date +%s) )) && cd /lustre1/project/stg_00096/home/lharbers/repositories/lrsomatic_report && git
-  checkout -b frontend-redesign 2>/dev/null || git checkout frontend-redesign && claude -p 'Execute the plan at                                    
-  /user/leuven/364/vsc36452/.claude/plans/can-this-html-report-linear-scroll.md. The plan contains steps that ask for user approval on design      
-  tokens and mockups — skip those approval gates and proceed with sensible defaults appropriate for a somatic-variant clinical report. Render the  
-  DLBCL3_pooled sample at the end (per the Verification section) and save the new HTML next to the existing one as DLBCL3_pooled_report.v2.html.   
-  Commit each major step as a separate commit on a new branch frontend-redesign.' --permission-mode bypassPermissions > ~/claude-redesign-$(date
-  +%Y%m%d-%H%M).log 2>&1
+#!/usr/bin/env bash
+# Deferred-start helper: waits until a given wall-clock time, then runs a
+# long task in the repo. Fill in the placeholders before use.
+#
+# Kept as a template only -- do not commit real sample IDs, report filenames,
+# or absolute paths under a user's home directory. This repository is public.
+
+REPO=/path/to/lrsomatic_report
+START=17:30
+
+sleep $(( $(date -d "$START today" +%s) - $(date +%s) )) \
+  && cd "$REPO" \
+  && claude -p 'Execute the plan at <plan-path>. Render SAMPLE_ID at the end
+      (per the Verification section) and save the HTML outside the repo.' \
+      > ~/claude-run-$(date +%Y%m%d-%H%M).log 2>&1
