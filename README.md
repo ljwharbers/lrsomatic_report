@@ -100,6 +100,14 @@ variant set; VAF, depth, genotype and phase set are joined from the VCF that VEP
 yields VAF and depth but no phase set. If none is found the table still renders, without
 those columns.
 
+A footnote under the variant table names the file those columns actually came from and how
+many variants they cover. **One VCF supplies them for the whole table**, so if the run
+combined several somatic callers by consensus, the VAF, depth, genotype and phase set come
+from whichever caller won each merge and need not match the `callers` column beside them.
+Variants reported by more than one caller are highlighted in that column, and the footnote
+says so. (Only the joined columns are ambiguous — the variant *set* is taken per record from
+the VEP file.)
+
 VEP writes indels at a different position and sometimes in a different allele notation than
 the VCF it was given, so the join is made on a normalised key — see `variant_key()` in
 `R/parse_smallvariants.R`.
@@ -133,14 +141,21 @@ Auto-detection reads `##contig` lines from the VEP somatic VCF.
 
 ## R package requirements
 
+`recipe/meta.yaml` is the source of truth for runtime dependencies — it is what the
+Bioconda package and the pipeline's container are built from. The list below mirrors it;
+if the two ever disagree, the recipe is right.
+
 Install in your R environment if missing:
 
 ```r
-install.packages(c("data.table", "dplyr", "tidyr", "DT", "htmltools",
-                   "optparse", "quarto", "yaml", "ggplot2", "svglite"))
-BiocManager::install(c("circlize", "ComplexHeatmap", "GenomicRanges"))
-# paletteer, prismatic are optional (not required by this version)
+install.packages(c("data.table", "dplyr", "DT", "htmltools", "optparse",
+                   "quarto", "yaml", "ggplot2", "svglite", "knitr",
+                   "R.utils", "base64enc"))
+BiocManager::install("circlize")
 ```
+
+Plus the `quarto` CLI itself. `R.utils` is not called directly — `data.table::fread()`
+requires it to read the gzipped VCFs.
 
 Tested with R 4.4.1 and Quarto 1.5.57.
 
@@ -168,5 +183,4 @@ lrsomatic_report/
 ## Roadmap
 
 - **v2**: Cohort report (oncoprint, recurrence tables across multiple samples)
-- **v2**: Nextflow module wrapping this CLI as a final pipeline step
 - **v2**: Wakhan haplotype-resolved copy-number integration

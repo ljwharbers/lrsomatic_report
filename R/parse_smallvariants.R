@@ -291,6 +291,53 @@ parse_caller_vcf = function(vcf_file, caller_name = "unknown") {
              caller = caller_name)
 }
 
+# Header-only provenance for the VCF(s) that supplied VAF/DP/GT/PS.
+#
+# Which file this is matters to a reader: when the pipeline ran several somatic callers
+# through consensus, the FORMAT fields in the surviving VCF come from whichever caller won
+# each merge, so they need not correspond to the `callers` column beside them. The report
+# names the file rather than silently implying one caller — see the footnote in
+# templates/sections/_smallvariants.qmd.
+#
+# `vcf_files` may be several paths (parse_caller_vcf() stacks them; ClairS splits matched
+# mode into snvs.vcf.gz + indel.vcf.gz). Returns NULL when there is nothing to describe,
+# matching the graceful-missing contract of the parsers above. Only the header is read —
+# no record parsing — so this stays cheap on a multi-million-variant VCF.
+vaf_provenance = function(vcf_files, sample_dir = NULL) {
+  if (is.null(vcf_files) || length(vcf_files) == 0) return(NULL)
+  vcf_files = vcf_files[!is.na(vcf_files) & nzchar(vcf_files)]
+  if (length(vcf_files) == 0) return(NULL)
+
+  # Paths read better relative to the sample directory the caller passed in.
+  rel = function(p) {
+    if (is.null(sample_dir) || !nzchar(sample_dir)) return(p)
+    root = sub("/+$", "", normalizePath(sample_dir, mustWork = FALSE))
+    full = normalizePath(p, mustWork = FALSE)
+    if (startsWith(full, paste0(root, "/"))) substring(full, nchar(root) + 2L) else p
+  }
+
+  # "##source=Clair3" and friends. Plenty of VCFs carry no source line at all, which is why
+  # the footnote treats this as optional colour rather than the identifying fact.
+  read_sources = function(p) {
+    if (!file.exists(p)) return(character(0))
+    con = gzfile(p, "rb")
+    on.exit(close(con), add = TRUE)
+    out = character(0)
+    repeat {
+      line = readLines(con, n = 1, warn = FALSE)
+      if (length(line) == 0) break
+      if (!startsWith(line, "##")) break   # #CHROM or a malformed header ends the scan
+      if (startsWith(line, "##source=")) out = c(out, sub("^##source=", "", line))
+    }
+    out
+  }
+
+  list(
+    paths   = unname(vapply(vcf_files, rel, character(1))),
+    sources = unique(unlist(lapply(vcf_files, read_sources)))
+  )
+}
+
 # Canonical variant key, used to join VEP annotation rows to the VCF they came from.
 #
 # VEP always reports an indel one base to the right of the VCF anchor, and writes the
