@@ -37,3 +37,59 @@ test_that("build_variant_table with empty panel returns empty table", {
   result = build_variant_table(vep, NULL, gene_panel = character(0))
   expect_equal(nrow(result), 0L)
 })
+
+# --- vaf_provenance() -------------------------------------------------------
+
+# Write a minimal gzipped VCF header (plus one record, so the scan has to stop on its own)
+make_vcf_gz = function(path, source_line = NULL) {
+  lines = c("##fileformat=VCFv4.2")
+  if (!is.null(source_line)) lines = c(lines, paste0("##source=", source_line))
+  lines = c(lines,
+            "##FORMAT=<ID=AF,Number=A,Type=Float,Description=\"Allele frequency\">",
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE1",
+            "chr1\t100\t.\tA\tT\t30\tPASS\t.\tGT:AF\t0/1:0.4")
+  con = gzfile(path, "wb")
+  writeLines(lines, con)
+  close(con)
+  path
+}
+
+test_that("vaf_provenance returns NULL when there is nothing to describe", {
+  expect_null(vaf_provenance(NULL))
+  expect_null(vaf_provenance(character(0)))
+  expect_null(vaf_provenance(NA_character_))
+  expect_null(vaf_provenance(""))
+})
+
+test_that("vaf_provenance reports the path and the declared ##source", {
+  d = withr::local_tempdir()
+  f = make_vcf_gz(file.path(d, "somatic.vcf.gz"), source_line = "Clair3")
+
+  prov = vaf_provenance(f, sample_dir = d)
+  expect_equal(prov$paths, "somatic.vcf.gz")   # relative to sample_dir
+  expect_equal(prov$sources, "Clair3")
+})
+
+test_that("vaf_provenance keeps the absolute path when it is outside sample_dir", {
+  d = withr::local_tempdir()
+  f = make_vcf_gz(file.path(d, "somatic.vcf.gz"), source_line = "Clair3")
+
+  prov = vaf_provenance(f, sample_dir = file.path(d, "elsewhere"))
+  expect_equal(prov$paths, f)
+})
+
+test_that("vaf_provenance handles several files and a missing ##source", {
+  d = withr::local_tempdir()
+  snvs  = make_vcf_gz(file.path(d, "snvs.vcf.gz"),  source_line = "ClairS")
+  indel = make_vcf_gz(file.path(d, "indel.vcf.gz"), source_line = NULL)
+
+  prov = vaf_provenance(c(snvs, indel), sample_dir = d)
+  expect_equal(prov$paths, c("snvs.vcf.gz", "indel.vcf.gz"))
+  expect_equal(prov$sources, "ClairS")   # deduped; the second file declares none
+})
+
+test_that("vaf_provenance does not fail on a path that does not exist", {
+  prov = vaf_provenance("/nonexistent/somatic.vcf.gz")
+  expect_equal(prov$paths, "/nonexistent/somatic.vcf.gz")
+  expect_length(prov$sources, 0L)
+})

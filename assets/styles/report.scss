@@ -863,6 +863,31 @@ div.dt-buttons {
 }
 
 // ============================================================
+// Table footnote — provenance / caveats printed under a data table
+// ============================================================
+.table-footnote {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  margin: 0.6rem 0 0;
+  max-width: 78ch;
+
+  code {
+    font-size: 0.95em;
+    background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
+    padding: 0.05em 0.35em;
+    border-radius: 3px;
+  }
+
+  // The consensus caveat is the one line a reader must not skim past.
+  .table-footnote__warn { color: var(--color-text); font-weight: 500; }
+}
+
+@media print {
+  .table-footnote { color: #666; }
+}
+
+// ============================================================
 // Callouts
 // ============================================================
 .callout {

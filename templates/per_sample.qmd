@@ -98,8 +98,22 @@ vep_data = parse_vep(outputs$vep_somatic)
 
 vaf_data = parse_caller_vcf(outputs$somatic_vaf_vcf, "somatic")
 
+# Where the VAF/DP/GT/PS columns came from, for the footnote under the variant table. One
+# file supplies them for every variant, which is ambiguous after a consensus merge — see
+# templates/sections/_smallvariants.qmd.
+vaf_prov = vaf_provenance(outputs$somatic_vaf_vcf, sample_dir)
+
 variant_table = build_variant_table(vep_data, vaf_data, gene_panel = NULL)
 tmb_info = compute_tmb(variant_table)
+
+# Join coverage: a silently failing variant_key() shows up here as a near-zero count
+# rather than as an error (see the variant_key() note in CLAUDE.md).
+n_vaf = if (!is.null(variant_table) && "vaf" %in% names(variant_table))
+          sum(!is.na(variant_table$vaf)) else NA_integer_
+# Variants reported by more than one caller: `callers` collapses to "clairs,deepsomatic".
+# Always 0 on the VEP text path, which carries no per-variant caller at all.
+n_multi = if (!is.null(variant_table) && "callers" %in% names(variant_table))
+            sum(grepl(",", variant_table$callers, fixed = TRUE)) else 0L
 
 # SNV data for circos (from VEP file — contains all somatic variants)
 snv_circos = NULL
@@ -193,7 +207,7 @@ cat("<script>\n", js_panels, "\n</script>\n", sep = "")
 
 ---
 
-*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.1.0*
+*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.2.0*
 
 ```{=html}
 <script>
