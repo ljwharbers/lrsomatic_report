@@ -271,6 +271,37 @@ js_col_index_map = function(nms) {
   paste0("{", paste0(js_quote(nms), ":", seq_along(nms) - 1L, collapse = ","), "}")
 }
 
+# One JS number literal per element. Element-wise rather than vectorised because
+# format() on a vector pads every element to a common format — c(1, 2.5) becomes
+# "1.0","2.5" — and scientific notation on a base-pair coordinate would read back as a
+# different number than the one it names.
+js_num = function(x) {
+  vapply(x, function(v) {
+    if (is.na(v)) "null" else format(v, scientific = FALSE, trim = TRUE)
+  }, character(1), USE.NAMES = FALSE)
+}
+
+.js_cell = function(v) if (is.numeric(v)) js_num(v) else ifelse(is.na(v), "null", js_quote(v))
+
+# A JS array literal from an atomic vector. Numbers are emitted bare, everything else
+# quoted; NA becomes null so the client can test for it. Written by hand rather than with
+# jsonlite because that would be a new dependency in both recipe/meta.yaml and the
+# pipeline's environment.yml — see the "R package requirements" note in CLAUDE.md.
+js_vec = function(x) {
+  if (length(x) == 0) return("[]")
+  paste0("[", paste(.js_cell(x), collapse = ","), "]")
+}
+
+# A JS array of arrays, one inner array per row of `dt`, columns in `cols` order.
+# Row-major and positional: far smaller than an array of objects, which matters when the
+# payload is a few thousand cytobands inlined into a self-contained HTML file.
+js_rows = function(dt, cols) {
+  if (is.null(dt) || nrow(dt) == 0) return("[]")
+  cells = lapply(cols, function(cl) .js_cell(dt[[cl]]))
+  rows = do.call(paste, c(cells, sep = ","))
+  paste0("[[", paste(rows, collapse = "],["), "]]")
+}
+
 # Format a number for human-readable display
 fmt_bp = function(x) {
   x = as.numeric(x)

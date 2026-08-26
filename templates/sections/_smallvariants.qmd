@@ -70,9 +70,9 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
   # n_multi is always 0 on the VEP text path, which carries no per-variant caller: the
   # caveat therefore appears only on the merged multi-caller (CSQ) path, which is exactly
   # where the ambiguity exists.
-  footnote = tagList(
+  footnote = table_details(
+    summary = "VAF provenance",
     tags$p(
-      class = "table-footnote",
       if (!is.null(vaf_prov)) {
         tagList(
           "VAF, depth, genotype and phase set are joined from ",
@@ -84,6 +84,10 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
           if (length(vaf_prov$sources) > 0)
             paste0(" (", paste(vaf_prov$sources, collapse = ", "), ");") else ";",
           "the variant set itself comes from the VEP annotation.",
+          # Named only when the VCF held more than one sample — that is the only case
+          # where picking the wrong column would silently report the normal's VAF.
+          if (length(vaf_prov$sample) > 0)
+            sprintf("Read from sample %s.", paste(vaf_prov$sample, collapse = ", ")) else NULL,
           if (!is.na(n_vaf))
             sprintf("%s of %s variants carry a VAF.",
                     format(n_vaf, big.mark = ","),

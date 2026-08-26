@@ -87,12 +87,12 @@ wakhan_solutions = parse_wakhan_solutions(outputs$wakhan_solutions)
 wakhan_cn_plots  = locate_wakhan_cn_plots(outputs$wakhan_dir, wakhan_solutions)
 
 # Parse QC
-qc_mosdepth = parse_mosdepth_summary(outputs$mosdepth_summary)
+qc_mosdepth = parse_mosdepth_summary(outputs$mosdepth_summary, names(chrom_lens))
 qc_mosdist  = parse_mosdepth_dist(outputs$mosdepth_dist)
 qc_cramino  = parse_cramino(outputs$cramino)
 qc_flagstat = parse_flagstat(outputs$flagstat)
 samtools_stats = parse_samtools_stats(outputs$samtools_stats)
-qc_normal_mosdepth = parse_mosdepth_summary(outputs$normal_mosdepth_summary)
+qc_normal_mosdepth = parse_mosdepth_summary(outputs$normal_mosdepth_summary, names(chrom_lens))
 qc_normal_cramino  = parse_cramino(outputs$normal_cramino)
 qc_normal_flagstat = parse_flagstat(outputs$normal_flagstat)
 qc_normal_samtools_stats = parse_samtools_stats(outputs$normal_samtools_stats)
@@ -100,12 +100,12 @@ qc_normal_samtools_stats = parse_samtools_stats(outputs$normal_samtools_stats)
 # Parse VEP + raw callers
 vep_data = parse_vep(outputs$vep_somatic)
 
-vaf_data = parse_caller_vcf(outputs$somatic_vaf_vcf, "somatic")
+vaf_data = parse_caller_vcf(outputs$somatic_vaf_vcf, "somatic", sample_id = params$sample_id)
 
 # Where the VAF/DP/GT/PS columns came from, for the footnote under the variant table. One
 # file supplies them for every variant, which is ambiguous after a consensus merge — see
 # templates/sections/_smallvariants.qmd.
-vaf_prov = vaf_provenance(outputs$somatic_vaf_vcf, sample_dir)
+vaf_prov = vaf_provenance(outputs$somatic_vaf_vcf, sample_dir, sample_id = params$sample_id)
 
 variant_table = build_variant_table(vep_data, vaf_data, gene_panel = NULL)
 tmb_info = compute_tmb(variant_table)
