@@ -59,7 +59,18 @@ test_that("bnd_panel_genes matches on the same window as the panel_hit column", 
   # MYC (chr8:127,735,434) is 1.5 kb from the chr8 breakend; BCL2 (chr18:63,123,346)
   # sits under the chr18 one.
   expect_true(all(c("MYC", "BCL2") %in% g$gene))
-  expect_true(all(g$panels == "lymphoid"))
+  # The gene track is the superset over every coordinate-carrying panel, so `panels`
+  # names all of them — don't pin it to the builtin set, which grows. A gene must
+  # come from at least one panel that actually lists it.
+  coord_panels = names(panels)[vapply(panels, function(p) isTRUE(p$has_coords), logical(1))]
+  for (i in seq_len(nrow(g))) {
+    named = strsplit(g$panels[i], ",", fixed = TRUE)[[1]]
+    expect_true(length(named) > 0)
+    expect_true(all(named %in% coord_panels))
+    expect_true(all(vapply(named, function(nm) g$gene[i] %in% panels[[nm]]$genes,
+                           logical(1))))
+  }
+  expect_true("lymphoid" %in% strsplit(g$panels[g$gene == "BCL2"], ",")[[1]])
   expect_equal(anyDuplicated(g[, .(chrom, start, end, gene)]), 0L)
 
   # Half the window away still hits; well outside it does not.

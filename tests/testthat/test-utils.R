@@ -18,6 +18,48 @@ test_that("load_all_gene_panels resolves per-reference builtins to one entry", {
   }
 })
 
+test_that("every builtin panel ships for both references with matching gene sets", {
+  # A builtin missing from one reference would be silently unavailable there, and a
+  # gene placed on a different chromosome between the two files means a bad liftover.
+  repo_root = dirname(dirname(getwd()))
+  assets    = file.path(repo_root, "assets")
+  hg38      = load_all_gene_panels(assets, "hg38")
+  t2t       = load_all_gene_panels(assets, "t2t")
+  expect_setequal(names(hg38), names(t2t))
+  expect_true(all(c("lymphoid", "sarcoma") %in% names(hg38)))
+
+  for (nm in names(hg38)) {
+    a = hg38[[nm]]; b = t2t[[nm]]
+    expect_setequal(a$genes, b$genes)
+    expect_equal(a$has_coords, b$has_coords)
+    if (!isTRUE(a$has_coords)) next
+    chrom_a = setNames(a$chrom, a$interval_gene)
+    chrom_b = setNames(b$chrom, b$interval_gene)
+    expect_equal(chrom_a[a$interval_gene], chrom_b[a$interval_gene],
+                 info = paste("chromosome disagreement in panel", nm))
+    for (p in list(a, b)) {
+      expect_false(any(is.na(p$start) | is.na(p$end)))
+      expect_true(all(p$end >= p$start))
+    }
+  }
+})
+
+test_that("the sarcoma panel carries its fusion partners with hg38 coordinates", {
+  assets = file.path(dirname(dirname(getwd())), "assets")
+  p = resolve_gene_panel("sarcoma", assets, "hg38")
+  expect_true(p$has_coords)
+  expect_equal(p$reference, "hg38")
+  expect_equal(length(p$genes), 140L)
+  # Canonical symbols, not the aliases the source list used.
+  expect_true(all(c("EWSR1", "SS18", "MRTFB", "OGA", "KDR", "FLT4", "ERBB2",
+                    "H3-3A", "POU2AF3", "DUX4L10") %in% p$genes))
+  expect_false(any(c("MKL2", "MGEA5", "VEGFR2", "VEGFR3", "HER2", "SYT",
+                     "H3F3A") %in% p$genes))
+  # EWSR1's hg38 span, so a T2T file swapped in here would fail.
+  expect_equal(p$chrom[p$interval_gene == "EWSR1"], "chr22")
+  expect_equal(p$start[p$interval_gene == "EWSR1"], 29268009L)
+})
+
 test_that("load_all_gene_panels skips a panel that ships only for another reference", {
   repo_root = dirname(dirname(getwd()))
   # lymphoid ships for hg38 and t2t only, so an unrelated reference gets nothing:
