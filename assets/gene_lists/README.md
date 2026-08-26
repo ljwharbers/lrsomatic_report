@@ -58,6 +58,8 @@ symbol-only too.
 |---|---|
 | `lymphoid.hg38.tsv` | 72 recurrently mutated genes in B-cell lymphomas (DLBCL, FL, MCL, CLL, BL, MALT), GENCODE v46 gene spans |
 | `lymphoid.t2t.tsv` | the same 72 genes, spans from the CHM13v2.0 RefSeq Liftoff v5.1 annotation |
+| `sarcoma.hg38.tsv` | 140 soft-tissue and bone sarcoma genes — tumour suppressors, amplification targets and recurrent fusion partners — GENCODE v46 gene spans |
+| `sarcoma.t2t.tsv` | the same 140 genes, spans from the CHM13v2.0 RefSeq Liftoff v5.1 annotation |
 
 Regenerating them is mechanical — gene spans keyed on `gene_name`, taken from
 `gene` features (GENCODE) or the min/max of `transcript` features (Liftoff, which has no
@@ -66,6 +68,22 @@ Regenerating them is mechanical — gene spans keyed on `gene_name`, taken from
 - hg38: `references/GRCh38.alt-masked-V2/annotation/gencode.v46.basic.annotation.gtf.gz`
 - t2t: `references/chm13_v2.0_maskedY.rCRS/annotation/chm13v2.0_RefSeq_Liftoff_v5.1.gtf`
 
-Three symbols in the original list are HGNC aliases that resolve in neither annotation and
-were mapped by hand: `CD20`→`MS4A1` (already present, so the rows merged), `GEF1`→`ARHGEF1`,
-`HIST1H1E`→`H1-4`.
+Neither annotation is keyed on current HGNC symbols throughout, so aliases in the source
+gene lists were mapped by hand. For `lymphoid`: `CD20`→`MS4A1` (already present, so the
+rows merged), `GEF1`→`ARHGEF1`, `HIST1H1E`→`H1-4`. For `sarcoma`, from an input list of
+151 lines: `VEGFR2`→`KDR`, `VEGFR3`→`FLT4`, `MKL2`→`MRTFB`, `MGEA5`→`OGA`, plus
+`HER2`→`ERBB2`, `SYT`→`SS18`, `H3F3A`→`H3-3A` and `H3F3B`→`H3-3B`, whose targets were
+already listed — those merged, as did seven verbatim duplicates, leaving 140 genes.
+
+Two `sarcoma` symbols need the T2T annotation handled specially, and both are recorded in
+that file's comment header:
+
+- `POU2AF3` — the Liftoff annotation predates the rename and carries it as `COLCA2`.
+- `DUX4L10` — the Liftoff annotation has no D4Z4 paralogs at all (only `DUX4` itself), so
+  this span comes from `GCF_009914755.1_T2T-CHM13v2.0_genomic.gtf.gz`, whose chromosomes
+  are NCBI accessions (`NC_060925.1` = `chr1` … `NC_060948.1` = `chrY`). Its 10q26
+  position agrees with the hg38 locus, so this is a genuine match rather than a guess.
+
+A missing coordinate is a **hard error** in `load_gene_panel()`, not a per-row downgrade to
+symbol matching, so a gene that resolves in one annotation and not the other has to be
+either mapped or dropped from that reference's file — it cannot be left blank.
