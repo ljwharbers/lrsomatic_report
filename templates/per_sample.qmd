@@ -307,10 +307,6 @@ cat("</script>\n")
 
 ---
 
-{{< include sections/_whatshap.qmd >}}
-
----
-
 {{< include sections/_qc.qmd >}}
 
 ---

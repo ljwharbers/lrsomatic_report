@@ -1,4 +1,5 @@
-## Phasing
+::: {.callout-note collapse="true"}
+### Phasing
 
 ```{r whatshap-info}
 whatshap = SECTION_DATA[["whatshap"]]
@@ -47,3 +48,4 @@ if (!is.null(whatshap) && nrow(whatshap$per_chrom) > 0) {
   )
 }
 ```
+:::

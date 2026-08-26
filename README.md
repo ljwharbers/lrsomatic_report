@@ -7,8 +7,7 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 - **Breakend circos**: a second circos over just the chromosomes a breakend touches, with panel gene bodies and names; selecting a row in the SV table highlights that rearrangement's arc, and the gene-panel filter dims the arcs it hides
 - **Interactive variant table**: VEP-annotated somatic small variants, optionally filtered to a gene panel, with VAF, depth and phasing
 - **Interactive SV table**: Severus structural variants, one row per rearrangement with both breakend loci, sharing the same gene-panel filter (matched on breakend position)
-- **Phasing**: per-chromosome WhatsHap statistics (germline)
-- **QC details**: mosdepth coverage, samtools flagstat, cramino read stats
+- **QC details**: mosdepth coverage, samtools flagstat, cramino read stats, and per-chromosome WhatsHap phasing statistics (germline)
 
 ## Quick start
 
