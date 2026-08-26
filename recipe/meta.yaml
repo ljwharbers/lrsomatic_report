@@ -1,4 +1,4 @@
-{% set version = "1.2.0" %}
+{% set version = "1.2.1" %}
 
 package:
   name: lrsomatic-report
@@ -6,7 +6,9 @@ package:
 
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: 67ddfbe8fcd0bf0bf5525d7cc93612e3ca9a02ef4976085c60c31fa41854102a
+  # Fill in once the tag is cut:
+  #   curl -sL https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v1.2.1.tar.gz | sha256sum
+  sha256: PLACEHOLDER_FILL_IN_AFTER_v1.2.1_TAG_IS_CUT
 
 build:
   number: 0

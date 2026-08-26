@@ -314,7 +314,7 @@ cat("</script>\n")
 
 ---
 
-*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.2.0*
+*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.2.1*
 
 ```{=html}
 <script>

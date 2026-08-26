@@ -49,7 +49,7 @@ panel selected when the report opens — see [Gene panels](#gene-panels).
 > - `--gene-panel` now defaults to `none` instead of `lymphoid`: reports open unfiltered
 >   unless a panel is asked for. Pass `--gene-panel lymphoid` to restore the old default.
 
-> **Changed since v1.2.0:**
+> **Changed in v1.2.1:**
 > - The SV table is **one row per rearrangement**, not one per breakend record: Severus's
 >   `_1`/`_2` mate records are collapsed, and each row carries both loci
 >   (`chrom_a`/`pos_a`, `chrom_b`/`pos_b`) plus a `svclass` separating interchromosomal
