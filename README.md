@@ -5,7 +5,7 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 - **Summary header**: purity, ploidy, coverage, N50, variant counts
 - **Circos plot**: somatic SNVs (6-class SBS colours), non-BND SVs, ASCAT copy number, translocation links
 - **Interactive variant table**: VEP-annotated somatic small variants, optionally filtered to a gene panel, with VAF, depth and phasing
-- **Interactive SV table**: Severus structural variants annotated with gene overlaps, sharing the same gene-panel filter
+- **Interactive SV table**: Severus structural variants, one row per rearrangement with both breakend loci, sharing the same gene-panel filter (matched on breakend position)
 - **Phasing**: per-chromosome WhatsHap statistics (germline)
 - **QC details**: mosdepth coverage, samtools flagstat, cramino read stats
 
@@ -49,17 +49,46 @@ panel selected when the report opens — see [Gene panels](#gene-panels).
 > - `--gene-panel` now defaults to `none` instead of `lymphoid`: reports open unfiltered
 >   unless a panel is asked for. Pass `--gene-panel lymphoid` to restore the old default.
 
+> **Changed since v1.2.0:**
+> - The SV table is **one row per rearrangement**, not one per breakend record: Severus's
+>   `_1`/`_2` mate records are collapsed, and each row carries both loci
+>   (`chrom_a`/`pos_a`, `chrom_b`/`pos_b`) plus a `svclass` separating interchromosomal
+>   translocations from intra-chromosomal breakends. The SV count and the circos links
+>   halve accordingly — they were double-counting. The single `gene_hits` column is
+>   replaced by per-breakend `gene_a`/`gene_b`, and a `panel_hit` column names which panel
+>   gene matched, and on which side.
+> - SVs are matched against a gene panel by **coordinate**, not gene symbol, whenever the
+>   panel carries `chrom`/`start`/`end` — see [Gene panels](#gene-panels). The bundled
+>   `lymphoid.tsv` is replaced by `lymphoid.hg38.tsv` and `lymphoid.t2t.tsv`; a custom
+>   symbol-only TSV still works and still matches on symbols.
+
 ## Gene panels
 
 Reports are **unfiltered by default**. `--gene-panel` only chooses which panel is selected when
 the report opens; the rendered HTML always contains every variant and every builtin panel, so a
 reader can switch panels (or paste a custom gene list) in the browser without re-rendering.
 
-Built-in panels live in `assets/gene_lists/`. Each is a TSV with a `gene` column (HGNC symbols).
+Built-in panels live in `assets/gene_lists/`. Each is a TSV with a `gene` column (HGNC symbols)
+and, optionally, `chrom`/`start`/`end` — which changes how structural variants are matched:
+
+| Panel columns | Small variants | Structural variants |
+|---|---|---|
+| `gene` only | symbol match | symbol match on the annotated breakend genes — no positional window |
+| `gene, chrom, start, end` | symbol match | within **1 Mb of either breakend** of a BND, or **100 kb of the span** of any other type |
+
+Coordinate matching is the reliable mode: whether VEP annotates a breakend with a gene symbol
+at all depends on the sample's VEP invocation (1.6%–90% of breakend rows across the samples
+measured), so a symbol-only panel can hide exactly the translocations it exists to find. The
+note under the SV table says which mode is in force.
+
+Because coordinates are only valid for one genome, a coordinate panel must declare its
+reference (a leading `# reference: hg38` line, or a `reference` column) and a mismatch with the
+rendered reference is a hard error. Builtins ship one file per reference and are offered as a
+single entry, resolved against the detected one.
 
 | Panel | Description |
 |---|---|
-| `lymphoid` | ~70 recurrently mutated genes in B-cell lymphomas (DLBCL, FL, CLL, MCL, BL, MALT) |
+| `lymphoid` | 72 recurrently mutated genes in B-cell lymphomas (DLBCL, FL, CLL, MCL, BL, MALT), as `lymphoid.hg38.tsv` and `lymphoid.t2t.tsv` |
 
 ```bash
 --gene-panel lymphoid                # open with the builtin lymphoid panel applied
@@ -67,7 +96,8 @@ Built-in panels live in `assets/gene_lists/`. Each is a TSV with a `gene` column
 ```
 
 A `--gene-panel` value that is neither `none`, a builtin name, nor an existing file is an error —
-a typo will not silently produce an unfiltered report.
+a typo will not silently produce an unfiltered report. See
+[`assets/gene_lists/README.md`](assets/gene_lists/README.md) for the full file format.
 
 ## Expected input layout
 
@@ -169,14 +199,14 @@ lrsomatic_report/
 │   ├── references.R             Cytoband + chrom-length loading, reference auto-detection
 │   ├── locate_outputs.R         Discover per-tool output files in a sample directory
 │   ├── parse_smallvariants.R    VEP text + raw caller VCF parsers; build variant table
-│   ├── parse_severus.R          Severus VCF + gene TSV parsers; build SV table
+│   ├── parse_severus.R          Severus VCF parsing (mate-collapsed), SV table, panel matching
 │   ├── parse_ascat.R            ASCAT segments + purity/ploidy parsers
 │   ├── parse_qc.R               Mosdepth, cramino, flagstat parsers
 │   └── circos.R                 draw_circos() — generates the circos SVG
 ├── templates/per_sample.qmd    Quarto template (HTML report)
 ├── assets/
 │   ├── references/{t2t,hg38}/  Cytobands + chrom lengths (bundled, no network needed)
-│   └── gene_lists/             lymphoid.tsv + README
+│   └── gene_lists/             lymphoid.{hg38,t2t}.tsv + README
 └── tests/                      Unit tests (testthat)
 ```
 
