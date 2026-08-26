@@ -42,6 +42,7 @@ source(file.path(repo_dir, "R/parse_severus.R"))
 source(file.path(repo_dir, "R/parse_ascat.R"))
 source(file.path(repo_dir, "R/parse_qc.R"))
 source(file.path(repo_dir, "R/circos.R"))
+source(file.path(repo_dir, "R/circos_bnd.R"))
 
 source(file.path(repo_dir, "R/sections.R"))
 for (f in list.files(file.path(repo_dir, "R/sections"), pattern = "\\.R$", full.names = TRUE)) {
@@ -365,6 +366,10 @@ cat("</script>\n")
     if (window.snvTableElem) $(window.snvTableElem).DataTable().draw();
     if (window.svTableElem)  $(window.svTableElem).DataTable().draw();
     updateCount();
+    // The breakend circos follows whatever the SV table is showing. Its own draw.dt
+    // handler covers the per-column search boxes; this call is what paints it the first
+    // time, before any filter has been touched.
+    if (window.bndSyncFilter) window.bndSyncFilter();
   }
 
   $(document).ready(function () {
