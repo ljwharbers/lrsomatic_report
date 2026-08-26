@@ -1,6 +1,6 @@
 ## Small variants
 
-```{r small-variant-table}
+```{r small-variant-prepare, results='asis'}
 if (!is.null(variant_table) && nrow(variant_table) > 0) {
   # Format the VAF as a percentage
   dt_display = copy(variant_table)
@@ -8,6 +8,14 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
     dt_display[, vaf := round(vaf * 100, 1)]
     setnames(dt_display, "vaf", "VAF%")
   }
+  # The panel filter reads the symbol column by name, not by a hard-coded position.
+  cat("<script>window.SNV_COLS = ", js_col_index_map(names(dt_display)), ";</script>\n",
+      sep = "")
+}
+```
+
+```{r small-variant-table}
+if (!is.null(variant_table) && nrow(variant_table) > 0) {
 
   # Cells to flag: a variant reported by several callers has its VAF/DP/GT/PS taken from
   # whichever one won the consensus merge, so those columns need not describe the caller
