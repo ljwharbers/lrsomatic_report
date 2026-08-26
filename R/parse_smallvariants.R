@@ -104,6 +104,12 @@ parse_vep_text = function(vep_file) {
   # with parse_vep_vcf().
   dt[, caller := NA_character_]
 
+  # Record identity, for contract parity with parse_vep_vcf()'s `id`. The text format
+  # has no VCF ID column, so this is VEP's own Uploaded_variation name — never a
+  # caller-assigned ID, which is why the SV table's ID-keyed join only ever sees the
+  # VCF path.
+  dt[, id := variant_id]
+
   dt
 }
 
@@ -172,12 +178,16 @@ parse_vep_vcf = function(vep_file) {
 
   # A variant reported by two somatic callers appears as two records; collapse to one
   # row per variant so the CSQ expansion below doesn't duplicate every annotation.
-  dt = dt[, .(CSQ = CSQ[1], caller = paste(sort(unique(caller)), collapse = ",")),
+  # ID rides along: it is what links an SV annotation record back to the caller record
+  # it came from (see build_sv_table_from_vep()), and is more reliable than the locus.
+  dt = dt[, .(CSQ = CSQ[1], id = ID[1],
+              caller = paste(sort(unique(caller)), collapse = ",")),
           by = .(CHROM, POS, REF, ALT)]
+  dt[id == ".", id := NA_character_]
 
   # One row per gene/transcript annotation (comma-separated CSQ entries)
   dt_long = dt[, .(csq_entry = unlist(strsplit(CSQ, ",", fixed = TRUE))),
-               by = .(CHROM, POS, REF, ALT, caller)]
+               by = .(CHROM, POS, REF, ALT, id, caller)]
   if (nrow(dt_long) == 0) return(NULL)
 
   # Split each entry on "|", materialising only the fields actually used below
@@ -218,7 +228,7 @@ parse_vep_vcf = function(vep_file) {
   # dbSNP / COSMIC IDs, derived from Existing_variation
   dt_long = derive_dbsnp_cosmic(dt_long)
 
-  dt_long[, .(chrom, pos, ref, alt, symbol, gene_id, consequence, impact, hgvsp,
+  dt_long[, .(chrom, pos, ref, alt, id, symbol, gene_id, consequence, impact, hgvsp,
               existing, dbsnp, cosmic, sift, polyphen, caller)]
 }
 
@@ -289,6 +299,53 @@ parse_caller_vcf = function(vcf_file, caller_name = "unknown") {
   data.table(chrom = dt$CHROM, pos = dt$POS, ref = dt$REF, alt = dt$ALT,
              vaf = vaf_list, dp = dp_list, gt = gt_list, ps = ps_list,
              caller = caller_name)
+}
+
+# Header-only provenance for the VCF(s) that supplied VAF/DP/GT/PS.
+#
+# Which file this is matters to a reader: when the pipeline ran several somatic callers
+# through consensus, the FORMAT fields in the surviving VCF come from whichever caller won
+# each merge, so they need not correspond to the `callers` column beside them. The report
+# names the file rather than silently implying one caller — see the footnote in
+# templates/sections/_smallvariants.qmd.
+#
+# `vcf_files` may be several paths (parse_caller_vcf() stacks them; ClairS splits matched
+# mode into snvs.vcf.gz + indel.vcf.gz). Returns NULL when there is nothing to describe,
+# matching the graceful-missing contract of the parsers above. Only the header is read —
+# no record parsing — so this stays cheap on a multi-million-variant VCF.
+vaf_provenance = function(vcf_files, sample_dir = NULL) {
+  if (is.null(vcf_files) || length(vcf_files) == 0) return(NULL)
+  vcf_files = vcf_files[!is.na(vcf_files) & nzchar(vcf_files)]
+  if (length(vcf_files) == 0) return(NULL)
+
+  # Paths read better relative to the sample directory the caller passed in.
+  rel = function(p) {
+    if (is.null(sample_dir) || !nzchar(sample_dir)) return(p)
+    root = sub("/+$", "", normalizePath(sample_dir, mustWork = FALSE))
+    full = normalizePath(p, mustWork = FALSE)
+    if (startsWith(full, paste0(root, "/"))) substring(full, nchar(root) + 2L) else p
+  }
+
+  # "##source=Clair3" and friends. Plenty of VCFs carry no source line at all, which is why
+  # the footnote treats this as optional colour rather than the identifying fact.
+  read_sources = function(p) {
+    if (!file.exists(p)) return(character(0))
+    con = gzfile(p, "rb")
+    on.exit(close(con), add = TRUE)
+    out = character(0)
+    repeat {
+      line = readLines(con, n = 1, warn = FALSE)
+      if (length(line) == 0) break
+      if (!startsWith(line, "##")) break   # #CHROM or a malformed header ends the scan
+      if (startsWith(line, "##source=")) out = c(out, sub("^##source=", "", line))
+    }
+    out
+  }
+
+  list(
+    paths   = unname(vapply(vcf_files, rel, character(1))),
+    sources = unique(unlist(lapply(vcf_files, read_sources)))
+  )
 }
 
 # Canonical variant key, used to join VEP annotation rows to the VCF they came from.

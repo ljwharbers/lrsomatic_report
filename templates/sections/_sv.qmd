@@ -1,47 +1,137 @@
-## Structural variants in gene panel
+## Structural variants
 
 ```{r sv-info}
+# The table is built from the caller VCF, not from the annotation, so it survives a
+# missing VEP SV VCF — an empty table here means no SV records were found at all.
 if (is.null(sv_table) || nrow(sv_table) == 0) {
-  section_notice(
-    if (!isTRUE(SECTION_DATA$sv$annotation_found)) "SV annotation file (VEP or gene TSV) not found."
-    else "No somatic structural variants detected."
-  )
+  section_notice("No somatic structural variants detected.")
+}
+```
+
+```{r sv-prepare, results='asis'}
+# Column positions are published from R rather than scraped from the rendered header:
+# see the panel-filter script in per_sample.qmd.
+if (!is.null(sv_table) && nrow(sv_table) > 0) {
+  sv_display = copy(sv_table)
+  # Populated client-side by the panel filter, so switching panels updates it on the
+  # existing redraw. The load-time panel's hits are already in sv_panel_hit (same
+  # function, same windows) and drive the "Panel SVs" card.
+  sv_display[, panel_hit := ""]
+  setcolorder(sv_display, c("id", "panel_hit"))
+  cat("<script>window.SV_COLS = ", js_col_index_map(names(sv_display)), ";</script>\n",
+      sep = "")
 }
 ```
 
 ```{r sv-table}
 if (!is.null(sv_table) && nrow(sv_table) > 0) {
-  # Column casing differs by annotation source: "svtype" (VEP path) vs "SVTYPE" (TSV path)
-  svtype_col = intersect(c("svtype", "SVTYPE"), names(sv_table))
+  idx0 = function(nm) which(names(sv_display) == nm) - 1L
+
+  # A breakend annotated as truncating a whole span can carry a hundred-odd symbols.
+  # Truncate the *display* only — sorting, searching and the CSV/copy buttons below
+  # use the "sort" rendering, which returns the full list.
+  gene_render = JS(
+    "function(data, type) {",
+    "  if (type !== 'display' || !data) return data;",
+    "  const g = String(data).split(',');",
+    "  if (g.length <= 6) return data;",
+    "  return '<span title=\"' + String(data).replace(/\"/g, '') + '\">' +",
+    "         g.slice(0, 6).join(',') + ' +' + (g.length - 6) + ' more</span>';",
+    "}")
+
+  # Same predicate as the row filter, so the column always agrees with what is shown.
+  panel_hit_render = JS(
+    "function(data, type, row) {",
+    "  return window.svPanelHitLabel ? window.svPanelHitLabel(row, window.SV_COLS) : '';",
+    "}")
 
   dtbl = DT::datatable(
-    sv_table,
+    sv_display,
     rownames   = FALSE,
     filter     = "top",
     elementId  = "sv-table",
     extensions = c("Buttons", "Scroller"),
     options    = list(
       dom       = "Bfrtip",
-      buttons   = c("copy", "csv"),
+      buttons   = list(list(extend = "copy", exportOptions = list(orthogonal = "sort")),
+                       list(extend = "csv",  exportOptions = list(orthogonal = "sort"))),
       scrollX   = TRUE,
       scrollY   = "350px",
       scroller  = TRUE,
       deferRender = TRUE,
       pageLength = 25,
+      columnDefs = list(
+        list(targets = idx0("panel_hit"), render = panel_hit_render),
+        list(targets = c(idx0("gene_a"), idx0("gene_b")), render = gene_render)
+      ),
       initComplete = JS("function() { window.svTableElem = this.api().table().node(); }")
     )
-  )
-  if (length(svtype_col) > 0) {
-    dtbl = dtbl |>
-      DT::formatStyle(
-        columns = svtype_col[1],
-        target  = "cell",
-        backgroundColor = DT::styleEqual(
-          c("DEL",     "DUP",     "INV",     "INS",     "BND"),
-          c("#dbeafe", "#dcfce7", "#fef9c3", "#fee2e2", "#f3e8ff")
-        )
+  ) |>
+    DT::formatStyle(
+      columns = "svtype",
+      target  = "cell",
+      backgroundColor = DT::styleEqual(
+        c("DEL",     "DUP",     "INV",     "INS",     "BND",     "sBND"),
+        c("#dbeafe", "#dcfce7", "#fef9c3", "#fee2e2", "#f3e8ff", "#f3e8ff")
       )
-  }
+    )
   dtbl
+}
+```
+
+```{r sv-footnote}
+# Provenance footnote, following the vaf_provenance() pattern in _smallvariants.qmd:
+# say where the breakend symbols came from, and — because it is the difference between
+# a filter that works on every sample and one that works on some — which panel matching
+# mode is active, against which reference, with which windows.
+if (!is.null(sv_table) && nrow(sv_table) > 0) {
+  rel = function(p) {
+    if (is.null(p)) return(NULL)
+    root = sub("/+$", "", normalizePath(sample_dir, mustWork = FALSE))
+    full = normalizePath(p, mustWork = FALSE)
+    if (startsWith(full, paste0(root, "/"))) substring(full, nchar(root) + 2L) else p
+  }
+
+  # Built as one HTML string rather than a tagList: htmltools puts each child on its
+  # own line, which HTML collapses to a space — leaving " ," after every <code>.
+  code = function(x) paste0("<code>", htmltools::htmlEscape(x), "</code>")
+
+  panel_note = if (is.null(panel)) {
+    "No gene panel is applied on load; select one above to filter both tables."
+  } else if (isTRUE(panel$has_coords)) {
+    sprintf(paste("Panel %s matches on <strong>breakend coordinates</strong> (%s intervals,",
+                  "within %s of either breakend of a BND or %s of the span of any other",
+                  "type)%s"),
+            code(basename(panel$path)), length(panel$start),
+            fmt_bp(SV_PANEL_WINDOW_BND), fmt_bp(SV_PANEL_WINDOW_OTHER),
+            if (nzchar(panel$reference)) paste0(", built on ", panel$reference, ".")
+            else paste(", whose reference is unverified — the panel declares none, so",
+                       "nothing checks it against this report's."))
+  } else {
+    sprintf(paste("Panel %s carries no coordinates, so SVs are matched on <strong>gene",
+                  "symbol</strong> only: a breakend VEP did not annotate cannot match,",
+                  "whatever it is near. Add %s, %s and %s columns to match on position",
+                  "instead."),
+            code(basename(panel$path)), code("chrom"), code("start"), code("end"))
+  }
+
+  annot_note = if (!is.null(SECTION_DATA$sv$annotation_path))
+    sprintf(paste("Breakend genes are from %s, joined on record ID; records that",
+                  "annotation dropped (it keeps only FILTER PASS) have none."),
+            code(rel(SECTION_DATA$sv$annotation_path)))
+  else
+    "No SV annotation file was found, so the breakend gene columns are empty."
+
+  tags$p(
+    class = "table-footnote",
+    HTML(paste(
+      sprintf("%s rearrangement%s, one row each — Severus writes both sides of a breakend as two records, and mate pairs are collapsed here%s.",
+              nrow(sv_table), if (nrow(sv_table) == 1) "" else "s",
+              if (!is.na(n_trans) && !is.na(n_intra_bnd))
+                sprintf(" (%s interchromosomal, %s intra-chromosomal breakend%s)",
+                        n_trans, n_intra_bnd, if (n_intra_bnd == 1) "" else "s")
+              else ""),
+      annot_note, panel_note))
+  )
 }
 ```
