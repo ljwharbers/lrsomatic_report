@@ -12,8 +12,8 @@ source(file.path(repo_root, "R/utils.R"))
 source(file.path(repo_root, "R/references.R"))
 source(file.path(repo_root, "R/parse_smallvariants.R"))
 source(file.path(repo_root, "R/parse_severus.R"))
-# circlize is a hard dependency of the breakend circos; the tests that need it skip
-# themselves, so a machine without it still runs the rest of the suite.
-if (requireNamespace("circlize", quietly = TRUE)) {
-  source(file.path(repo_root, "R/circos_bnd.R"))
-}
+# The breakend circos is drawn client-side now, so R/circos_bnd.R only selects and
+# serialises data — no circlize, nothing to skip. (R/circos.R still needs circlize for
+# the genome-wide plot, but nothing under test sources it.)
+source(file.path(repo_root, "R/sections.R"))
+source(file.path(repo_root, "R/circos_bnd.R"))

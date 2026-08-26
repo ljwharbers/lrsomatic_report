@@ -10,16 +10,16 @@ if (is.null(sv_table) || nrow(sv_table) == 0) {
 
 ```{r sv-bnd-circos}
 # Breakend circos: the same rearrangements as the table below, drawn as arcs over just
-# the chromosomes they touch. Inlined rather than embedded as a base64 <img> like the
-# genome-wide circos, because the arcs have to be reachable from the page's own script —
-# see R/circos_bnd.R.
+# the chromosomes they touch. R only selects and serialises the data — the plot itself is
+# built by assets/js/bnd_circos.js, so that it can re-lay-out to the chromosomes that
+# survive the current filter instead of dimming a fixed set. See R/circos_bnd.R.
 bnd_res = NULL
 if (!is.null(sv_table) && nrow(sv_table) > 0) {
   bnd_res = tryCatch({
     # One filtered set feeds both calls, so the gene track cannot label an arc that was
     # never drawn.
     bnd_drawn = bnd_links(sv_table, chromosomes)
-    draw_bnd_circos(bnd_drawn,
+    bnd_circos_data(bnd_drawn,
                     bnd_panel_genes(bnd_drawn, params$all_panels),
                     cytobands, chrom_lens, chromosomes)
   }, error = function(e) {
@@ -28,7 +28,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   })
 }
 
-if (!is.null(bnd_res) && !is.null(bnd_res$svg)) {
+if (!is.null(bnd_res) && !is.null(bnd_res$data)) {
   legend_item = function(swatch, var, label) {
     tags$div(class = "circos-legend__item",
              tags$span(class = paste0("circos-swatch--", swatch),
@@ -36,14 +36,11 @@ if (!is.null(bnd_res) && !is.null(bnd_res$svg)) {
              label)
   }
   tagList(
+    # The chromosome count is filled in by the plot, since it changes with the filter.
     tags$p(class = "circos-eyebrow",
-           sprintf("Breakends · %d chromosome%s · %s",
-                   length(bnd_res$chroms),
-                   if (length(bnd_res$chroms) == 1) "" else "s",
-                   if (isTRUE(bnd_res$interactive))
-                     "select a row below to highlight its arc"
-                   else "row highlighting unavailable")),
-    tags$div(class = "bnd-circos", HTML(bnd_res$svg)),
+           tags$span(id = "bnd-eyebrow", "Breakends"),
+           " · select a row below to highlight its arc"),
+    tags$div(class = "bnd-circos", id = "bnd-circos"),
     tags$div(class = "circos-legend",
       tags$div(class = "circos-legend__group",
         tags$div(class = "circos-legend__title", "Breakend circos"),
@@ -52,15 +49,22 @@ if (!is.null(bnd_res) && !is.null(bnd_res$svg)) {
         legend_item("bar", "--circos-bnd-gene",     "Panel gene")
       )
     ),
-    tags$p(class = "bnd-circos-caption", tags$span(id = "bnd-shown-count")),
-    # An untagged plot is still a useful figure, but it must not claim to highlight:
-    # a mismatch means the arcs and the rows are no longer the same objects.
-    if (!isTRUE(bnd_res$interactive))
-      section_notice(paste("The arcs could not be matched to table rows, so selecting a",
-                           "row will not highlight one. The plot itself is unaffected."))
+    tags$p(class = "bnd-circos-caption", tags$span(id = "bnd-shown-count"))
   )
 } else if (!is.null(bnd_res)) {
   section_notice(bnd_res$reason)
+}
+```
+
+```{r sv-bnd-circos-data, results='asis'}
+# The payload, then the drawing code. bnd_circos.js is inlined from its own file rather
+# than pasted into an R string so it stays lintable and editable as JavaScript; the
+# report is self-contained, so it cannot be linked.
+if (!is.null(bnd_res) && !is.null(bnd_res$data)) {
+  cat(bnd_circos_script(bnd_res), "\n")
+  cat("<script>\n")
+  cat(readLines(file.path(params$repo_dir, "assets/js/bnd_circos.js")), sep = "\n")
+  cat("\n</script>\n")
 }
 ```
 
@@ -145,37 +149,24 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
 # Cross-link the table to the circos. This owns the row selection outright — see the
 # `selection` note above. Row identity comes from the DataTables API rather than from a
 # DOM id, because Scroller plus deferRender recycle the <tr> nodes, which is also why the
-# selected class is re-applied on every draw; the arcs are found by the data-svid R wrote
-# onto them.
-if (!is.null(bnd_res) && !is.null(bnd_res$svg)) {
+# selected class is re-applied on every draw.
+#
+# Every filter change redraws the plot from window.BND_DATA rather than restyling what is
+# already there, so the sector layout follows the filtered link set. The old viewBox
+# repair is gone with the inlined markup it existed for: Quarto's HTML pipeline lowercases
+# attribute names on markup it processes, but nodes built by createElementNS() never pass
+# through it.
+if (!is.null(bnd_res) && !is.null(bnd_res$data)) {
   cat("<script>\n")
-  cat("const BND_INTERACTIVE = ", if (isTRUE(bnd_res$interactive)) "true" else "false",
-      ";\n", sep = "")
   cat(r"----(
 (function () {
-  // Quarto's HTML pipeline lowercases attribute names, so svglite's `viewBox` reaches
-  // the page as `viewbox`. An HTML parser is meant to case-correct SVG attributes back
-  // (the "adjust SVG attributes" table), but SVG attributes are case-sensitive once
-  // parsed and a plain `viewbox` leaves the plot with no viewBox at all — which means
-  // no aspect ratio, so `height: auto` cannot scale it. Repairing it here is a no-op
-  // wherever the parser already did the right thing.
-  document.querySelectorAll(".bnd-circos svg").forEach(function (el) {
-    const vb = el.getAttribute("viewBox") || el.getAttribute("viewbox");
-    if (vb && !el.getAttribute("viewBox")) el.setAttribute("viewBox", vb);
-    // The intrinsic pt size fights `width: 100%`; the viewBox is the only size it needs.
-    el.removeAttribute("width");
-    el.removeAttribute("height");
-  });
-
-  if (!BND_INTERACTIVE) return;
-
   const SELECTED = new Set();
-  // null until the first sync: everything drawn counts as visible.
+  // null until the first sync: everything counts as visible.
   let visibleIds = null;
   let visibleGenes = new Set();
 
   const table = () => (window.svTableElem ? $(window.svTableElem).DataTable() : null);
-  const all = (sel) => document.querySelectorAll(".bnd-circos " + sel);
+  const host = () => document.getElementById("bnd-circos");
 
   function rowId(row) {
     const cols = window.SV_COLS || {};
@@ -195,41 +186,27 @@ if (!is.null(bnd_res) && !is.null(bnd_res$svg)) {
       .filter((g) => g.length > 0);
   }
 
+  // Redraw the plot for the current filter and selection. The sector set is recomputed
+  // from the visible links, so chromosomes nothing touches leave the plot entirely rather
+  // than sitting there dimmed.
   function apply() {
-    const liveChroms = new Set();
-    all(".bnd-link").forEach(function (el) {
-      const id = el.getAttribute("data-svid");
-      const shown = visibleIds === null || visibleIds.has(id);
-      const picked = SELECTED.has(id);
-      el.classList.toggle("is-dim", !shown);
-      el.classList.toggle("is-selected", picked);
-      // SVG has no z-index: a highlighted arc is raised by being re-appended.
-      if (picked) el.parentNode.appendChild(el);
-      if (shown) {
-        liveChroms.add(el.getAttribute("data-chrom-a"));
-        liveChroms.add(el.getAttribute("data-chrom-b"));
-      }
-    });
-    all(".bnd-chrom-label").forEach(function (el) {
-      el.classList.toggle("is-dim", !liveChroms.has(el.getAttribute("data-chrom")));
-    });
-    [".bnd-gene-body", ".bnd-gene-label", ".bnd-gene-line"].forEach(function (sel) {
-      all(sel).forEach(function (el) {
-        const g = (el.getAttribute("data-gene") || "").toUpperCase();
-        el.classList.toggle("is-hidden", !visibleGenes.has(g));
-      });
-    });
-    caption();
+    if (!window.bndCircos) return;
+    const stats = window.bndCircos.render(host(), visibleIds, visibleGenes, SELECTED);
+    caption(stats);
   }
 
-  function caption() {
+  function caption(stats) {
+    const total = (window.BND_DATA && window.BND_DATA.links)
+      ? window.BND_DATA.links.length : stats.arcs;
+    const eyebrow = document.getElementById("bnd-eyebrow");
+    if (eyebrow) {
+      eyebrow.textContent = "Breakends · " + stats.chroms + " chromosome" +
+                            (stats.chroms === 1 ? "" : "s");
+    }
     const el = document.getElementById("bnd-shown-count");
     if (!el) return;
-    const total = all(".bnd-link").length;
-    const shown = all(".bnd-link:not(.is-dim)").length;
-    const genes = all(".bnd-gene-label:not(.is-hidden)").length;
-    const parts = [shown + " of " + total + " arc" + (total === 1 ? "" : "s") + " shown"];
-    if (genes > 0) parts.push(genes + " panel gene" + (genes === 1 ? "" : "s"));
+    const parts = [stats.arcs + " of " + total + " arc" + (total === 1 ? "" : "s") + " shown"];
+    if (stats.genes > 0) parts.push(stats.genes + " panel gene" + (stats.genes === 1 ? "" : "s"));
     if (SELECTED.size > 0) parts.push(SELECTED.size + " selected");
     el.textContent = parts.join(" · ");
   }
@@ -279,6 +256,15 @@ if (!is.null(bnd_res) && !is.null(bnd_res$svg)) {
   $(document).on("draw.dt", function (e) {
     if (e.target === window.svTableElem) window.bndSyncFilter();
   });
+
+  // The host starts empty, so draw once immediately with no filter applied. Waiting for
+  // the table's first draw.dt would leave a blank gap where the plot should be, and would
+  // leave the plot missing entirely if the table failed to initialise.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", apply);
+  } else {
+    apply();
+  }
 })();
 )----")
   cat("\n</script>\n")
@@ -330,19 +316,21 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
 
   # What the circos above is showing, said once, next to the numbers it shares with the
   # table. Only mentioned when there is a plot to explain.
-  circos_note = if (!is.null(bnd_res) && !is.null(bnd_res$svg))
-    sprintf(paste("The circos above draws one arc per breakend with both loci mapped,",
-                  "over the %d chromosome%s they touch. Gene bodies are the panel genes",
-                  "within %s of a breakend — the same test that fills the %s column, so",
-                  "a gene is drawn exactly when a visible row names it, and a panel",
-                  "carrying no coordinates draws none. Bodies are markers at a minimum",
-                  "visible width, not spans to scale."),
-            length(bnd_res$chroms), if (length(bnd_res$chroms) == 1) "" else "s",
+  circos_note = if (!is.null(bnd_res) && !is.null(bnd_res$data))
+    sprintf(paste("The circos above draws one arc per breakend with both loci mapped, and",
+                  "is redrawn whenever the filter changes — it shows only the chromosomes",
+                  "the visible rows touch, out of the %d these %d arc%s span in total.",
+                  "Gene bodies are the panel genes within %s of a breakend — the same test",
+                  "that fills the %s column, so a gene is drawn exactly when a visible row",
+                  "names it, and a panel carrying no coordinates draws none. Bodies are",
+                  "markers at a minimum visible width, not spans to scale."),
+            length(bnd_res$chroms), bnd_res$n_links,
+            if (bnd_res$n_links == 1) "" else "s",
             fmt_bp(SV_PANEL_WINDOW_BND), code("panel_hit"))
   else NULL
 
-  tags$p(
-    class = "table-footnote",
+  table_details(
+    summary = "How these rows and this plot are built",
     HTML(paste(
       sprintf("%s rearrangement%s, one row each — Severus writes both sides of a breakend as two records, and mate pairs are collapsed here%s.",
               nrow(sv_table), if (nrow(sv_table) == 1) "" else "s",

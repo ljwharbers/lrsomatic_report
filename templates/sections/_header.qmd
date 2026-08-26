@@ -29,9 +29,13 @@ card = function(label, value, css_class = "", subtitle = NULL) {
   )
 }
 
-# Keep acronym uppercase but let the trailing plural "s" stay lowercase
+# Keep the acronym uppercase but let the trailing plural "s" stay lowercase.
+# Built as one HTML string rather than nested tags: htmltools puts each child on its own
+# line, and that newline renders as a space — the label came out as "SNV s".
 lc_plural = function(text) {
-  tags$span(substr(text, 1, nchar(text) - 1L), tags$span(class = "lc", "s"))
+  stopifnot(endsWith(text, "s"))
+  HTML(paste0(htmlEscape(substr(text, 1, nchar(text) - 1L)),
+              '<span class="lc">s</span>'))
 }
 
 div(class = "metric-grid",

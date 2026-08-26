@@ -90,95 +90,87 @@ test_that("bnd_panel_genes returns nothing for a symbol-only panel", {
   expect_equal(nrow(bnd_panel_genes(bl, NULL)), 0)
 })
 
-# ---- draw_bnd_circos -----------------------------------------------------
+# ---- bnd_circos_data -----------------------------------------------------
+#
+# The plot itself is drawn by assets/js/bnd_circos.js; what R is responsible for is
+# selecting the right records and serialising them correctly, which is what these cover.
 
-test_that("draw_bnd_circos tags every arc and gene, and leaks no sentinel", {
-  skip_if_not_installed("circlize")
-  skip_if_not_installed("svglite")
+test_that("bnd_circos_data emits every drawable arc, over only the chromosomes touched", {
+  chroms = chroms_hg38()
+  bl  = bnd_links(sv_fixture(), chroms)
+  res = bnd_circos_data(bl, bnd_panel_genes(bl, load_all_gene_panels(assets_dir, "hg38")),
+                        cyto_hg38(), lens_hg38(), chroms)
 
-  panels = load_all_gene_panels(assets_dir, "hg38")
-  bl  = bnd_links(sv_fixture(), chroms_hg38())
-  g   = bnd_panel_genes(bl, panels)
-  res = draw_bnd_circos(bl, g, cyto_hg38(), lens_hg38(), chroms_hg38())
-
-  expect_true(res$interactive)
+  expect_null(res$reason)
   expect_equal(res$n_links, 3L)
-  expect_equal(n_class(res$svg, "bnd-link"), 3)
-
-  # Every row's id reached the SVG, and nothing else did.
-  svids = unlist(regmatches(res$svg, gregexpr('data-svid="[^"]*"', res$svg)))
-  expect_setequal(svids, sprintf('data-svid="%s"', bl$id))
-
-  # Sectors are the touched chromosomes only, in the report's canonical order.
+  # Only the chromosomes a drawable breakend touches, in reference order.
   expect_equal(res$chroms, c("chr8", "chr14", "chr18"))
-  expect_equal(n_class(res$svg, "bnd-chrom-label"), 3)
+  expect_equal(res$data$chromosomes, '["chr8","chr14","chr18"]')
+  expect_equal(length(gregexpr('["severus', res$data$links, fixed = TRUE)[[1]]), 3L)
 
-  expect_equal(res$n_genes, nrow(g))
-  expect_equal(n_class(res$svg, "bnd-gene-body"), nrow(g))
-  expect_equal(n_class(res$svg, "bnd-gene-label"), nrow(g))
-  expect_true(n_class(res$svg, "bnd-gene-line") >= nrow(g))
-  genes_out = unique(unlist(regmatches(res$svg, gregexpr('data-gene="[^"]*"', res$svg))))
-  expect_setequal(genes_out, sprintf('data-gene="%s"', sort(unique(g$gene))))
-
-  # The whole point of the rewrite: no drawing colour survives into the output, and
-  # svglite's own global stylesheet no longer targets bare element names.
-  expect_false(grepl(BND_SENTINEL_RE, res$svg))
-  expect_false(grepl(".svglite ", res$svg, fixed = TRUE))
-  expect_true(startsWith(res$svg, "<svg"))
+  # Cytobands are restricted to the plotted sectors: the payload is inlined into a
+  # self-contained HTML file, so shipping all 1549 hg38 bands would be waste.
+  expect_false(grepl('["chr1",', res$data$cytobands, fixed = TRUE))
+  expect_true(grepl('["chr8",', res$data$cytobands, fixed = TRUE))
 })
 
-test_that("draw_bnd_circos renders without genes", {
-  skip_if_not_installed("circlize")
-  bl  = bnd_links(sv_fixture(), chroms_hg38())
-  res = draw_bnd_circos(bl, NULL, cyto_hg38(), lens_hg38(), chroms_hg38())
-
-  expect_true(res$interactive)
+test_that("bnd_circos_data emits an empty gene array when no panel carries coordinates", {
+  chroms = chroms_hg38()
+  res = bnd_circos_data(bnd_links(sv_fixture(), chroms), NULL,
+                        cyto_hg38(), lens_hg38(), chroms)
+  expect_equal(res$data$genes, "[]")
   expect_equal(res$n_genes, 0L)
-  expect_equal(n_class(res$svg, "bnd-gene-body"), 0)
-  expect_equal(n_class(res$svg, "bnd-gene-label"), 0)
 })
 
-test_that("draw_bnd_circos declines rather than drawing nothing or everything", {
-  skip_if_not_installed("circlize")
+test_that("bnd_circos_data declines rather than emitting nothing or everything", {
   chroms = chroms_hg38()
 
-  none = draw_bnd_circos(bnd_links(sv_fixture()[0], chroms), NULL,
+  none = bnd_circos_data(bnd_links(sv_fixture()[0], chroms), NULL,
                          cyto_hg38(), lens_hg38(), chroms)
-  expect_null(none$svg)
+  expect_null(none$data)
   expect_match(none$reason, "nothing to draw")
 
-  bl  = bnd_links(sv_fixture(), chroms)
-  big = bl[rep(1L, BND_CIRCOS_MAX_LINKS + 1L)]
-  over = draw_bnd_circos(big, NULL, cyto_hg38(), lens_hg38(), chroms)
-  expect_null(over$svg)
-  expect_match(over$reason, as.character(BND_CIRCOS_MAX_LINKS))
+  big = bnd_links(sv_fixture(), chroms)
+  big = rbindlist(rep(list(big), ceiling((BND_CIRCOS_MAX_LINKS + 1) / nrow(big))))
+  over = bnd_circos_data(big, NULL, cyto_hg38(), lens_hg38(), chroms)
+  expect_null(over$data)
+  expect_match(over$reason, "more than this plot can show")
 })
 
-# ---- .tag_bnd_svg --------------------------------------------------------
-
-test_that(".tag_bnd_svg leaves colours it does not own alone", {
-  # #101010 matches the sentinel pattern but is a plausible cytoband grey, so it must
-  # survive untouched; only a colour in the registry is rewritten.
-  txt = paste(
-    "<svg>",
-    "<polygon points='0,0' style='fill: #101010;' />",
-    "<polyline points='0,0' style='stroke: #100001;' />",
-    "</svg>", sep = "\n")
-  out = .tag_bnd_svg(txt, list(`#100001` = list(family = "link", attrs = 'class="bnd-link"')))
-
-  expect_true(grepl("#101010", out$svg, fixed = TRUE))
-  expect_false(grepl("#100001", out$svg, fixed = TRUE))
-  expect_equal(out$seen, "#100001")
-  expect_true(grepl('<polyline class="bnd-link"', out$svg, fixed = TRUE))
+test_that("bnd_circos_data clamps a locus past the end of its sector", {
+  chroms = chroms_hg38()
+  sv = sv_fixture()[1]
+  sv$pos_b = 999000000L   # past the end of chr14
+  res = bnd_circos_data(bnd_links(sv, chroms), NULL, cyto_hg38(), lens_hg38(), chroms)
+  # Clamped rather than dropped: dropping it would break the arc's cross-link to its row.
+  expect_equal(res$n_links, 1L)
+  expect_true(grepl(format(lens_hg38()[["chr14"]], scientific = FALSE),
+                    res$data$links, fixed = TRUE))
 })
 
-test_that(".tag_bnd_svg refuses a label that is not the one it expected", {
-  txt = "<svg>\n<text style='fill: #300001;'>NOTMYC</text>\n</svg>"
-  out = .tag_bnd_svg(txt, list(
-    `#300001` = list(family = "gene", expect_text = "MYC",
-                     attrs = 'class="bnd-gene-label" data-gene="MYC"')))
+test_that("bnd_circos_script produces one assignable literal, and nothing when refused", {
+  chroms = chroms_hg38()
+  res = bnd_circos_data(bnd_links(sv_fixture(), chroms), NULL,
+                        cyto_hg38(), lens_hg38(), chroms)
+  js = bnd_circos_script(res)
+  expect_match(js, "^<script>window\\.BND_DATA=\\{")
+  expect_match(js, "\\};</script>$")
 
-  expect_equal(out$mismatched, "#300001")
-  expect_length(out$seen, 0)
-  expect_false(grepl("bnd-gene-label", out$svg, fixed = TRUE))
+  expect_equal(bnd_circos_script(list(data = NULL)), "")
 })
+
+# ---- js_vec / js_rows ----------------------------------------------------
+
+test_that("js_vec and js_rows emit valid literals, with NA as null", {
+  expect_equal(js_vec(character(0)), "[]")
+  expect_equal(js_vec(c("a", NA)), '["a",null]')
+  expect_equal(js_vec(c(1, 2.5)), "[1,2.5]")
+  # A coordinate must not come out in scientific notation: 2.48956422e+08 is valid JS but
+  # reads back as a different number than the base pair it names.
+  expect_equal(js_vec(248956422), "[248956422]")
+
+  dt = data.table(a = c("x", "y"), b = c(1L, NA_integer_))
+  expect_equal(js_rows(dt, c("a", "b")), '[["x",1],["y",null]]')
+  expect_equal(js_rows(data.table(), "a"), "[]")
+})
+
