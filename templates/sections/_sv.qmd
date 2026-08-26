@@ -8,6 +8,62 @@ if (is.null(sv_table) || nrow(sv_table) == 0) {
 }
 ```
 
+```{r sv-bnd-circos}
+# Breakend circos: the same rearrangements as the table below, drawn as arcs over just
+# the chromosomes they touch. Inlined rather than embedded as a base64 <img> like the
+# genome-wide circos, because the arcs have to be reachable from the page's own script —
+# see R/circos_bnd.R.
+bnd_res = NULL
+if (!is.null(sv_table) && nrow(sv_table) > 0) {
+  bnd_res = tryCatch({
+    # One filtered set feeds both calls, so the gene track cannot label an arc that was
+    # never drawn.
+    bnd_drawn = bnd_links(sv_table, chromosomes)
+    draw_bnd_circos(bnd_drawn,
+                    bnd_panel_genes(bnd_drawn, params$all_panels),
+                    cytobands, chrom_lens, chromosomes)
+  }, error = function(e) {
+    message("Breakend circos failed: ", conditionMessage(e))
+    NULL
+  })
+}
+
+if (!is.null(bnd_res) && !is.null(bnd_res$svg)) {
+  legend_item = function(swatch, var, label) {
+    tags$div(class = "circos-legend__item",
+             tags$span(class = paste0("circos-swatch--", swatch),
+                       style = paste0("--_swatch: var(", var, ")")),
+             label)
+  }
+  tagList(
+    tags$p(class = "circos-eyebrow",
+           sprintf("Breakends · %d chromosome%s · %s",
+                   length(bnd_res$chroms),
+                   if (length(bnd_res$chroms) == 1) "" else "s",
+                   if (isTRUE(bnd_res$interactive))
+                     "select a row below to highlight its arc"
+                   else "row highlighting unavailable")),
+    tags$div(class = "bnd-circos", HTML(bnd_res$svg)),
+    tags$div(class = "circos-legend",
+      tags$div(class = "circos-legend__group",
+        tags$div(class = "circos-legend__title", "Breakend circos"),
+        legend_item("arc", "--circos-bnd",          "Rearrangement"),
+        legend_item("arc", "--circos-bnd-selected", "Selected in the table"),
+        legend_item("bar", "--circos-bnd-gene",     "Panel gene")
+      )
+    ),
+    tags$p(class = "bnd-circos-caption", tags$span(id = "bnd-shown-count")),
+    # An untagged plot is still a useful figure, but it must not claim to highlight:
+    # a mismatch means the arcs and the rows are no longer the same objects.
+    if (!isTRUE(bnd_res$interactive))
+      section_notice(paste("The arcs could not be matched to table rows, so selecting a",
+                           "row will not highlight one. The plot itself is unaffected."))
+  )
+} else if (!is.null(bnd_res)) {
+  section_notice(bnd_res$reason)
+}
+```
+
 ```{r sv-prepare, results='asis'}
 # Column positions are published from R rather than scraped from the rendered header:
 # see the panel-filter script in per_sample.qmd.
@@ -50,6 +106,12 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
     rownames   = FALSE,
     filter     = "top",
     elementId  = "sv-table",
+    # A static DT widget carries no selection config, and the binding then defaults
+    # data.selection.mode to "none" and does no row selection at all
+    # (DT/htmlwidgets/datatables.js:230). Saying so explicitly keeps that true if this
+    # table ever gains a server/Shiny mode, so the breakend circos's own selection below
+    # stays the only one and cannot end up fighting DT's `.selected` styling.
+    selection  = "none",
     extensions = c("Buttons", "Scroller"),
     options    = list(
       dom       = "Bfrtip",
@@ -76,6 +138,150 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
       )
     )
   dtbl
+}
+```
+
+```{r sv-bnd-circos-js, results='asis'}
+# Cross-link the table to the circos. This owns the row selection outright — see the
+# `selection` note above. Row identity comes from the DataTables API rather than from a
+# DOM id, because Scroller plus deferRender recycle the <tr> nodes, which is also why the
+# selected class is re-applied on every draw; the arcs are found by the data-svid R wrote
+# onto them.
+if (!is.null(bnd_res) && !is.null(bnd_res$svg)) {
+  cat("<script>\n")
+  cat("const BND_INTERACTIVE = ", if (isTRUE(bnd_res$interactive)) "true" else "false",
+      ";\n", sep = "")
+  cat(r"----(
+(function () {
+  // Quarto's HTML pipeline lowercases attribute names, so svglite's `viewBox` reaches
+  // the page as `viewbox`. An HTML parser is meant to case-correct SVG attributes back
+  // (the "adjust SVG attributes" table), but SVG attributes are case-sensitive once
+  // parsed and a plain `viewbox` leaves the plot with no viewBox at all — which means
+  // no aspect ratio, so `height: auto` cannot scale it. Repairing it here is a no-op
+  // wherever the parser already did the right thing.
+  document.querySelectorAll(".bnd-circos svg").forEach(function (el) {
+    const vb = el.getAttribute("viewBox") || el.getAttribute("viewbox");
+    if (vb && !el.getAttribute("viewBox")) el.setAttribute("viewBox", vb);
+    // The intrinsic pt size fights `width: 100%`; the viewBox is the only size it needs.
+    el.removeAttribute("width");
+    el.removeAttribute("height");
+  });
+
+  if (!BND_INTERACTIVE) return;
+
+  const SELECTED = new Set();
+  // null until the first sync: everything drawn counts as visible.
+  let visibleIds = null;
+  let visibleGenes = new Set();
+
+  const table = () => (window.svTableElem ? $(window.svTableElem).DataTable() : null);
+  const all = (sel) => document.querySelectorAll(".bnd-circos " + sel);
+
+  function rowId(row) {
+    const cols = window.SV_COLS || {};
+    return cols["id"] === undefined ? null : String(row[cols["id"]]);
+  }
+
+  // The panel genes a row hits, from the very predicate that fills its panel_hit cell —
+  // so a gene is labelled on the plot exactly when it is named in the table. Labels
+  // arrive as "MYC (A), BCL2 (B)".
+  function rowGenes(row) {
+    if (!window.svPanelHits) return [];
+    return window.svPanelHits(row, window.SV_COLS)
+      .map((lab) => lab.split(" (")[0])
+      .join(",")
+      .split(",")
+      .map((g) => g.trim().toUpperCase())
+      .filter((g) => g.length > 0);
+  }
+
+  function apply() {
+    const liveChroms = new Set();
+    all(".bnd-link").forEach(function (el) {
+      const id = el.getAttribute("data-svid");
+      const shown = visibleIds === null || visibleIds.has(id);
+      const picked = SELECTED.has(id);
+      el.classList.toggle("is-dim", !shown);
+      el.classList.toggle("is-selected", picked);
+      // SVG has no z-index: a highlighted arc is raised by being re-appended.
+      if (picked) el.parentNode.appendChild(el);
+      if (shown) {
+        liveChroms.add(el.getAttribute("data-chrom-a"));
+        liveChroms.add(el.getAttribute("data-chrom-b"));
+      }
+    });
+    all(".bnd-chrom-label").forEach(function (el) {
+      el.classList.toggle("is-dim", !liveChroms.has(el.getAttribute("data-chrom")));
+    });
+    [".bnd-gene-body", ".bnd-gene-label", ".bnd-gene-line"].forEach(function (sel) {
+      all(sel).forEach(function (el) {
+        const g = (el.getAttribute("data-gene") || "").toUpperCase();
+        el.classList.toggle("is-hidden", !visibleGenes.has(g));
+      });
+    });
+    caption();
+  }
+
+  function caption() {
+    const el = document.getElementById("bnd-shown-count");
+    if (!el) return;
+    const total = all(".bnd-link").length;
+    const shown = all(".bnd-link:not(.is-dim)").length;
+    const genes = all(".bnd-gene-label:not(.is-hidden)").length;
+    const parts = [shown + " of " + total + " arc" + (total === 1 ? "" : "s") + " shown"];
+    if (genes > 0) parts.push(genes + " panel gene" + (genes === 1 ? "" : "s"));
+    if (SELECTED.size > 0) parts.push(SELECTED.size + " selected");
+    el.textContent = parts.join(" · ");
+  }
+
+  // Re-apply the selected class to the rows currently rendered. Scroller destroys and
+  // rebuilds <tr> nodes, so this has to run on every draw, not just on click.
+  function paintRows() {
+    const t = table();
+    if (!t) return;
+    $(t.table().body()).find("tr").each(function () {
+      const d = t.row(this).data();
+      if (!d) return;
+      const id = rowId(d);
+      $(this).toggleClass("bnd-selected", id !== null && SELECTED.has(id));
+    });
+  }
+
+  window.bndSyncFilter = function () {
+    const t = table();
+    if (!t) return;
+    const ids = new Set();
+    const genes = new Set();
+    t.rows({ search: "applied" }).data().each(function (row) {
+      const id = rowId(row);
+      if (id !== null) ids.add(id);
+      rowGenes(row).forEach((g) => genes.add(g));
+    });
+    visibleIds = ids;
+    visibleGenes = genes;
+    apply();
+    paintRows();
+  };
+
+  $(document).on("click", "#sv-table tbody tr", function () {
+    const t = table();
+    if (!t) return;
+    const d = t.row(this).data();
+    if (!d) return;
+    const id = rowId(d);
+    if (id === null) return;
+    if (SELECTED.has(id)) SELECTED.delete(id); else SELECTED.add(id);
+    $(this).toggleClass("bnd-selected", SELECTED.has(id));
+    apply();
+  });
+
+  // Covers the per-column search boxes too, which do not go through redraw().
+  $(document).on("draw.dt", function (e) {
+    if (e.target === window.svTableElem) window.bndSyncFilter();
+  });
+})();
+)----")
+  cat("\n</script>\n")
 }
 ```
 
@@ -122,6 +328,19 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   else
     "No SV annotation file was found, so the breakend gene columns are empty."
 
+  # What the circos above is showing, said once, next to the numbers it shares with the
+  # table. Only mentioned when there is a plot to explain.
+  circos_note = if (!is.null(bnd_res) && !is.null(bnd_res$svg))
+    sprintf(paste("The circos above draws one arc per breakend with both loci mapped,",
+                  "over the %d chromosome%s they touch. Gene bodies are the panel genes",
+                  "within %s of a breakend — the same test that fills the %s column, so",
+                  "a gene is drawn exactly when a visible row names it, and a panel",
+                  "carrying no coordinates draws none. Bodies are markers at a minimum",
+                  "visible width, not spans to scale."),
+            length(bnd_res$chroms), if (length(bnd_res$chroms) == 1) "" else "s",
+            fmt_bp(SV_PANEL_WINDOW_BND), code("panel_hit"))
+  else NULL
+
   tags$p(
     class = "table-footnote",
     HTML(paste(
@@ -131,7 +350,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
                 sprintf(" (%s interchromosomal, %s intra-chromosomal breakend%s)",
                         n_trans, n_intra_bnd, if (n_intra_bnd == 1) "" else "s")
               else ""),
-      annot_note, panel_note))
+      annot_note, panel_note, circos_note))
   )
 }
 ```

@@ -114,6 +114,10 @@ $border-radius-lg:     12px;
   --circos-cnv-total: #1b1e22;
   // BND/translocation
   --circos-bnd:     #8a5fa3;
+  // Breakend circos only (R/circos_bnd.R): the arc a table row selects, and the
+  // panel-gene bodies drawn on the ideogram.
+  --circos-bnd-selected: #d7263d;
+  --circos-bnd-gene:     #0d5c75;
 
   // Metric-card accent colours
   --metric-purity:     #{$report-danger};
@@ -151,6 +155,8 @@ $border-radius-lg:     12px;
     // Circos legend swatches that would be invisible on dark bg — lighten to match --color-text
     --circos-snv-cg:        #e8e6df;
     --circos-cnv-total:     #e8e6df;
+    // The breakend circos keeps a light plate, so its own colours are unchanged; only
+    // the caption and the selected-row tint sit on the dark surface.
   }
 
   body { background: var(--color-bg) !important; color: var(--color-text) !important; }
@@ -860,6 +866,77 @@ div.dt-buttons {
 @media print {
   .circos-legend { border-top-color: #ccc; }
   .circos-eyebrow { color: #666; }
+}
+
+// ============================================================
+// Breakend circos — inline SVG, cross-linked to the SV table
+// ============================================================
+// This plot is inlined rather than embedded as a base64 <img>, so that page CSS and
+// JS can reach its arcs at all. Its styling therefore lives here rather than in the
+// drawing code: R/circos_bnd.R strips the inline `style` off every tagged shape so
+// that these rules own stroke, width and opacity.
+//
+// They must stay nested under .bnd-circos. svglite ships its own
+// `.bnd-svglite polyline { stroke: #000000; fill: none }` rule inside the SVG, and at
+// specificity (0,1,1) that beats a bare `.bnd-link` — the arcs would render black.
+.bnd-circos {
+  background: #fcfbf7;
+  border: 1px solid #d8d3c8;
+  border-radius: var(--card-radius);
+  padding: 18px 18px 10px;
+  box-shadow: var(--card-shadow), inset 0 0 0 1px rgba(255,255,255,0.6);
+  max-width: 640px;
+  margin: 0 auto;
+  // The plate stays light in dark mode, as .circos-container does, which is also what
+  // lets the labels resolve currentColor to dark ink in both themes.
+  color: #1b1e22;
+
+  svg { width: 100%; height: auto; display: block; }
+
+  .bnd-link {
+    fill: none;
+    stroke: var(--circos-bnd);
+    stroke-width: 1;
+    opacity: 0.5;
+    transition: opacity 0.12s ease, stroke 0.12s ease, stroke-width 0.12s ease;
+  }
+  // Filtered out of the table: kept in place rather than hidden, so the arcs that
+  // survive a panel keep their context.
+  .bnd-link.is-dim { opacity: 0.05; }
+  .bnd-link.is-selected {
+    stroke: var(--circos-bnd-selected);
+    stroke-width: 2.4;
+    opacity: 1;
+  }
+
+  .bnd-gene-body { fill: var(--circos-bnd-gene); stroke: none; }
+  .bnd-gene-line { fill: none; stroke: #b8b2a6; stroke-width: 0.8; }
+  .bnd-chrom-label.is-dim { opacity: 0.28; }
+
+  .is-hidden { display: none; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .bnd-circos {
+    border-color: #4a4540;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.5), 0 8px 32px -8px rgba(0,0,0,0.7);
+  }
+}
+
+.bnd-circos-caption {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  text-align: center;
+  margin: 0.55rem 0 0;
+}
+
+// Rows picked in the SV table — the ones whose arcs are highlighted
+#sv-table table.dataTable tbody tr { cursor: pointer; }
+#sv-table table.dataTable tbody tr.bnd-selected td {
+  background: var(--color-primary-muted) !important;
+  box-shadow: inset 3px 0 0 var(--circos-bnd-selected);
 }
 
 // ============================================================

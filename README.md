@@ -4,6 +4,7 @@ Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomat
 
 - **Summary header**: purity, ploidy, coverage, N50, variant counts
 - **Circos plot**: somatic SNVs (6-class SBS colours), non-BND SVs, ASCAT copy number, translocation links
+- **Breakend circos**: a second circos over just the chromosomes a breakend touches, with panel gene bodies and names; selecting a row in the SV table highlights that rearrangement's arc, and the gene-panel filter dims the arcs it hides
 - **Interactive variant table**: VEP-annotated somatic small variants, optionally filtered to a gene panel, with VAF, depth and phasing
 - **Interactive SV table**: Severus structural variants, one row per rearrangement with both breakend loci, sharing the same gene-panel filter (matched on breakend position)
 - **Phasing**: per-chromosome WhatsHap statistics (germline)
@@ -202,7 +203,8 @@ lrsomatic_report/
 │   ├── parse_severus.R          Severus VCF parsing (mate-collapsed), SV table, panel matching
 │   ├── parse_ascat.R            ASCAT segments + purity/ploidy parsers
 │   ├── parse_qc.R               Mosdepth, cramino, flagstat parsers
-│   └── circos.R                 draw_circos() — generates the circos SVG
+│   ├── circos.R                 draw_circos() — the genome-wide circos SVG
+│   └── circos_bnd.R             draw_bnd_circos() — the breakend circos, inline and row-linked
 ├── templates/per_sample.qmd    Quarto template (HTML report)
 ├── assets/
 │   ├── references/{t2t,hg38}/  Cytobands + chrom lengths (bundled, no network needed)
