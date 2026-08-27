@@ -9,6 +9,14 @@ suppressPackageStartupMessages({
 # row per rearrangement carrying *both* breakend loci.
 BND_SVTYPES = c("BND", "sBND")
 
+# The BND-derived `svclass` values (see the fcase in parse_severus_somatic_records()).
+# What these three share against DEL/DUP/INV/INS is what sv_display_columns() turns on:
+# a junction is *two loci*, so it has no span and no size, while a contiguous type is
+# *one span* whose two records are its own start and end. BND_CIRCOS_CLASSES
+# (R/circos_bnd.R) is this set minus "single breakend", which has no partner locus and
+# therefore no arc.
+SV_JUNCTION_CLASSES = c("translocation", "intra-chr breakend", "single breakend")
+
 # Panel-matching windows. Defined here as the single source of truth: they are
 # used by sv_panel_hits() below and emitted to the report's client-side filter
 # from templates/per_sample.qmd, so the R "Panel SVs" card and the JS row filter
@@ -264,6 +272,103 @@ build_sv_table_from_vep = function(records, vep_sv_vcf) {
             impact      = fifelse(use_b, b$impact,      a$impact))]
 
   sv[, ..out_cols]
+}
+
+# Human-readable location, size and gene columns for the SV table.
+#
+# The stored schema is bedpe-shaped (chrom_a/pos_a + chrom_b/pos_b) because that is the
+# only shape a translocation fits, and everything downstream reads it — sv_panel_hits(),
+# the client-side filter, bnd_links(). But it is the wrong *reading* for most rows: a
+# DEL's two records are its own start and end, not two partners, and its gene_a/gene_b
+# are just the genes at either edge of one span. So the raw columns stay (hidden in the
+# rendered table, and still exported) and these are shown instead.
+#
+# The rule is `svclass`, not "same chromosome": parse_severus_somatic_records() sets
+# chrom_b = chrom_a for DEL/DUP/INV/INS, so chrom_b == chrom_a is equally true of an
+# intra-chromosomal breakend — and there the two loci are a junction, not a span the
+# variant swallows. Keying off the contig would hand an intra-chr breakend a start, an
+# end and a size it does not have.
+#
+# Returns a data.table of five columns, one row per row of `sv_table`, same order:
+#   locus      the display string (see the fcase below)
+#   locus_sort sort key for `locus`, which as a display string sorts lexically
+#   size       fmt_bp() of size_bp; "" for a junction
+#   size_bp    the number behind `size`, and its sort key
+#   genes      merged for a span, side-labelled for a junction
+# `chrom_levels` orders the sort key: pass the report's plotted chromosome vector from
+# chromosomes_for_sex(), which is already in natural order. Contigs outside it sort last.
+sv_display_columns = function(sv_table, chrom_levels = NULL) {
+  empty = data.table(locus = character(), locus_sort = character(),
+                     size = character(), size_bp = numeric(), genes = character())
+  if (is.null(sv_table) || nrow(sv_table) == 0) return(empty)
+
+  d = as.data.table(sv_table)
+  need = c("svclass", "chrom_a", "pos_a", "chrom_b", "pos_b", "sv_len",
+           "gene_a", "gene_b")
+  absent = setdiff(need, names(d))
+  if (length(absent) > 0)
+    stop("sv_display_columns(): sv_table is missing ", paste(absent, collapse = ", "))
+
+  is_junction = d$svclass %in% SV_JUNCTION_CLASSES
+  pa = suppressWarnings(as.numeric(d$pos_a))
+  pb = suppressWarnings(as.numeric(d$pos_b))
+
+  # formatC(), not format(): format() is vectorised to a *common* width and would pad
+  # every position out to the longest one in the table.
+  bp = function(x) formatC(x, format = "d", big.mark = ",")
+  at = function(chrom, pos) paste0(chrom, ":", bp(pos))
+
+  locus = fcase(
+    is.na(pa) | is.na(d$chrom_a),   NA_character_,
+    d$svclass == "single breakend", paste0(at(d$chrom_a, pa), " (unpaired)"),
+    is_junction,
+      # An arrow, not a dash: these two loci are joined, they do not bound a span. Both
+      # sides are named even for an intra-chromosomal junction, so a per-column search
+      # for a chromosome matches it on either side.
+      fifelse(is.na(pb) | is.na(d$chrom_b),
+              paste0(at(d$chrom_a, pa), " (unpaired)"),
+              paste0(at(d$chrom_a, pa),
+                     fifelse(d$svclass == "translocation", " → ", " ↔ "),
+                     at(d$chrom_b, pb))),
+    # A contiguous type: one span. An INS has END == POS, so it is a single point.
+    default = fifelse(is.na(pb) | pb <= pa,
+                      at(d$chrom_a, pa),
+                      paste0(at(d$chrom_a, pa), "–", bp(pb)))
+  )
+
+  # SVLEN where Severus wrote one — an INS's length is *not* its span — else the span.
+  len = suppressWarnings(as.numeric(d$sv_len))
+  size_bp = fifelse(is_junction, NA_real_, fifelse(!is.na(len), abs(len), pb - pa))
+  # as.character() is load-bearing: fmt_bp() is built on ifelse(), which returns a vector
+  # typed after its *test*, so an all-NA size_bp — every row a junction, i.e. a BND-only
+  # SV table — comes back logical and the fifelse() below would reject the type mismatch.
+  size = as.character(fmt_bp(size_bp))
+
+  split_genes = function(x) {
+    if (is.na(x) || !nzchar(x)) return(character())
+    g = trimws(strsplit(x, ",", fixed = TRUE)[[1]])
+    unique(g[nzchar(g)])
+  }
+  # A middot rather than the whitespace a mock-up would use: DT escapes cell content, so
+  # &nbsp; is unavailable, and HTML collapses a run of spaces to one.
+  genes = vapply(seq_len(nrow(d)), function(i) {
+    a = split_genes(d$gene_a[i]); b = split_genes(d$gene_b[i])
+    if (!is_junction[i]) return(paste(unique(c(a, b)), collapse = ", "))
+    sides = c(if (length(a)) paste0("A: ", paste(a, collapse = ",")),
+              if (length(b)) paste0("B: ", paste(b, collapse = ",")))
+    paste(sides, collapse = " · ")
+  }, character(1))
+
+  rank = if (length(chrom_levels)) match(d$chrom_a, chrom_levels)
+         else rep(NA_integer_, nrow(d))
+  rank[is.na(rank)] = 999L
+  locus_sort = fifelse(is.na(pa), "", sprintf("%03d:%011.0f", rank, pa))
+
+  data.table(locus      = fifelse(is.na(locus), "", locus),
+             locus_sort = locus_sort,
+             size       = fifelse(is.na(size), "", size),
+             size_bp    = size_bp,
+             genes      = genes)
 }
 
 # Which panel genes each SV hits, and how it hit them.
