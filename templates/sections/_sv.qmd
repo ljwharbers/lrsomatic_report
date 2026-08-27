@@ -77,7 +77,14 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   # existing redraw. The load-time panel's hits are already in sv_panel_hit (same
   # function, same windows) and drive the "Panel SVs" card.
   sv_display[, panel_hit := ""]
-  setcolorder(sv_display, c("id", "panel_hit"))
+  # Readable location/size/gene columns. The bedpe-shaped raw columns stay in the frame
+  # — hidden below, but still read by every by-name lookup in the JS layer and still
+  # exported — so this is presentation only: see sv_display_columns() in
+  # R/parse_severus.R for why svclass, not the contig, decides what a row means.
+  sv_display = cbind(sv_display, sv_display_columns(sv_display, chromosomes))
+  setcolorder(sv_display, c("id", "panel_hit", "svclass", "svtype",
+                            "locus", "size", "genes",
+                            "vaf", "consequence", "impact", "caller"))
   cat("<script>window.SV_COLS = ", js_col_index_map(names(sv_display)), ";</script>\n",
       sep = "")
 }
@@ -88,8 +95,8 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   idx0 = function(nm) which(names(sv_display) == nm) - 1L
 
   # A breakend annotated as truncating a whole span can carry a hundred-odd symbols.
-  # Truncate the *display* only — sorting, searching and the CSV/copy buttons below
-  # use the "sort" rendering, which returns the full list.
+  # Truncate the *display* only — sorting, searching and the CSV/copy buttons below ask
+  # for other renderings, all of which return the full list.
   gene_render = JS(
     "function(data, type) {",
     "  if (type !== 'display' || !data) return data;",
@@ -105,6 +112,29 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
     "  return window.svPanelHitLabel ? window.svPanelHitLabel(row, window.SV_COLS) : '';",
     "}")
 
+  # `locus` and `size` are formatted strings, so they sort lexically — "chr2:…" after
+  # "chr13:…", "613 kb" after "1.2 Mb". Sort them on the hidden numeric column built
+  # alongside each. Only the sort types are redirected: display, filter and export all
+  # fall through to the readable string, which is what lets a per-column search for
+  # "chr8" match a translocation on *either* side — something the chrom_a box could not.
+  orthogonal_render = function(key) JS(
+    "function(data, type, row) {",
+    "  if (type !== 'sort' && type !== 'type') return data;",
+    "  const cols = window.SV_COLS || {};",
+    sprintf("  const k = cols['%s'];", key),
+    "  return k === undefined ? data : row[k];",
+    "}")
+
+  # Kept in the frame, out of the view: every by-name lookup in the JS layer reads these
+  # (svPanelHits() in per_sample.qmd, rowId() below), and the export selector below keeps
+  # them in the CSV. DataTables hands render and search callbacks the whole row array,
+  # invisible columns included, so hiding them costs nothing downstream.
+  hidden = c("chrom_a", "pos_a", "chrom_b", "pos_b", "gene_a", "gene_b",
+             "sv_len", "size_bp", "locus_sort")
+
+  exp_opts = list(orthogonal = "export",
+                  columns    = seq_len(ncol(sv_display)) - 1L)
+
   dtbl = DT::datatable(
     sv_display,
     rownames   = FALSE,
@@ -119,8 +149,13 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
     extensions = c("Buttons", "Scroller"),
     options    = list(
       dom       = "Bfrtip",
-      buttons   = list(list(extend = "copy", exportOptions = list(orthogonal = "sort")),
-                       list(extend = "csv",  exportOptions = list(orthogonal = "sort"))),
+      # "export" rather than "sort": the sort rendering of `locus` is now a zero-padded
+      # key, and of `size` a bare number. Neither renderer recognises "export", so both
+      # fall through to the full readable string — untruncated, since only "display"
+      # truncates. The explicit column list keeps the hidden raw coordinate columns in
+      # the download, which Buttons' ":visible" default would drop.
+      buttons   = list(list(extend = "copy", exportOptions = exp_opts),
+                       list(extend = "csv",  exportOptions = exp_opts)),
       scrollX   = TRUE,
       scrollY   = "350px",
       scroller  = TRUE,
@@ -128,7 +163,11 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
       pageLength = 25,
       columnDefs = list(
         list(targets = idx0("panel_hit"), render = panel_hit_render),
-        list(targets = c(idx0("gene_a"), idx0("gene_b")), render = gene_render)
+        list(targets = idx0("genes"),     render = gene_render),
+        list(targets = idx0("locus"),     render = orthogonal_render("locus_sort")),
+        list(targets = idx0("size"),      render = orthogonal_render("size_bp")),
+        list(targets = vapply(hidden, idx0, integer(1), USE.NAMES = FALSE),
+             visible = FALSE)
       ),
       initComplete = JS("function() { window.svTableElem = this.api().table().node(); }")
     )
@@ -319,7 +358,25 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
                   "annotation dropped (it keeps only FILTER PASS) have none."),
             code(rel(SECTION_DATA$sv$annotation_path)))
   else
-    "No SV annotation file was found, so the breakend gene columns are empty."
+    "No SV annotation file was found, so the gene column is empty."
+
+  # The point of the locus/size convention, said where the columns are: a contiguous type
+  # is one span, a breakend is two joined loci, and conflating them is exactly what the
+  # old chrom_a/pos_a/chrom_b/pos_b columns invited.
+  locus_note = sprintf(paste("%s reads as a span (%s) for a contiguous type and as two",
+                             "joined loci (%s or %s) for a breakend, which is also why %s",
+                             "is blank for a breakend: its two loci bound no interval, so",
+                             "there is no length to report. The underlying %s columns are",
+                             "hidden rather than dropped — they are still what the panel",
+                             "filter matches on, and the copy and CSV buttons still export",
+                             "them. %s merges both sides for a contiguous type and labels",
+                             "them %s and %s for a breakend, where which partner carries",
+                             "which gene is the point."),
+                       code("locus"), code("chr13:48,303,151–48,915,700"),
+                       code("→"), code("↔"), code("size"),
+                       paste(code("chrom_a"), code("pos_a"), code("chrom_b"),
+                             code("pos_b"), sep = ", "),
+                       code("genes"), code("A:"), code("B:"))
 
   # What the circos above is showing, said once, next to the numbers it shares with the
   # table. Only mentioned when there is a plot to explain.
@@ -345,7 +402,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
                 sprintf(" (%s interchromosomal, %s intra-chromosomal breakend%s)",
                         n_trans, n_intra_bnd, if (n_intra_bnd == 1) "" else "s")
               else ""),
-      annot_note, panel_note, circos_note))
+      locus_note, annot_note, panel_note, circos_note))
   )
 }
 ```

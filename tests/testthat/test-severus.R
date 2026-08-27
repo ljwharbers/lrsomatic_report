@@ -278,3 +278,112 @@ test_that("build_sv_table maps the gene-annotated TSV onto the shared schema", {
   expect_equal(sv_panel_hits(t, coord_panel("NEAR", "chr7", 6000, 6100))[2],
                "NEAR (B, direct)")
 })
+
+# ---- The display columns ------------------------------------------------
+#
+# Nothing else in the suite pins the SV table's column set, so a rename anywhere along
+# the chain that feeds the report fails silently. These do.
+
+SV_OUT_COLS = c("id", "svclass", "svtype", "chrom_a", "pos_a", "gene_a",
+                "chrom_b", "pos_b", "gene_b", "sv_len", "vaf",
+                "consequence", "impact")
+
+test_that("both SV table builders return exactly the shared column contract", {
+  sv = write_severus_vcf(mate_pair())
+  on.exit(unlink(sv))
+  expect_equal(names(build_sv_table_from_vep(sv, NULL)), SV_OUT_COLS)
+
+  tsv = data.table(
+    ID = "SV1", SVTYPE = "DEL", DETAILED_TYPE = "DEL",
+    START_CHROM = "chr1", START_POS = 1000L, END_CHROM = "chr1", END_POS = 5000L,
+    SV_LEN = 4000L, VAF = 0.4, NHL_GENE_HITS = "MYC"
+  )
+  expect_equal(names(build_sv_table(tsv)), SV_OUT_COLS)
+
+  # And everything sv_display_columns() reads is in that contract, so the display frame
+  # cannot be built from columns the builders don't promise.
+  expect_true(all(c("svclass", "chrom_a", "pos_a", "chrom_b", "pos_b", "sv_len",
+                    "gene_a", "gene_b") %in% SV_OUT_COLS))
+})
+
+# One row per svclass, in the order the display rules branch on them.
+display_rows = function() data.table(
+  svclass = c("DEL", "DUP", "INS", "translocation", "intra-chr breakend",
+              "single breakend"),
+  svtype  = c("DEL", "DUP", "INS", "BND", "BND", "sBND"),
+  chrom_a = c("chr13", "chr9", "chr2", "chr1", "chr17", "chr5"),
+  pos_a   = c(48303151L, 21700000L, 60780110L, 1234567L, 7120400L, 12345678L),
+  chrom_b = c("chr13", "chr9", "chr2", "chr8", "chr17", NA_character_),
+  pos_b   = c(48915700L, 21995300L, 60780110L, 128000000L, 9880100L, NA_integer_),
+  sv_len  = c(612549L, 295300L, 1200L, NA_integer_, NA_integer_, NA_integer_),
+  gene_a  = c("RB1,GPC5", "CDKN2A", "BCL11A", "BCL2", "TP53", NA_character_),
+  gene_b  = c("GPC5,PTEN", NA_character_, NA_character_, "MYC", NA_character_,
+              NA_character_)
+)
+
+test_that("locus reads as a span for a contiguous type and as joined loci for a breakend", {
+  d = sv_display_columns(display_rows(), paste0("chr", c(1:22, "X", "Y")))
+
+  expect_equal(d$locus, c(
+    "chr13:48,303,151–48,915,700",        # DEL: one span
+    "chr9:21,700,000–21,995,300",         # DUP: one span
+    "chr2:60,780,110",                    # INS: END == POS, so a single point
+    "chr1:1,234,567 → chr8:128,000,000",  # translocation
+    "chr17:7,120,400 ↔ chr17:9,880,100",  # intra-chr: same contig, still a junction
+    "chr5:12,345,678 (unpaired)"          # single breakend: no partner locus
+  ))
+  # Positions are not padded to a common width, which vectorised format() would do.
+  expect_false(any(grepl("  ", d$locus)))
+})
+
+test_that("size is the length of a span and blank for every junction class", {
+  d = sv_display_columns(display_rows())
+  expect_equal(d$size[1:3], c("612.5 kb", "295.3 kb", "1.2 kb"))
+  # The whole point of branching on svclass rather than on chrom_b == chrom_a: an
+  # intra-chr breakend is on one contig but bounds no interval, so it has no size.
+  expect_equal(d$size[4:6], c("", "", ""))
+  expect_true(all(is.na(d$size_bp[4:6])))
+})
+
+test_that("size_bp falls back to the span when SVLEN is absent", {
+  rows = display_rows()[1]
+  rows[, sv_len := NA_integer_]
+  expect_equal(sv_display_columns(rows)$size_bp, 48915700 - 48303151)
+})
+
+test_that("genes merge for a span and are side-labelled for a junction", {
+  d = sv_display_columns(display_rows())
+  expect_equal(d$genes[1], "RB1, GPC5, PTEN")   # both edges of one span, deduplicated
+  expect_equal(d$genes[2], "CDKN2A")
+  # Which partner carries which gene is the point of a translocation.
+  expect_equal(d$genes[4], "A: BCL2 · B: MYC")
+  expect_equal(d$genes[5], "A: TP53")           # the empty side is omitted, not blank
+  expect_equal(d$genes[6], "")
+})
+
+test_that("locus_sort orders by chromosome then position, unlike the display string", {
+  d = sv_display_columns(display_rows(), paste0("chr", c(1:22, "X", "Y")))
+  # chr2 before chr13 — the lexical trap this key exists for.
+  expect_lt(d$locus_sort[3], d$locus_sort[1])
+  expect_lt(d$locus_sort[4], d$locus_sort[3])   # chr1 first
+  # A contig outside the plotted set sorts last rather than erroring.
+  odd = display_rows()[1]
+  odd[, chrom_a := "chrUn_KI270442v1"]
+  expect_gt(sv_display_columns(odd, "chr13")$locus_sort, d$locus_sort[1])
+})
+
+test_that("an SV table of nothing but junctions still builds its columns", {
+  # fmt_bp() is built on ifelse(), which types its result after the *test*, so an all-NA
+  # size_bp comes back logical. A BND-only sample is entirely plausible, and this used to
+  # take the whole section down with a fifelse() type mismatch.
+  d = sv_display_columns(display_rows()[4:6])
+  expect_type(d$size, "character")
+  expect_equal(d$size, c("", "", ""))
+  expect_equal(d$locus[1], "chr1:1,234,567 → chr8:128,000,000")
+})
+
+test_that("sv_display_columns is empty-safe and rejects a frame missing its inputs", {
+  expect_equal(nrow(sv_display_columns(NULL)), 0L)
+  expect_equal(nrow(sv_display_columns(data.table())), 0L)
+  expect_error(sv_display_columns(data.table(svclass = "DEL")), "missing")
+})
