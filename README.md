@@ -56,7 +56,10 @@ panel selected when the report opens — see [Gene panels](#gene-panels).
 >   translocations from intra-chromosomal breakends. The SV count and the circos links
 >   halve accordingly — they were double-counting. The single `gene_hits` column is
 >   replaced by per-breakend `gene_a`/`gene_b`, and a `panel_hit` column names which panel
->   gene matched, and on which side.
+>   gene matched, on which side, and how: each entry reads `GENE (side, how)` — for
+>   example `RB1 (span, direct)` when the span overlaps the gene, or `RB1 (B, 188.5 kb)`
+>   when breakend B only fell inside the search window. The windows are wide (1 Mb around a
+>   BND), so that second token is what separates a disrupted gene from a nearby one.
 > - SVs are matched against a gene panel by **coordinate**, not gene symbol, whenever the
 >   panel carries `chrom`/`start`/`end` — see [Gene panels](#gene-panels). The bundled
 >   `lymphoid.tsv` is replaced by `lymphoid.hg38.tsv` and `lymphoid.t2t.tsv`; a custom

@@ -216,25 +216,42 @@ test_that("a coordinate panel matches exactly at the window edge and not beyond 
   sv = sv_rows()
   # BND side A at chr8:1,000,000 — an interval starting exactly 1 Mb away matches.
   expect_equal(sv_panel_hits(sv, coord_panel("EDGE", "chr8", 2000000, 2000100))[1],
-               "EDGE (A)")
+               "EDGE (A, 1 Mb)")
   expect_equal(sv_panel_hits(sv, coord_panel("PAST", "chr8", 2000001, 2000100))[1], "")
   # DEL span chr10:5,000,000-5,100,000 — 100 kb window on the span, not on each end.
   expect_equal(sv_panel_hits(sv, coord_panel("EDGE", "chr10", 5200000, 5200100))[2],
-               "EDGE (span)")
+               "EDGE (span, 100 kb)")
   expect_equal(sv_panel_hits(sv, coord_panel("PAST", "chr10", 5200001, 5200100))[2], "")
+})
+
+test_that("a hit says whether it is on the gene or only near it", {
+  sv = sv_rows()
+  # The whole point of the second token: a breakend inside the gene and one most of a
+  # megabase away are both hits, and have to read differently.
+  expect_equal(sv_panel_hits(sv, coord_panel("INSIDE", "chr8", 999000, 1001000))[1],
+               "INSIDE (A, direct)")
+  expect_equal(sv_panel_hits(sv, coord_panel("NEARBY", "chr8", 1300000, 1310000))[1],
+               "NEARBY (A, 300 kb)")
+  # Distance is measured from the locus, not from the edge of the window around it.
+  expect_equal(sv_panel_hits(sv, coord_panel("CLOSE", "chr8", 1000500, 1001000))[1],
+               "CLOSE (A, 500 bp)")
+  # A DEL that swallows the gene is direct, however wide the deletion is.
+  expect_equal(sv_panel_hits(sv, coord_panel("SPANNED", "chr10", 5040000, 5060000))[2],
+               "SPANNED (span, direct)")
 })
 
 test_that("a panel interval matching only side B is still a hit", {
   sv = sv_rows()
   hits = sv_panel_hits(sv, coord_panel("FARSIDE", "chr14", 2000500, 2001000))
-  expect_equal(hits[1], "FARSIDE (B)")
+  expect_equal(hits[1], "FARSIDE (B, 500 bp)")
   expect_equal(hits[2], "")
 })
 
 test_that("a symbol-only panel matches either side's annotated gene, with no window", {
   sv = sv_rows()
   sym = list(has_coords = FALSE, genes = c("SOMEGENE", "OTHER"))
-  expect_equal(sv_panel_hits(sv, sym), c("SOMEGENE (A)", ""))
+  # No coordinates on this path, so a symbol hit is always reported as direct.
+  expect_equal(sv_panel_hits(sv, sym), c("SOMEGENE (A, direct)", ""))
   # A gene 1 Mb away is invisible to symbol matching — the failure this replaces.
   expect_equal(sv_panel_hits(sv, list(has_coords = FALSE, genes = "EDGE")), c("", ""))
 })
@@ -258,5 +275,6 @@ test_that("build_sv_table maps the gene-annotated TSV onto the shared schema", {
   expect_equal(t$svclass, c("DEL", "translocation"))
   expect_equal(t$gene_a[1], "MYC;BCL2")
   # Coordinate matching works on this path too, because it has both loci.
-  expect_equal(sv_panel_hits(t, coord_panel("NEAR", "chr7", 6000, 6100))[2], "NEAR (B)")
+  expect_equal(sv_panel_hits(t, coord_panel("NEAR", "chr7", 6000, 6100))[2],
+               "NEAR (B, direct)")
 })
