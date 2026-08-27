@@ -266,7 +266,7 @@ build_sv_table_from_vep = function(records, vep_sv_vcf) {
   sv[, ..out_cols]
 }
 
-# Which panel genes each SV hits.
+# Which panel genes each SV hits, and how it hit them.
 #
 # Coordinate-carrying panels (see load_gene_panel()) are matched on position: a panel
 # interval within `bnd_window` of either breakend of a BND, or within `other_window` of
@@ -277,9 +277,14 @@ build_sv_table_from_vep = function(records, vep_sv_vcf) {
 # A symbol-only panel falls back to a direct hit on either side's VEP symbol: today's
 # behaviour, but reading both breakends instead of one.
 #
-# Returns one character label per row of `sv_table` ("" = no hit), naming the matched
-# gene and the side it matched on. The "Panel SVs" summary card counts the non-empty
-# entries; the client-side filter applies the same test with the same windows.
+# Returns one character label per row of `sv_table` ("" = no hit). Each hit reads
+# "GENE (side, how)": `side` is the breakend it matched on (A/B, or "span" for a
+# contiguous type), and `how` is "direct" when the locus overlaps the gene interval, or
+# the distance to it otherwise. Without that second token a breakend most of a megabase
+# away reads exactly like one inside the gene — the BND window is wide, and proximity is
+# not disruption. The "Panel SVs" summary card counts the non-empty entries; the
+# client-side filter applies the same test with the same windows and builds the same
+# labels.
 sv_panel_hits = function(sv_table, panel,
                          bnd_window = SV_PANEL_WINDOW_BND,
                          other_window = SV_PANEL_WINDOW_OTHER) {
@@ -287,7 +292,7 @@ sv_panel_hits = function(sv_table, panel,
   if (n == 0) return(character(0))
   if (is.null(panel)) return(rep("", n))
 
-  label = function(genes, side) paste0(genes, " (", side, ")")
+  label = function(genes, side, how) paste0(genes, " (", side, ", ", how, ")")
 
   if (!isTRUE(panel$has_coords)) {
     symbols = toupper(panel$genes)
@@ -301,8 +306,11 @@ sv_panel_hits = function(sv_table, panel,
       }, character(1), USE.NAMES = FALSE)
     }
     ha = hit_side("gene_a"); hb = hit_side("gene_b")
+    # A VEP symbol sits on the breakend itself, so a symbol hit is always direct — and
+    # there are no coordinates on this path to measure anything else from.
     return(vapply(seq_len(n), function(i) {
-      parts = c(if (nzchar(ha[i])) label(ha[i], "A"), if (nzchar(hb[i])) label(hb[i], "B"))
+      parts = c(if (nzchar(ha[i])) label(ha[i], "A", "direct"),
+                if (nzchar(hb[i])) label(hb[i], "B", "direct"))
       paste(parts, collapse = ", ")
     }, character(1)))
   }
@@ -311,27 +319,37 @@ sv_panel_hits = function(sv_table, panel,
   if (is.null(iv) || nrow(iv) == 0) return(rep("", n))
 
   is_bnd = sv_table$svtype %in% BND_SVTYPES
+  # `start`/`end` are padded by the window and are what foverlaps() matches on. `qlo`/`qhi`
+  # carry the *unpadded* locus through the join: the gap to a gene has to be measured from
+  # where the breakend actually is, not from the edge of the window around it.
   q = rbindlist(list(
     # Each breakend of a BND gets its own window; the two sides can be on
     # different contigs, so they cannot be one interval.
     data.table(row = which(is_bnd), side = "A",
                chrom = sv_table$chrom_a[is_bnd],
                start = sv_table$pos_a[is_bnd] - bnd_window,
-               end   = sv_table$pos_a[is_bnd] + bnd_window),
+               end   = sv_table$pos_a[is_bnd] + bnd_window,
+               qlo   = sv_table$pos_a[is_bnd],
+               qhi   = sv_table$pos_a[is_bnd]),
     data.table(row = which(is_bnd), side = "B",
                chrom = sv_table$chrom_b[is_bnd],
                start = sv_table$pos_b[is_bnd] - bnd_window,
-               end   = sv_table$pos_b[is_bnd] + bnd_window),
+               end   = sv_table$pos_b[is_bnd] + bnd_window,
+               qlo   = sv_table$pos_b[is_bnd],
+               qhi   = sv_table$pos_b[is_bnd]),
     # Other types are contiguous: one window around the whole span.
     data.table(row = which(!is_bnd), side = "span",
                chrom = sv_table$chrom_a[!is_bnd],
                start = pmin(sv_table$pos_a[!is_bnd], sv_table$pos_b[!is_bnd]) - other_window,
-               end   = pmax(sv_table$pos_a[!is_bnd], sv_table$pos_b[!is_bnd]) + other_window)
+               end   = pmax(sv_table$pos_a[!is_bnd], sv_table$pos_b[!is_bnd]) + other_window,
+               qlo   = pmin(sv_table$pos_a[!is_bnd], sv_table$pos_b[!is_bnd]),
+               qhi   = pmax(sv_table$pos_a[!is_bnd], sv_table$pos_b[!is_bnd]))
   ))
   q = q[!is.na(chrom) & !is.na(start) & !is.na(end)]
   if (nrow(q) == 0) return(rep("", n))
   q[, start := pmax(as.numeric(start), 0)]
   q[, end   := as.numeric(end)]
+  q[, `:=`(qlo = as.numeric(qlo), qhi = as.numeric(qhi))]
   iv = copy(iv)
   iv[, `:=`(start = as.numeric(start), end = as.numeric(end))]
   setkey(iv, chrom, start, end)
@@ -340,7 +358,12 @@ sv_panel_hits = function(sv_table, panel,
                              type = "any", nomatch = NULL)
   if (nrow(ov) == 0) return(rep("", n))
 
-  per_row = ov[, .(hit = paste(unique(label(gene, side)), collapse = ", ")), by = row]
+  # `start`/`end` are the gene's own interval here — foverlaps() renamed the padded query
+  # window to i.start/i.end. A zero gap means the locus lands inside the gene.
+  ov[, gap := pmax(0, pmax(start - qhi, qlo - end))]
+  ov[, how := fifelse(gap == 0, "direct", fmt_bp(gap))]
+
+  per_row = ov[, .(hit = paste(unique(label(gene, side, how)), collapse = ", ")), by = row]
   out = rep("", n)
   out[per_row$row] = per_row$hit
   out

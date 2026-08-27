@@ -225,20 +225,32 @@ function splitGenes(cell) {
     .filter(function (g) { return g.length > 0; });
 }
 
-// Panel genes an SV row hits, as "GENE (side)" labels. Mirrors sv_panel_hits() in
-// R/parse_severus.R: a coordinate panel matches within SV_PANEL_WINDOW_BND of either
-// breakend of a BND, or within SV_PANEL_WINDOW_OTHER of the span of any other type;
-// a symbol-only panel matches the per-side VEP symbols directly.
+// fmt_bp() from R/utils.R. Math.round(x * 10) / 10 rather than toFixed(1) because R
+// prints the rounded number, not a fixed number of decimals: 188531 reads "188.5 kb" in
+// both, but toFixed would turn a round 306000 into "306.0 kb" where R writes "306 kb".
+function fmtBp(x) {
+  const r = function (v) { return String(Math.round(v * 10) / 10); };
+  if (Math.abs(x) >= 1e6) return r(x / 1e6) + " Mb";
+  if (Math.abs(x) >= 1e3) return r(x / 1e3) + " kb";
+  return String(x) + " bp";
+}
+
+// Panel genes an SV row hits, as "GENE (side, how)" labels — `how` being "direct" when
+// the locus overlaps the gene, or the distance to it when it only fell inside the window.
+// Mirrors sv_panel_hits() in R/parse_severus.R: a coordinate panel matches within
+// SV_PANEL_WINDOW_BND of either breakend of a BND, or within SV_PANEL_WINDOW_OTHER of the
+// span of any other type; a symbol-only panel matches the per-side VEP symbols directly.
 function svPanelHits(row, cols) {
   const p = activePanelDef();
   if (!p) return [];
   const at = function (n) { return (cols && cols[n] !== undefined) ? row[cols[n]] : undefined; };
 
   if (!p.hasCoords) {
+    // A VEP symbol sits on the breakend itself, so a symbol hit is always direct.
     const out = [];
     [["gene_a", "A"], ["gene_b", "B"]].forEach(function (side) {
       const hit = splitGenes(at(side[0])).filter(function (g) { return p.symbols.has(g); });
-      if (hit.length) out.push(hit.join(",") + " (" + side[1] + ")");
+      if (hit.length) out.push(hit.join(",") + " (" + side[1] + ", direct)");
     });
     return out;
   }
@@ -246,21 +258,24 @@ function svPanelHits(row, cols) {
   const isBnd = BND_SVTYPES.indexOf(String(at("svtype"))) >= 0;
   const ca = at("chrom_a"), cb = at("chrom_b");
   const pa = Number(at("pos_a")), pb = Number(at("pos_b"));
+  // [chrom, windowStart, windowEnd, side, locusLo, locusHi] — the last two are the
+  // unpadded locus, which is what the distance is measured from.
   const q = [];
   if (isBnd) {
-    if (ca && isFinite(pa)) q.push([ca, pa - SV_PANEL_WINDOW_BND, pa + SV_PANEL_WINDOW_BND, "A"]);
-    if (cb && isFinite(pb)) q.push([cb, pb - SV_PANEL_WINDOW_BND, pb + SV_PANEL_WINDOW_BND, "B"]);
+    if (ca && isFinite(pa)) q.push([ca, pa - SV_PANEL_WINDOW_BND, pa + SV_PANEL_WINDOW_BND, "A", pa, pa]);
+    if (cb && isFinite(pb)) q.push([cb, pb - SV_PANEL_WINDOW_BND, pb + SV_PANEL_WINDOW_BND, "B", pb, pb]);
   } else if (ca && isFinite(pa)) {
     const lo = isFinite(pb) ? Math.min(pa, pb) : pa;
     const hi = isFinite(pb) ? Math.max(pa, pb) : pa;
-    q.push([ca, lo - SV_PANEL_WINDOW_OTHER, hi + SV_PANEL_WINDOW_OTHER, "span"]);
+    q.push([ca, lo - SV_PANEL_WINDOW_OTHER, hi + SV_PANEL_WINDOW_OTHER, "span", lo, hi]);
   }
 
   const out = [];
   p.intervals.forEach(function (iv) {
     q.forEach(function (w) {
       if (iv[0] === w[0] && iv[1] <= w[2] && iv[2] >= w[1]) {
-        const label = iv[3] + " (" + w[3] + ")";
+        const gap = Math.max(0, iv[1] - w[5], w[4] - iv[2]);
+        const label = iv[3] + " (" + w[3] + ", " + (gap === 0 ? "direct" : fmtBp(gap)) + ")";
         if (out.indexOf(label) < 0) out.push(label);
       }
     });
