@@ -27,7 +27,8 @@ Matched and tumour-only runs take the same command: the run mode and every input
 are discovered from the sample directory.
 
 Tables render unfiltered. Add `--gene-panel lymphoid` (or a path to your own TSV) to have a
-panel selected when the report opens — see [Gene panels](#gene-panels).
+panel applied when the report opens, and pass the option more than once to apply several at
+the same time — see [Gene panels](#gene-panels).
 
 ## All options
 
@@ -37,7 +38,8 @@ panel selected when the report opens — see [Gene panels](#gene-panels).
 --reference    t2t | hg38 | auto  (default: auto)
 --sex          male | female | XY | XX  (required)
 --gene-panel   none | builtin panel name (e.g. lymphoid) | path to a custom TSV
-               (default: none — tables render unfiltered)
+               (default: none — tables render unfiltered). Repeatable: pass it
+               several times to apply several panels at once (union).
 --output       Output HTML path  (default: <sample-id>_report.html in current dir)
 --title        Report title
 ```
@@ -87,12 +89,22 @@ panel selected when the report opens — see [Gene panels](#gene-panels).
 >   scrolled past is otherwise easy to lose track of.
 > - Fixed: the "N small variants · N SVs shown" line went stale when a per-column filter was
 >   used, having only followed the gene-panel selector.
+> - `--gene-panel` is now **repeatable**, and the report's panel selector is a row of
+>   checkboxes rather than a dropdown: tick any number and a row is kept if it hits **any**
+>   of them. No box ticked is the unfiltered state, so the "All genes" entry is gone. With
+>   two or more ticked, each `panel_hit` entry ends with the panel it matched in square
+>   brackets — with one, the labels read exactly as before. `--gene-panel none` combined
+>   with a real panel is now an error rather than a case where one quietly wins.
+> - The SV table's footnote about how the panel matches now follows the ticked boxes; it
+>   previously described the load-time panel and went stale the moment a reader switched.
 
 ## Gene panels
 
-Reports are **unfiltered by default**. `--gene-panel` only chooses which panel is selected when
+Reports are **unfiltered by default**. `--gene-panel` only chooses which panels are ticked when
 the report opens; the rendered HTML always contains every variant and every builtin panel, so a
-reader can switch panels (or paste a custom gene list) in the browser without re-rendering.
+reader can tick and untick panels (or paste a custom gene list) in the browser without
+re-rendering. In the report the panels are checkboxes: tick any number and a variant or SV is
+kept if it hits **any** of them, and with none ticked the tables are unfiltered.
 
 Built-in panels live in `assets/gene_lists/`. Each is a TSV with a `gene` column (HGNC symbols)
 and, optionally, `chrom`/`start`/`end` — which changes how structural variants are matched:
@@ -119,10 +131,18 @@ single entry, resolved against the detected one.
 ```bash
 --gene-panel lymphoid                # open with the builtin lymphoid panel applied
 --gene-panel /path/to/my_genes.tsv   # must have a 'gene' column or be a single-column file
+
+# Repeatable — open with both applied, a row kept if it hits either:
+--gene-panel lymphoid --gene-panel /path/to/my_genes.tsv
 ```
 
+With more than one panel ticked, each `panel_hit` entry ends with the panel it matched in
+square brackets (`MYC (A, direct) [lymphoid]`); with one, there is no suffix. Two TSVs sharing
+a basename both stay selectable — the second is registered as `<name>-custom`.
+
 A `--gene-panel` value that is neither `none`, a builtin name, nor an existing file is an error —
-a typo will not silently produce an unfiltered report. See
+a typo will not silently produce an unfiltered report. `none` combined with a real panel is an
+error too, rather than a case where one of the two quietly wins. See
 [`assets/gene_lists/README.md`](assets/gene_lists/README.md) for the full file format.
 
 ## Expected input layout

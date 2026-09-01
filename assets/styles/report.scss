@@ -517,39 +517,69 @@ blockquote {
   white-space: nowrap;
 }
 
-.panel-controls__select {
-  padding: 6px 12px;
-  border-radius: 6px;
+.panel-controls__toggles {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+// One chip per panel. `.is-on` is toggled from JS rather than styled off :checked, so
+// the chip and the checkbox cannot disagree after a programmatic Clear.
+.panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 5px 11px;
+  border-radius: 999px;
   border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
   font-family: var(--font-sans);
   font-size: 0.85rem;
   font-weight: 500;
-  background: var(--color-bg);
-  color: var(--color-text);
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 
-  &:focus {
-    outline: none;
+  &:hover { border-color: var(--color-primary); }
+
+  &.is-on {
     border-color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  }
+
+  input {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--color-primary);
+  }
+
+  &:focus-within {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
   }
 }
 
-// Shown only while a column tickbox filter is set — see assets/js/facet_filter.js.
+// Shared by both buttons in the control bar: #panel-clear, which unticks every gene
+// panel, and #facet-clear, which clears the column tickbox filters and stays hidden
+// until one is set (see assets/js/facet_filter.js). They are two neutral secondary
+// controls sitting side by side, so they take one style — restyling one restyles both.
 .panel-controls__clear {
   padding: 5px 11px;
   border-radius: 6px;
-  border: 1px solid var(--color-primary);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
   font-family: var(--font-sans);
-  font-size: 0.76rem;
-  font-weight: 500;
-  background: var(--color-bg);
-  color: var(--color-primary);
+  font-size: 0.78rem;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
 
-  &:hover { background: var(--color-surface-alt); }
+  &:hover {
+    border-color: var(--color-primary);
+    color: var(--color-text);
+  }
 
   &:focus-visible {
     outline: none;
