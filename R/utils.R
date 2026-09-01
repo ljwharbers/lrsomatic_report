@@ -402,8 +402,11 @@ FACET_MAX_VALUES = 200L
 # `sep: null` means match the whole cell. A `null` value is the "no value" bucket (NA, or
 # empty after trimming) and always sorts last; its "(none)" label is applied client-side, so
 # a literal cell value of "(none)" cannot collide with it. Counts are *rows* per distinct
-# token — a split column's counts therefore sum to more than nrow() — and they are over the
-# whole table, never recomputed per filter.
+# token — a split column's counts therefore sum to more than nrow() — over the whole table.
+# They are the *baseline*: facet_filter.js recomputes the number it displays on every
+# filtering pass (over the rows the other filters leave, ignoring the column's own ticks)
+# and keeps these for the option tooltip. The value order emitted here is the displayed
+# order and never changes, so a count dropping to 0 dims a row rather than moving it.
 #
 # A column that is absent, or outside [FACET_MIN_VALUES, FACET_MAX_VALUES] distinct values,
 # is omitted with a message() and keeps its text box. The message is the point: a renamed
