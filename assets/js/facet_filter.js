@@ -13,11 +13,22 @@
 // — see "live counts" below. Five things about the DOM and about DataTables this works in,
 // each learned from internals rather than assumed:
 //
-//   1. DT's own `div.form-group` in the filter cell is KEPT and the <input> inside it only
-//      hidden. DT binds the handler that un-clips `overflow:hidden` on
-//      .dataTables_scrollHead to that div, so triggering its "show"/"hide" events is what
-//      lets an open menu escape the scroll head under scrollX. The widget is appended
-//      inside that div so DT's own $td.children('div').first()/.last() lookups still hold.
+//   1. The button goes in DT's own `div.form-group`, which is KEPT with its <input> only
+//      hidden (DT holds a reference to that input, and the div is what DT's own
+//      $td.children('div').first()/.last() lookups find). The MENU is not in the cell at
+//      all: it is a child of <body>, position:fixed, placed each time from the button's
+//      getBoundingClientRect(). Both halves of that are forced —
+//        * the cell sits inside .dataTables_scrollHead and .dataTables_scrollBody, which
+//          clip an absolutely-positioned menu. DT ships a workaround for its own filters
+//          (flip those containers to overflow:visible on a "show" event, datatables.js
+//          ~474-500) and it is unusable here: .dataTables_scrollBody is what *holds* the
+//          horizontal scroll position, so making it visible discards it — on a wide table
+//          the whole view snaps back to the first column and the menu you just opened is
+//          off screen. We therefore never trigger DT's show/hide.
+//        * a fixed-position menu left inside the cell would be duplicated, visibly, by the
+//          sizing clone in note 2: that clone clips an absolute child in a zero-height
+//          wrapper, but nothing clips a fixed one — and ticking a value causes a draw,
+//          which is when the clone is rebuilt.
 //   2. No `id` attributes anywhere in this markup, and no handlers delegated from
 //      `document` onto widget classes. DataTables rebuilds a zero-height sizing clone of
 //      the whole header in the scroll body on every draw, refilling each cell by innerHTML
@@ -326,33 +337,86 @@
   }
 
   // ---- the open menu -------------------------------------------------------
+  var EDGE = 8;    // keep this much clear of every viewport edge
+
   function closeOpen() {
     if (!OPEN) return;
     var w = OPEN;
-    w.$menu.prop("hidden", true).removeClass("facet__menu--right");
+    w.$menu.prop("hidden", true);
     w.$btn.attr("aria-expanded", "false");
-    w.$wrap.trigger("hide");                 // DT re-clips the scroll head
-    w.$wrapper.removeClass("facet-open");    // and the report's own wrapper overflow
     OPEN = null;
+  }
+
+  // The menu is fixed, so its coordinates are the button's viewport coordinates. Aligned
+  // to the button's left edge, flipped to its right edge (and then clamped) rather than
+  // being allowed off screen — the faceted columns sit far enough right in the SV table
+  // for that to matter — and flipped above the header when there is no room below.
+  function placeMenu(w) {
+    var b    = w.$btn[0].getBoundingClientRect();
+    var menu = w.$menu[0];
+    var mw   = menu.offsetWidth, mh = menu.offsetHeight;
+
+    var left = b.left;
+    if (left + mw > window.innerWidth - EDGE) left = b.right - mw;
+    left = Math.max(EDGE, Math.min(left, window.innerWidth - EDGE - mw));
+
+    var top = b.bottom + 4;
+    if (top + mh > window.innerHeight - EDGE) {
+      var above = b.top - 4 - mh;
+      top = above >= EDGE ? above
+                          : Math.max(EDGE, window.innerHeight - EDGE - mh);
+    }
+
+    menu.style.left = Math.round(left) + "px";
+    menu.style.top  = Math.round(top) + "px";
   }
 
   function openMenu(w) {
     if (OPEN === w) { closeOpen(); return; }
     closeOpen();
-    w.$wrap.trigger("show");
-    w.$wrapper.addClass("facet-open");
-    w.$menu.prop("hidden", false);
+    w.$menu.prop("hidden", false);           // measurable only once it is not display:none
     w.$btn.attr("aria-expanded", "true");
     OPEN = w;
-    // Flip to the right edge when the menu would run off the viewport. Cheap, and the
-    // faceted columns sit far enough right in the SV table for it to matter.
-    var box = w.$menu[0].getBoundingClientRect();
-    if (box.right > window.innerWidth - 8) w.$menu.addClass("facet__menu--right");
-    if (w.$find.length) w.$find.trigger("focus");
+    placeMenu(w);
+    // preventScroll: the menu is already in the viewport, and letting the browser scroll an
+    // ancestor to "reveal" a focused field is how the table would jump under the reader.
+    if (w.$find.length) w.$find[0].focus({ preventScroll: true });
+  }
+
+  // A fixed menu does not travel with the button, so it has to be told to. Scroll events do
+  // not bubble but they do capture, so one document-level capturing listener catches the
+  // page, the scroll body and the scroll head alike. Only ever one menu is open, and the
+  // handler leaves immediately when there is none.
+  function followButton() {
+    if (!OPEN) return;
+    var w = OPEN;
+    var b = w.$btn[0].getBoundingClientRect();
+    var clip = w.clip ? w.clip.getBoundingClientRect() : null;
+    // Scrolled out from under its own column, or off the page entirely: a menu still
+    // pointing at a column that is no longer there is worse than no menu.
+    if ((b.width === 0 && b.height === 0) ||
+        b.bottom < 0 || b.top > window.innerHeight ||
+        (clip && (b.right <= clip.left || b.left >= clip.right))) {
+      closeOpen();
+      return;
+    }
+    placeMenu(w);
   }
 
   // ---- widget -------------------------------------------------------------
-  function markup(name, def) {
+  // Two nodes, in two places: the button replaces the text box in the header cell, the menu
+  // is appended to <body>. See note 1 at the top for why they cannot share a parent.
+  function buttonMarkup(name) {
+    return '<div class="facet">' +
+             '<button type="button" class="facet__btn" aria-expanded="false"' +
+             ' aria-haspopup="true" title="Filter ' + esc(name) + ' by value">' +
+               '<span class="facet__label">All</span>' +
+               '<span class="facet__caret" aria-hidden="true">&#9662;</span>' +
+             '</button>' +
+           '</div>';
+  }
+
+  function menuMarkup(name, def) {
     var withFind = def.values.length > SEARCH_THRESHOLD;
     var opts = def.values.map(function (v) {
       var tok = v[0], n = v[1];
@@ -367,25 +431,18 @@
              '</label>';
     }).join("");
 
-    return '<div class="facet">' +
-             '<button type="button" class="facet__btn" aria-expanded="false"' +
-             ' aria-haspopup="true" title="Filter ' + esc(name) + ' by value">' +
-               '<span class="facet__label">All</span>' +
-               '<span class="facet__caret" aria-hidden="true">&#9662;</span>' +
-             '</button>' +
-             '<div class="facet__menu" role="group" aria-label="' + esc(name) +
-             ' values" hidden>' +
-               '<div class="facet__tools">' +
-                 (withFind ? '<input type="text" class="facet__find"' +
-                             ' placeholder="Find value…" autocomplete="off">' : "") +
-                 '<button type="button" class="facet__all" title="Tick all shown">All' +
-                 '</button>' +
-                 '<button type="button" class="facet__none" title="Untick all shown">None' +
-                 '</button>' +
-               '</div>' +
-               '<div class="facet__list">' + opts + '</div>' +
-               '<p class="facet__foot">counts follow the other active filters</p>' +
+    return '<div class="facet__menu" role="group" aria-label="' + esc(name) +
+           ' values" hidden>' +
+             '<div class="facet__tools">' +
+               (withFind ? '<input type="text" class="facet__find"' +
+                           ' placeholder="Find value…" autocomplete="off">' : "") +
+               '<button type="button" class="facet__all" title="Tick all shown">All' +
+               '</button>' +
+               '<button type="button" class="facet__none" title="Untick all shown">None' +
+               '</button>' +
              '</div>' +
+             '<div class="facet__list">' + opts + '</div>' +
+             '<p class="facet__foot">counts follow the other active filters</p>' +
            '</div>';
   }
 
@@ -500,23 +557,25 @@
     $input.hide().attr("tabindex", "-1").attr("aria-hidden", "true");
     $wrap.children("span.glyphicon").hide();
 
-    var $container = $(markup(name, def));
+    var $container = $(buttonMarkup(name));
     $wrap.append($container);                      // inside $wrap, see note 1 at the top
+    var $menu = $(menuMarkup(name, def)).appendTo(document.body);
 
-    // Both of these clip: report.scss sets overflow:hidden on .dataTables_wrapper AND on
-    // the htmlwidget's own .datatables div (for the card's border radius), and DT's
-    // show/hide handler only un-clips the scroll head inside them.
+    // What the button is clipped by, so an open menu can tell that its column has been
+    // scrolled away. .dataTables_scrollHead exists only under scrollX/scrollY; the table
+    // container is the honest fallback.
     var $cont = $(api.table().container());
+    var $clip = $cont.find(".dataTables_scrollHead").first();
 
     var w = {
       key: t.key, name: name, api: api,
-      $wrap: $wrap, $wrapper: $cont.add($cont.closest(".datatables")),
+      clip: ($clip.length ? $clip : $cont)[0],
       $container: $container,
       $btn:   $container.find(".facet__btn"),
       $label: $container.find(".facet__label"),
-      $menu:  $container.find(".facet__menu"),
-      $find:  $container.find(".facet__find"),
-      $list:  $container.find(".facet__list")
+      $menu:  $menu,
+      $find:  $menu.find(".facet__find"),
+      $list:  $menu.find(".facet__list")
     };
 
     // Option rows, in payload order, paired with their vocabulary id so the live count is
@@ -574,15 +633,14 @@
       });
     }
 
-    w.$container.on("keydown", function (e) {
+    // Bound to both nodes: they are no longer in the same subtree, and Escape has to work
+    // from the find box as much as from the button.
+    w.$container.add(w.$menu).on("keydown", function (e) {
       if (e.key === "Escape" || e.keyCode === 27) {
         closeOpen();
         w.$btn.trigger("focus");
       }
     });
-
-    // A click anywhere inside the menu must not reach the outside-click handler below.
-    w.$menu.on("click", function (e) { e.stopPropagation(); });
 
     refreshLabel(w);
     return w;
@@ -716,11 +774,19 @@
   });
 
   // The one outside-click handler. Bound to document on purpose — it tests containment
-  // against the open menu, not against a widget class, so the header's sizing clone is
-  // irrelevant to it.
+  // against the open widget's own two nodes, not against a widget class, so the header's
+  // sizing clone is irrelevant to it. Both nodes, because the menu is in <body> and the
+  // button in the header: a click inside the menu is not inside the button's container.
   $(document).on("mousedown", function (e) {
-    if (OPEN && !OPEN.$container[0].contains(e.target)) closeOpen();
+    if (!OPEN) return;
+    if (OPEN.$container[0].contains(e.target) || OPEN.$menu[0].contains(e.target)) return;
+    closeOpen();
   });
+
+  // A fixed menu has to be re-placed whenever anything under it moves. Capturing, so the
+  // scroll body's and the scroll head's own scroll events reach it.
+  document.addEventListener("scroll", followButton, true);
+  window.addEventListener("resize", followButton);
 
   // Which values are ticked, for inspection from the browser console and for
   // tests/js/test-facet-predicate.js — the ticked state is otherwise unreachable without a
