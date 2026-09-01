@@ -87,6 +87,19 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
                             "vaf", "consequence", "impact", "caller"))
   cat("<script>window.SV_COLS = ", js_col_index_map(names(sv_display)), ";</script>\n",
       sep = "")
+
+  # Values present in each tickbox-filtered column, for the checkbox dropdowns in the
+  # filter row (assets/js/facet_filter.js). Emitted after setcolorder so the names are
+  # final. `caller` is a single value today, so js_facet_defs() omits it and it keeps its
+  # text box — see R/utils.R.
+  sv_facet_cols = c("svclass", "svtype", "impact", "consequence", "caller")
+  cat("<script>window.SV_FACET_COLS = ", js_vec(sv_facet_cols), ";</script>\n", sep = "")
+  cat("<script>window.SV_FACETS = ",
+      js_facet_defs(sv_display,
+                    cols   = sv_facet_cols,
+                    seps   = c(consequence = ","),
+                    levels = list(impact = IMPACT_LEVELS)),
+      ";</script>\n", sep = "")
 }
 ```
 

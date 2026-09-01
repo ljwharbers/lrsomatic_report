@@ -65,6 +65,29 @@ panel selected when the report opens — see [Gene panels](#gene-panels).
 >   `lymphoid.tsv` is replaced by `lymphoid.hg38.tsv` and `lymphoid.t2t.tsv`; a custom
 >   symbol-only TSV still works and still matches on symbols.
 
+> **Changed in v1.3.0:**
+> - The categorical columns of both variant tables now filter by **tickbox dropdown**
+>   instead of a free-text box: `consequence`, `impact` and `callers` on the small-variant
+>   table, `svclass`, `svtype`, `impact`, `consequence` and `caller` on the SV table. Each
+>   dropdown lists the values actually present in that sample with a row count, so it also
+>   answers "what is even in this column?". Every other column keeps its text box, and the
+>   table's own search box still does substring across all columns.
+> - Ticking several values in one column is **OR**; ticking values in two columns is
+>   **AND**. A ticked term matches a cell holding several — ticking `missense_variant` also
+>   shows a row whose consequence is `missense_variant,splice_region_variant`. Counts are
+>   over all rows and do not change as you filter, and `(none)` selects the rows with no
+>   value in that column.
+> - A column with fewer than two distinct values keeps its plain text box rather than
+>   offering an empty dropdown. That is expected for `callers` when VEP produced its default
+>   text output (which carries no per-variant caller) and for the SV `caller` column, which
+>   has one value today.
+> - Ticks survive changing the gene panel, are reflected in the "N shown" count, and are
+>   honoured by the copy/CSV buttons. **Clear value filters** in the panel bar resets them —
+>   it appears only while something is ticked, since a filter set on a header that has been
+>   scrolled past is otherwise easy to lose track of.
+> - Fixed: the "N small variants · N SVs shown" line went stale when a per-column filter was
+>   used, having only followed the gene-panel selector.
+
 ## Gene panels
 
 Reports are **unfiltered by default**. `--gene-panel` only chooses which panel is selected when
@@ -206,12 +229,15 @@ lrsomatic_report/
 │   ├── parse_ascat.R            ASCAT segments + purity/ploidy parsers
 │   ├── parse_qc.R               Mosdepth, cramino, flagstat parsers
 │   ├── circos.R                 draw_circos() — the genome-wide circos SVG
-│   └── circos_bnd.R             draw_bnd_circos() — the breakend circos, inline and row-linked
+│   └── circos_bnd.R             Breakend circos: selects and serialises it for the browser
 ├── templates/per_sample.qmd    Quarto template (HTML report)
 ├── assets/
 │   ├── references/{t2t,hg38}/  Cytobands + chrom lengths (bundled, no network needed)
-│   └── gene_lists/             lymphoid.{hg38,t2t}.tsv + README
-└── tests/                      Unit tests (testthat)
+│   ├── gene_lists/             lymphoid.{hg38,t2t}.tsv + README
+│   ├── styles/                 report.scss (the report theme)
+│   └── js/                     bnd_circos.js (breakend circos), facet_filter.js (tickbox
+│                               column filters) — inlined at render time
+└── tests/                      testthat unit tests + tests/js (node, no dependencies)
 ```
 
 ## Roadmap
