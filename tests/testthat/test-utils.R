@@ -242,3 +242,94 @@ test_that("resolve_selected_panels errors on a key it cannot resolve", {
     resolve_selected_panels("nosuchpanel", list(), file.path(repo_root, "assets"), "hg38"),
     "Gene panel not found")
 })
+
+# ---- js_facet_defs (tickbox column filters) -------------------------------
+
+test_that("js_facet_defs orders a levelled column by severity, not by count", {
+  d = data.table(impact = c("MODIFIER", "MODIFIER", "MODIFIER", "HIGH", "LOW"))
+  out = js_facet_defs(d, "impact", levels = list(impact = IMPACT_LEVELS))
+  expect_equal(out, '{"impact":{"sep":null,"values":[["HIGH",1],["LOW",1],["MODIFIER",3]]}}')
+})
+
+test_that("js_facet_defs puts a value outside the fixed levels after them", {
+  d = data.table(impact = c("HIGH", "WEIRD", "WEIRD"))
+  out = js_facet_defs(d, "impact", levels = list(impact = IMPACT_LEVELS))
+  # WEIRD is the more common value and still sorts after the levelled one.
+  expect_lt(regexpr("HIGH", out, fixed = TRUE), regexpr("WEIRD", out, fixed = TRUE))
+})
+
+test_that("js_facet_defs counts rows per token, so a split column oversums nrow()", {
+  d = data.table(consequence = c("a,b", "a"))
+  out = js_facet_defs(d, "consequence", seps = c(consequence = ","))
+  expect_equal(out, '{"consequence":{"sep":",","values":[["a",2],["b",1]]}}')
+  # 3 token-rows over 2 table rows: the intended semantics, not a defect.
+  expect_gt(sum(as.integer(regmatches(out, gregexpr("[0-9]+", out))[[1]])), nrow(d))
+})
+
+test_that("js_facet_defs counts a token repeated in one cell once, and trims whitespace", {
+  d = data.table(x = c("a,a", "a, b"))
+  out = js_facet_defs(d, "x", seps = c(x = ","))
+  expect_equal(out, '{"x":{"sep":",","values":[["a",2],["b",1]]}}')
+})
+
+test_that("js_facet_defs collapses NA and empty into one null bucket that sorts last", {
+  d = data.table(x = c(NA, "", "  ", "a", "b"))
+  out = js_facet_defs(d, "x")
+  # One bucket of 3 for the three no-value rows, and last despite being the largest.
+  expect_equal(out, '{"x":{"sep":null,"values":[["a",1],["b",1],[null,3]]}}')
+})
+
+test_that("js_facet_defs keeps values that share a prefix distinct", {
+  # Guards against any future move to substring matching: these two must never merge.
+  d = data.table(x = c("splice_region_variant", "splice_acceptor_variant"))
+  out = js_facet_defs(d, "x")
+  expect_match(out, "splice_region_variant", fixed = TRUE)
+  expect_match(out, "splice_acceptor_variant", fixed = TRUE)
+})
+
+test_that("js_facet_defs omits a column with too few distinct values, loudly", {
+  # Both real cases: `callers` is "" for every row on the VEP text path, and the SV table
+  # carries a single caller. The column keeps its plain text filter.
+  d = data.table(callers = rep("", 3), caller = rep("severus", 3))
+  expect_message(js_facet_defs(d, "callers", seps = c(callers = ",")), "0 distinct")
+  expect_message(js_facet_defs(d, "caller"), "1 distinct")
+  expect_equal(suppressMessages(js_facet_defs(d, c("callers", "caller"))), "{}")
+})
+
+test_that("js_facet_defs omits a column with more distinct values than the payload cap", {
+  d = data.table(x = as.character(seq_len(FACET_MAX_VALUES + 1L)))
+  expect_message(js_facet_defs(d, "x"), "distinct value")
+  expect_equal(suppressMessages(js_facet_defs(d, "x")), "{}")
+})
+
+test_that("js_facet_defs reports an absent column rather than dropping it silently", {
+  # This is the renamed-facet-column alarm: without it the leftover text box looks
+  # intentional and the missing dropdown is invisible.
+  d = data.table(impact = c("HIGH", "LOW"))
+  expect_message(js_facet_defs(d, "consequence"), "not in the table")
+  expect_equal(suppressMessages(js_facet_defs(d, c("impact", "consequence"))),
+               '{"impact":{"sep":null,"values":[["HIGH",1],["LOW",1]]}}')
+})
+
+test_that("js_facet_defs escapes a quote in a value", {
+  expect_equal(js_facet_defs(data.table(x = c('a"b', "c")), "x"),
+               '{"x":{"sep":null,"values":[["a\\"b",1],["c",1]]}}')
+})
+
+test_that("js_facet_defs returns an empty object for no data and no columns", {
+  d = data.table(x = c("a", "b"))
+  expect_equal(js_facet_defs(NULL, "x"), "{}")
+  expect_equal(js_facet_defs(d[0], "x"), "{}")
+  expect_equal(js_facet_defs(d, character(0)), "{}")
+})
+
+test_that("js_facet_defs output is deterministic and brace-balanced", {
+  d = data.table(x = c("b", "a", "c", "a"), y = c("p,q", "q", "p", "r"))
+  out = js_facet_defs(d, c("x", "y"), seps = c(y = ","))
+  expect_identical(out, js_facet_defs(d, c("x", "y"), seps = c(y = ",")))
+  expect_match(out, "^\\{")
+  expect_match(out, "\\}$")
+  chars = strsplit(out, "")[[1]]
+  expect_equal(sum(chars == "{"), sum(chars == "}"))
+  expect_equal(sum(chars == "["), sum(chars == "]"))
+})
