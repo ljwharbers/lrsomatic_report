@@ -326,7 +326,7 @@ cat("</script>\n")
 
 ---
 
-*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.2.1*
+*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.3.0*
 
 ```{=html}
 <script>
@@ -384,6 +384,15 @@ cat("</script>\n")
   }
 
   $(document).ready(function () {
+    // The count follows any draw of either table, not just a panel change. The per-column
+    // search boxes and the tickbox dropdowns redraw directly — exactly as the breakend
+    // circos's own draw.dt handler in _sv.qmd already assumes — so before this, typing in a
+    // column filter left "N small variants shown" stale. It also means facet_filter.js
+    // needs no coupling to this block: it calls draw(), and the count and the circos follow.
+    $(document).on("draw.dt", function (e) {
+      if (e.target === window.snvTableElem || e.target === window.svTableElem) updateCount();
+    });
+
     $("#panel-select").on("change", function () {
       state.panel = this.value;
       const isCustom = state.panel === "__custom__";
@@ -412,4 +421,16 @@ cat("</script>\n")
   });
 })();
 </script>
+```
+
+```{r facet-filter-js, results='asis'}
+# Checkbox-dropdown ("tickbox") column filters for the two big tables. Inlined once, at the
+# end, from its own .js file rather than pasted into an R string — same reason as
+# bnd_circos.js: it stays lintable JavaScript, and the report is self-contained so it
+# cannot be linked. Each table's values (window.SNV_FACETS / window.SV_FACETS) and column
+# map are emitted by its own prepare chunk above; the widget reads them when a table
+# announces itself, so this only has to be parsed before the tables initialise.
+cat("<script>\n")
+cat(readLines(file.path(params$repo_dir, "assets/js/facet_filter.js")), sep = "\n")
+cat("\n</script>\n")
 ```
