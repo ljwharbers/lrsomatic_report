@@ -257,6 +257,74 @@ load_all_gene_panels = function(assets_dir, reference = NULL) {
   panels
 }
 
+# Give a user-supplied panel a key that doesn't collide with an already-registered
+# one. The first collision keeps the plain "-custom" suffix the single-panel code
+# used; further collisions number from 2, so several TSVs sharing a basename all
+# stay selectable instead of overwriting each other.
+unique_panel_name = function(nm, taken) {
+  if (!(nm %in% taken)) return(nm)
+  cand = paste0(nm, "-custom")
+  i = 1L
+  while (cand %in% taken) {
+    i = i + 1L
+    cand = paste0(nm, "-custom", i)
+  }
+  cand
+}
+
+# Resolve the panel keys selected on load into real panel objects, keyed by the same
+# names params$all_panels uses (which is also what the checkboxes carry).
+#
+# Deliberately re-read from disk rather than reusing params$all_panels directly: a
+# panel object that has round-tripped through Quarto's YAML execute_params comes back
+# with list-typed vectors, and panel_intervals() and the `%in%` symbol tests want real
+# atomic ones. A custom TSV's key is not a builtin name, so its location is recovered
+# from the registered object's own $path.
+#
+# Not wrapped in tryCatch, for the same reason resolve_gene_panel() isn't: a panel that
+# can't be resolved has to fail the render rather than silently match nothing.
+resolve_selected_panels = function(keys, all_panels, assets_dir, reference = NULL) {
+  keys = setdiff(as.character(unlist(keys)), "__all__")
+  keys = keys[!is.na(keys) & nzchar(keys)]
+  if (length(keys) == 0) return(list())
+  out = list()
+  for (k in unique(keys)) {
+    p    = if (!is.null(all_panels)) all_panels[[k]] else NULL
+    path = if (!is.null(p) && !is.null(p$path)) as.character(p$path)[1] else NA_character_
+    out[[k]] = if (!is.na(path) && file.exists(path)) load_gene_panel(path, reference)
+               else resolve_gene_panel(k, assets_dir, reference)
+  }
+  out[!vapply(out, is.null, logical(1))]
+}
+
+# Pull every occurrence of a repeatable flag out of an argv vector.
+#
+# optparse has no action="append": given `--gene-panel a --gene-panel b` it silently
+# keeps only "b". So the flag is stripped from argv here and parse_args() is handed the
+# remainder; its make_option() entry stays in option_list purely so --help documents it.
+# Both `--flag value` and `--flag=value` are accepted.
+extract_repeated_option = function(args, flag) {
+  args = as.character(args)
+  vals = character(0)
+  rest = character(0)
+  i = 1L
+  while (i <= length(args)) {
+    a = args[i]
+    if (identical(a, flag)) {
+      if (i == length(args)) stop(flag, " requires a value")
+      vals = c(vals, args[i + 1L])
+      i = i + 2L
+    } else if (startsWith(a, paste0(flag, "="))) {
+      vals = c(vals, substring(a, nchar(flag) + 2L))
+      i = i + 1L
+    } else {
+      rest = c(rest, a)
+      i = i + 1L
+    }
+  }
+  list(values = vals, rest = rest)
+}
+
 # ---- Small JS serialisation helpers --------------------------------------
 # The report ships panel data and column positions to its own client-side filter.
 # Keeping these here means the R table and the JS that indexes it are generated
