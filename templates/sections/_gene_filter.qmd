@@ -47,6 +47,12 @@ cat(paste0('
   <div class="panel-controls__toggles">
 ', chips, '  </div>
   <button type="button" id="panel-clear" class="panel-controls__clear">Clear</button>
+  <!-- Unhidden by assets/js/facet_filter.js whenever a column tickbox filter is set. It
+       sits here rather than by the tables because with scrollY = "400px" a ticked filter
+       can be scrolled out of sight, and inside .panel-controls it inherits the print
+       hiding for free. It shares .panel-controls__clear with the panel Clear beside it —
+       two neutral secondary controls in one bar — so restyling one restyles both. -->
+  <button type="button" id="facet-clear" class="panel-controls__clear" hidden>Clear value filters</button>
   <span id="panel-variant-count" class="panel-controls__count"></span>
 </div>
 <div id="custom-gene-panel" class="panel-controls__custom-area" style="display:none;">
