@@ -302,6 +302,98 @@ js_rows = function(dt, cols) {
   paste0("[[", paste(rows, collapse = "],["), "]]")
 }
 
+# VEP's impact severity order. The tickbox dropdowns present impact in this order rather
+# than by count, because severity is the only order a reader expects — and it is the order
+# the styleEqual() palettes in _smallvariants.qmd and _sv.qmd already use.
+IMPACT_LEVELS = c("HIGH", "MODERATE", "LOW", "MODIFIER")
+
+# A column with fewer than this many distinct values is not worth a dropdown, and one with
+# more would inline a large payload into a self-contained report: either way it keeps its
+# plain text filter. 0 and 1 are real cases, not defects — `callers` is "" for every row on
+# the VEP text path, and the SV table has a single caller today.
+FACET_MIN_VALUES = 2L
+FACET_MAX_VALUES = 200L
+
+# Distinct values, with row counts, for the checkbox-dropdown ("tickbox") column filters —
+# see assets/js/facet_filter.js. Enumerated here rather than by a client-side scan because
+# the small-variant table runs 27k–167k rows.
+#
+# cols   : facet column names as they appear in the *display* frame (post-setnames), which
+#          is what the client resolves through window.SNV_COLS / window.SV_COLS.
+# seps   : named vector of per-column separators. A column named here is split into tokens,
+#          one not named is matched whole. The separator has to mirror how the cell was
+#          built — `consequence` is VEP's "&"-joined terms rewritten to commas and `callers`
+#          is paste(sort(unique(caller)), collapse = ",") — so that ticking one term matches
+#          a two-term cell. It travels in the payload rather than being hard-coded in the JS.
+# levels : named list of fixed value orders (impact). Values not listed fall in after them,
+#          by descending row count then alphabetically, so the output is deterministic.
+#
+# Returns a JS object literal keyed by column name:
+#   {"impact":{"sep":null,"values":[["HIGH",1203],["MODERATE",8140],[null,17]]},
+#    "consequence":{"sep":",","values":[["intron_variant",90210], ...]}}
+# `sep: null` means match the whole cell. A `null` value is the "no value" bucket (NA, or
+# empty after trimming) and always sorts last; its "(none)" label is applied client-side, so
+# a literal cell value of "(none)" cannot collide with it. Counts are *rows* per distinct
+# token — a split column's counts therefore sum to more than nrow() — and they are over the
+# whole table, never recomputed per filter.
+#
+# A column that is absent, or outside [FACET_MIN_VALUES, FACET_MAX_VALUES] distinct values,
+# is omitted with a message() and keeps its text box. The message is the point: a renamed
+# facet column is otherwise invisible, because the text box left behind looks intentional.
+js_facet_defs = function(dt, cols, seps = character(0), levels = list()) {
+  if (is.null(dt) || nrow(dt) == 0 || length(cols) == 0) return("{}")
+  entries = character(0)
+
+  for (nm in cols) {
+    if (!nm %in% names(dt)) {
+      message("Facet column '", nm, "' is not in the table - no value filter for it.")
+      next
+    }
+    sp = if (nm %in% names(seps)) seps[[nm]] else NA_character_
+    v  = as.character(dt[[nm]])
+
+    if (!is.na(sp) && nzchar(sp)) {
+      lst  = strsplit(v, sp, fixed = TRUE)
+      lens = lengths(lst)
+      # A cell that splits into nothing at all still contributes its row to the NA bucket.
+      lst[lens == 0L] = NA_character_
+      d = data.table(row = rep.int(seq_along(v), pmax(lens, 1L)),
+                     tok = trimws(unlist(lst, use.names = FALSE)))
+      d = unique(d, by = c("row", "tok"))   # "a,a" counts its row once
+    } else {
+      d = data.table(row = seq_along(v), tok = trimws(v))
+    }
+    d[is.na(tok) | !nzchar(tok), tok := NA_character_]
+
+    cnt   = d[, .N, by = tok]
+    n_val = nrow(cnt[!is.na(tok)])
+    if (n_val < FACET_MIN_VALUES || n_val > FACET_MAX_VALUES) {
+      message("Facet column '", nm, "': ", n_val,
+              " distinct value(s) - keeping the plain text filter.")
+      next
+    }
+
+    # Fixed levels first (only those actually present), then by descending count, then
+    # alphabetically so ties are stable. The NA bucket is an escape hatch rather than a
+    # value competing for attention, so it sorts last whatever its count.
+    lv   = intersect(as.character(levels[[nm]]), cnt$tok[!is.na(cnt$tok)])
+    rank = ifelse(is.na(cnt$tok), length(lv) + 2L,
+                  ifelse(cnt$tok %in% lv, match(cnt$tok, lv), length(lv) + 1L))
+    cnt  = cnt[order(rank, -N, tok)]
+
+    vals = sprintf("[%s,%s]",
+                   ifelse(is.na(cnt$tok), "null", js_quote(cnt$tok)),
+                   js_num(cnt$N))
+    entries = c(entries,
+                sprintf('%s:{"sep":%s,"values":[%s]}',
+                        js_quote(nm),
+                        if (is.na(sp) || !nzchar(sp)) "null" else js_quote(sp),
+                        paste(vals, collapse = ",")))
+  }
+
+  paste0("{", paste(entries, collapse = ","), "}")
+}
+
 # Format a number for human-readable display
 fmt_bp = function(x) {
   x = as.numeric(x)
