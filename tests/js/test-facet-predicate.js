@@ -40,6 +40,9 @@ $.trim = (s) => String(s).trim();
 const sandbox = {
   $, jQuery: $, console,
   setTimeout, clearTimeout,
+  // window.addEventListener is for the resize listener that re-places an open menu; the
+  // document one is for the capturing scroll listener beside it.
+  addEventListener: noop,
   document: { getElementById: () => null, addEventListener: noop },
 };
 sandbox.window = sandbox;
