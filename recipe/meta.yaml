@@ -6,9 +6,7 @@ package:
 
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
-  # Fill in once the tag exists, with the digest of the tarball GitHub serves for it:
-  #   curl -sL https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v1.3.0.tar.gz | sha256sum
-  sha256: PLACEHOLDER_FILL_IN_AFTER_v1.3.0_TAG_IS_CUT
+  sha256: 5a06ee7ab9f968f9d5c8accaa3efdb86aa9de6016f358d4b74631a37694e55cb
 
 build:
   number: 0
