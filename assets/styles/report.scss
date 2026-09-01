@@ -890,6 +890,11 @@ div.dt-buttons {
 
   &--hidden { display: none; }
   &--none .facet__v { color: var(--color-text-muted); font-style: italic; }
+
+  // No row left under the other active filters. Dimmed in place rather than hidden or
+  // moved: the order is R's descending-count order and stays fixed, so nothing jumps under
+  // the cursor as counts change, and the value stays tickable.
+  &--empty { opacity: 0.45; }
 }
 
 .facet__v {
