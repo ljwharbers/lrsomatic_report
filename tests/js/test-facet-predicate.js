@@ -40,6 +40,9 @@ $.trim = (s) => String(s).trim();
 const sandbox = {
   $, jQuery: $, console,
   setTimeout, clearTimeout,
+  // window.addEventListener is for the resize listener that re-places an open menu; the
+  // document one is for the capturing scroll listener beside it.
+  addEventListener: noop,
   document: { getElementById: () => null, addEventListener: noop },
 };
 sandbox.window = sandbox;
@@ -162,6 +165,83 @@ clear();
 tick("snv", "nosuchcolumn", ["x"]);
 check("unresolvable column is skipped",
       run(snvNode, snvRow("intron_variant", "MODIFIER", "")), true);
+
+// ---- live counts ----------------------------------------------------------
+// The number beside each value is accumulated inside the same predicate pass that does the
+// matching, over the rows passing every *other* filter but ignoring the column's own ticks.
+// It fails as silently as the matching does — a wrong number just reads as a wrong number —
+// and it is the half that cannot be checked by eye on a 167k-row table.
+//
+// DataTables passes the per-predicate loop counter as the 5th argument, restarting at 0 for
+// each predicate; the counts reset on that, so a scenario drives its first row with j = 0.
+const runAt = (node, row, j) => predicate({ nTable: node }, row.map(String), 0, row, j);
+const countOf = (key, col, token) => {
+  const pairs = sandbox.window.facetFilterCounts()[key][col] || [];
+  const hit = pairs.filter((p) => p[0] === token);
+  return hit.length ? hit[0][1] : 0;
+};
+// Three rows exercising every shape at once: a whole-cell column (impact), a split column
+// with a multi-token cell (consequence) and a split column with an empty cell (callers).
+const COUNT_ROWS = [
+  snvRow("missense_variant", "MODERATE", "clairs"),
+  snvRow("intron_variant", "MODIFIER", "clairs,deepsomatic"),
+  snvRow("missense_variant,splice_region_variant", "MODERATE", "")
+];
+function countPass() {
+  COUNT_ROWS.forEach((row, j) => runAt(snvNode, row, j));
+}
+
+// Unfiltered: every row counts everywhere, a split cell adds to each of its tokens, and an
+// empty cell lands in the (none) bucket. `consequence` sums to 4 over 3 rows, which is the
+// over-sum js_facet_defs() documents on the R side.
+clear();
+countPass();
+check("count missense (no filter)",     countOf("snv", "consequence", "missense_variant"), 2);
+check("count intron (no filter)",       countOf("snv", "consequence", "intron_variant"), 1);
+check("count splice_region (no filter)", countOf("snv", "consequence", "splice_region_variant"), 1);
+check("count MODERATE (no filter)",     countOf("snv", "impact", "MODERATE"), 2);
+check("count MODIFIER (no filter)",     countOf("snv", "impact", "MODIFIER"), 1);
+check("count clairs (no filter)",       countOf("snv", "callers", "clairs"), 2);
+check("count deepsomatic (no filter)",  countOf("snv", "callers", "deepsomatic"), 1);
+check("count (none) bucket",            countOf("snv", "callers", null), 1);
+
+// One column ticked: every other column follows it, and the ticked column's own counts do
+// not — that is what keeps the remaining values of a ticked column readable. The row that
+// fails only `impact` still counts towards `impact`, and towards nothing else.
+clear();
+tick("snv", "impact", ["MODERATE"]);
+countPass();
+check("ticked column ignores its own ticks (kept)",   countOf("snv", "impact", "MODERATE"), 2);
+check("ticked column ignores its own ticks (excluded)", countOf("snv", "impact", "MODIFIER"), 1);
+check("other column follows the tick (match)",  countOf("snv", "consequence", "missense_variant"), 2);
+check("other column follows the tick (miss)",   countOf("snv", "consequence", "intron_variant"), 0);
+check("split column follows the tick",          countOf("snv", "callers", "clairs"), 1);
+check("split column follows the tick (zeroed)", countOf("snv", "callers", "deepsomatic"), 0);
+
+// Two columns ticked: a row failing both counts nowhere at all, so MODIFIER — which the
+// single-tick case above still credited — now reads 0.
+clear();
+tick("snv", "impact", ["MODERATE"]);
+tick("snv", "consequence", ["missense_variant"]);
+countPass();
+check("row failing two columns counts nowhere", countOf("snv", "impact", "MODIFIER"), 0);
+check("rows failing neither still count",       countOf("snv", "impact", "MODERATE"), 2);
+check("companion token of a passing row",       countOf("snv", "consequence", "splice_region_variant"), 1);
+check("value excluded by the other column",     countOf("snv", "consequence", "intron_variant"), 0);
+check("unticked column sees both ticks",        countOf("snv", "callers", "clairs"), 1);
+
+// A token repeated inside one cell counts its row once, mirroring
+// js_facet_defs()'s unique(d, by = c("row", "tok")).
+clear();
+runAt(snvNode, snvRow("missense_variant", "HIGH", "clairs,clairs"), 0);
+check("repeated token counts its row once", countOf("snv", "callers", "clairs"), 1);
+
+// Counts are per table, exactly as the ticks are.
+clear();
+runAt(svNode, ["SV1", "translocation"], 0);
+runAt(svNode, ["SV2", "DEL"], 1);
+check("SV counts are the SV table's", countOf("sv", "svclass", "translocation"), 1);
+check("SNV counts untouched by an SV pass", countOf("snv", "impact", "HIGH"), 1);
 
 if (failed > 0) {
   console.error(failed + " check(s) failed");
