@@ -258,7 +258,41 @@ test_that("a symbol-only panel matches either side's annotated gene, with no win
 
 test_that("no panel means no hits, and an empty table is handled", {
   expect_equal(sv_panel_hits(sv_rows(), NULL), c("", ""))
+  expect_equal(sv_panel_hits(sv_rows(), list()), c("", ""))
   expect_equal(sv_panel_hits(data.table(), coord_panel("X", "chr1", 1, 2)), character(0))
+})
+
+test_that("several panels union, and each hit says which panel it came from", {
+  sv = sv_rows()
+  panels = list(a = coord_panel("AGENE", "chr8", 999000, 1001000),
+                b = coord_panel("BGENE", "chr10", 5040000, 5060000))
+  hits = sv_panel_hits(sv, panels)
+  # Row 1 hits only panel a, row 2 only panel b — union means both rows are kept.
+  expect_equal(hits[1], "AGENE (A, direct) [a]")
+  expect_equal(hits[2], "BGENE (span, direct) [b]")
+
+  # Two panels hitting the same row list both, in panel order.
+  both = sv_panel_hits(sv, list(a = coord_panel("AGENE", "chr8", 999000, 1001000),
+                                b = coord_panel("BGENE", "chr8", 1300000, 1310000)))
+  expect_equal(both[1], "AGENE (A, direct) [a], BGENE (A, 300 kb) [b]")
+})
+
+test_that("a lone panel carries no [name] suffix, however it is passed", {
+  # The suffix exists to disambiguate a union; with one panel there is nothing to
+  # disambiguate, and the labels must stay byte-identical to the single-panel report.
+  # svPanelHits() in per_sample.qmd applies the same rule.
+  sv = sv_rows()
+  p  = coord_panel("INSIDE", "chr8", 999000, 1001000)
+  expect_equal(sv_panel_hits(sv, p)[1], "INSIDE (A, direct)")
+  expect_equal(sv_panel_hits(sv, list(lymphoid = p))[1], "INSIDE (A, direct)")
+})
+
+test_that("a symbol-only and a coordinate panel can be active together", {
+  sv = sv_rows()
+  hits = sv_panel_hits(sv, list(sym  = list(has_coords = FALSE, genes = "SOMEGENE"),
+                                pos  = coord_panel("NEARBY", "chr8", 1300000, 1310000)))
+  expect_equal(hits[1], "SOMEGENE (A, direct) [sym], NEARBY (A, 300 kb) [pos]")
+  expect_equal(hits[2], "")
 })
 
 test_that("build_sv_table maps the gene-annotated TSV onto the shared schema", {
