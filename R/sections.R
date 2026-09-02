@@ -8,9 +8,11 @@ register_section = function(descriptor) {
   SECTIONS[[descriptor$id]] <<- descriptor
 }
 
-# Standard "nothing to show" notice used by section presentation shims.
-section_notice = function(msg) {
-  tags$div(class = "alert alert-info", msg)
+# Standard "nothing to show" notice used by section presentation shims. A quiet dashed
+# note rather than a Bootstrap alert: absent data is expected, not an error. `warn` marks
+# the one case that is a failure worth noticing (e.g. the circos could not be drawn).
+section_notice = function(msg, warn = FALSE) {
+  tags$div(class = if (warn) "section-notice section-notice--warn" else "section-notice", msg)
 }
 
 # Provenance and caveats that belong under a table, folded away by default.

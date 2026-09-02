@@ -340,31 +340,17 @@ cat("</script>\n")
 
 {{< include sections/_header.qmd >}}
 
----
-
 {{< include sections/_circos.qmd >}}
-
----
 
 {{< include sections/_ascat.qmd >}}
 
----
-
 {{< include sections/_gene_filter.qmd >}}
-
----
 
 {{< include sections/_smallvariants.qmd >}}
 
----
-
 {{< include sections/_sv.qmd >}}
 
----
-
 {{< include sections/_qc.qmd >}}
-
----
 
 *Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.3.0*
 
