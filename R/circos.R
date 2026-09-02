@@ -118,12 +118,18 @@ draw_circos = function(snv_data = NULL,
   circos.clear()
 
   n_chr = length(chromosomes)
-  gap_degrees = c(rep(1, n_chr - 1), 5)
+  gap_degrees = c(rep(1.5, n_chr - 1), 7)
+
+  # One quiet track surface for all three rings — the alternating grey bands and the
+  # per-chromosome Mb axes were visual noise on top of the data. Colours match the
+  # --color-border / surface tokens in report.scss.
+  track_bg     = "#fbfaf6"
+  track_border = "#e4e0d6"
 
   circos.par(
     "start.degree" = 90,
     "gap.degree"   = gap_degrees,
-    "track.margin" = c(0.008, 0.008),
+    "track.margin" = c(0.006, 0.006),
     "cell.padding" = c(0, 0, 0, 0)
   )
 
@@ -136,7 +142,8 @@ draw_circos = function(snv_data = NULL,
 
   circos.initializeWithIdeogram(cyto_list$df,
                                 chromosome.index = cyto_list$chromosome,
-                                labels.cex       = 0.7)
+                                plotType         = c("ideogram", "labels"),
+                                labels.cex       = 0.8)
 
   # Pre-compute jitter once so it varies per chromosome but stays reproducible
   set.seed(42)
@@ -145,20 +152,21 @@ draw_circos = function(snv_data = NULL,
   circos.trackPlotRegion(
     factors      = chromosomes,
     ylim         = c(0, 1),
-    bg.border    = "#d8d3c8",
-    bg.col       = rep(c("#fcfbf7", "#f6f4ee"), length.out = n_chr),
-    track.height = 0.13,
+    bg.border    = track_border,
+    bg.col       = track_bg,
+    track.height = 0.16,
     panel.fun    = function(region, value, ...) {
       chr = get.cell.meta.data("sector.index")
       sub_snv = snv[chrom == chr]
       if (nrow(sub_snv) == 0) return(invisible(NULL))
       y_jitter = runif(nrow(sub_snv), 0.05, 0.95)
+      # Translucent so a dense cloud reads as a tint, not confetti.
       circos.points(
         x   = sub_snv$pos,
         y   = y_jitter,
-        col = sub_snv$circos_col,
+        col = adjustcolor(sub_snv$circos_col, alpha.f = 0.65),
         pch = 19,
-        cex = 0.15
+        cex = 0.18
       )
     }
   )
@@ -167,9 +175,9 @@ draw_circos = function(snv_data = NULL,
   circos.trackPlotRegion(
     factors      = chromosomes,
     ylim         = c(0, 1),
-    bg.border    = "#d8d3c8",
-    bg.col       = rep(c("#f6f4ee", "#fcfbf7"), length.out = n_chr),
-    track.height = 0.11,
+    bg.border    = track_border,
+    bg.col       = track_bg,
+    track.height = 0.10,
     panel.fun    = function(region, value, ...) {
       chr = get.cell.meta.data("sector.index")
       sub_sv = sv_nt[chrom == chr & !is.na(circos_pos)]
@@ -181,7 +189,7 @@ draw_circos = function(snv_data = NULL,
           x0  = x1, x1  = x2,
           y0  = sub_sv$circos_pos[i], y1 = sub_sv$circos_pos[i],
           col = sub_sv$circos_col[i],
-          lwd = 2
+          lwd = 2.5
         )
       }
     }
@@ -196,7 +204,7 @@ draw_circos = function(snv_data = NULL,
       track.index       = 3,
       sector.index      = chromosomes[1],
       labels.niceFacing = TRUE,
-      labels.cex        = 0.35
+      labels.cex        = 0.45
     ),
     error = function(e) NULL
   )
@@ -205,9 +213,9 @@ draw_circos = function(snv_data = NULL,
   circos.trackPlotRegion(
     factors      = chromosomes,
     ylim         = c(0, 4),
-    bg.border    = "#d8d3c8",
-    bg.col       = rep(c("#fcfbf7", "#f6f4ee"), length.out = n_chr),
-    track.height = 0.17,
+    bg.border    = track_border,
+    bg.col       = track_bg,
+    track.height = 0.18,
     panel.fun    = function(region, value, ...) {
       chr = get.cell.meta.data("sector.index")
       sub_cnv = cnv[chr == get.cell.meta.data("sector.index")]
@@ -215,9 +223,9 @@ draw_circos = function(snv_data = NULL,
 
       xmax = lens_filt[chr]
       if (!is.na(xmax)) {
-        for (y_ref in c(1, 2, 3, 4)) {
+        for (y_ref in c(1, 2, 3)) {
           circos.lines(c(0, xmax), c(y_ref, y_ref),
-                       col = "#d8d3c8", lwd = 0.3, lty = "dotted")
+                       col = track_border, lwd = 0.4, lty = "dotted")
         }
       }
 
@@ -227,7 +235,7 @@ draw_circos = function(snv_data = NULL,
         labels            = c("0", "1", "2", "3", "4+"),
         sector.index      = chromosomes[1],
         labels.niceFacing = TRUE,
-        labels.cex        = 0.30
+        labels.cex        = 0.40
       )
 
       for (i in seq_len(nrow(sub_cnv))) {
@@ -255,8 +263,8 @@ draw_circos = function(snv_data = NULL,
         circos.link(
           sector.index1 = sv_tr$chrom[i],  point1 = sv_tr$pos[i],
           sector.index2 = sv_tr$chrom2[i], point2 = sv_tr$pos2[i],
-          col = adjustcolor(BND_COLOUR, alpha.f = 0.5),
-          lwd = 0.8
+          col = adjustcolor(BND_COLOUR, alpha.f = 0.45),
+          lwd = 0.9
         ),
         error = function(e) NULL
       )

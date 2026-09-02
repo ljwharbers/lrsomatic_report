@@ -474,12 +474,19 @@ fmt_bp = function(x) {
 }
 
 # Embed a local PNG file as a self-contained base64 img tag
-embed_png = function(path, max_width = "900px") {
+# Embed a PNG as a framed figure (.report-figure in assets/styles/report.scss), so the
+# tool-generated plots (ASCAT's, mostly) sit on the same surface as everything else. The
+# optional caption names the plot; the tabset heading above it is navigation.
+embed_png = function(path, max_width = "900px", caption = NULL) {
   if (is.null(path) || !file.exists(path)) return(NULL)
   b64 = base64enc::base64encode(path)
-  htmltools::tags$img(
-    src   = paste0("data:image/png;base64,", b64),
-    style = paste0("max-width:", max_width, "; display:block; margin:auto;")
+  htmltools::tags$figure(
+    class = "report-figure",
+    htmltools::tags$img(
+      src   = paste0("data:image/png;base64,", b64),
+      style = paste0("max-width:", max_width, "; display:block; margin:auto;")
+    ),
+    if (!is.null(caption)) htmltools::tags$figcaption(class = "report-figure__caption", caption)
   )
 }
 
@@ -524,6 +531,7 @@ window.addEventListener('load', function () {
 embed_html_iframe = function(path, height = "780px") {
   if (is.null(path) || !file.exists(path)) return(NULL)
   htmltools::tags$iframe(
+    class = "report-figure__frame",
     src   = wakhan_plot_datauri(path),
     style = paste0("width:100%; height:", height, "; border:none;")
   )
@@ -555,9 +563,11 @@ render_wakhan_cn_tabs = function(plots) {
     p = plots[[i]]
     uri = wakhan_plot_datauri(p$plot)
     iframe = if (i == 1) {
-      htmltools::tags$iframe(src = uri, style = "width:100%; height:780px; border:none;")
+      htmltools::tags$iframe(class = "report-figure__frame", src = uri,
+                             style = "width:100%; height:780px; border:none;")
     } else {
-      htmltools::tags$iframe(`data-src` = uri, style = "width:100%; height:780px; border:none;")
+      htmltools::tags$iframe(class = "report-figure__frame", `data-src` = uri,
+                             style = "width:100%; height:780px; border:none;")
     }
     htmltools::tags$div(
       class = if (i == 1) "wakhan-cn-pane active" else "wakhan-cn-pane",
@@ -566,17 +576,9 @@ render_wakhan_cn_tabs = function(plots) {
     )
   })
 
+  # Styled by the .wakhan-cn-tab* rules in assets/styles/report.scss, next to the other tab
+  # strips, rather than by an inline <style> of its own.
   htmltools::tagList(
-    htmltools::tags$style("
-      .wakhan-cn-tabs__nav { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
-      .wakhan-cn-tab {
-        border:1px solid var(--color-border, #ccc); background:var(--color-bg, #fff);
-        border-radius:5px; padding:5px 10px; font-size:0.85rem; cursor:pointer;
-      }
-      .wakhan-cn-tab.active { background:var(--color-primary, #333); color:#fff; }
-      .wakhan-cn-pane { display:none; }
-      .wakhan-cn-pane.active { display:block; }
-    "),
     htmltools::tags$div(class = "wakhan-cn-tabs__nav", buttons),
     htmltools::tags$div(class = "wakhan-cn-tabs__panes", panes),
     htmltools::tags$script(htmltools::HTML("
