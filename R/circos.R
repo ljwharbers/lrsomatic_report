@@ -45,16 +45,7 @@ BND_COLOUR = "#8a5fa3"
   paste0(norm_ref, ">", norm_alt)
 }
 
-# Draw a circos plot and write it to output_path (SVG or PNG depending on extension)
-#
-# @param snv_data      data.table: chrom, pos, ref, alt  (single-base SNVs only)
-# @param sv_nontrans   data.table from severus_circos_tracks()$nontrans
-# @param sv_trans      data.table from severus_circos_tracks()$translocations
-# @param cnv_data      data.table from parse_ascat_segments()
-# @param cytobands     data.frame: chrom, start, end, name, stain
-# @param chrom_lengths named integer vector (chrom → bp length)
-# @param chromosomes   character vector of chroms to plot
-# @param output_path   path to the output file
+# Draw a circos plot to output_path (SVG or PNG by extension)
 draw_circos = function(snv_data = NULL,
                        sv_nontrans = NULL,
                        sv_trans = NULL,
@@ -120,9 +111,7 @@ draw_circos = function(snv_data = NULL,
   n_chr = length(chromosomes)
   gap_degrees = c(rep(1.5, n_chr - 1), 7)
 
-  # One quiet track surface for all three rings — the alternating grey bands and the
-  # per-chromosome Mb axes were visual noise on top of the data. Colours match the
-  # --color-border / surface tokens in report.scss.
+  # Single quiet track surface; colours match the report.scss border/surface tokens
   track_bg     = "#fbfaf6"
   track_border = "#e4e0d6"
 
@@ -253,10 +242,7 @@ draw_circos = function(snv_data = NULL,
     }
   )
 
-  # ---- Translocation links (BND) in the centre ----------------------------
-  # One arc per rearrangement: severus_circos_tracks() has already collapsed Severus's
-  # two mate records into one row, so nothing here draws the same arc twice (which used
-  # to show as doubled opacity at alpha.f = 0.5).
+  # ---- Translocation links (BND): one arc per mate-collapsed rearrangement ----
   if (nrow(sv_tr) > 0) {
     for (i in seq_len(nrow(sv_tr))) {
       tryCatch(
