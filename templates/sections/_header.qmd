@@ -29,17 +29,14 @@ card = function(label, value, css_class = "", subtitle = NULL) {
   )
 }
 
-# Keep the acronym uppercase but let the trailing plural "s" stay lowercase.
-# Built as one HTML string rather than nested tags: htmltools puts each child on its own
-# line, and that newline renders as a space — the label came out as "SNV s".
+# One HTML string, not nested tags: htmltools' newlines rendered the label as "SNV s"
 lc_plural = function(text) {
   stopifnot(endsWith(text, "s"))
   HTML(paste0(htmlEscape(substr(text, 1, nchar(text) - 1L)),
               '<span class="lc">s</span>'))
 }
 
-# Eleven numbers in one undifferentiated grid read as a wall; three labelled groups say
-# which are about the tumour, which about its variants, and which about the sequencing run.
+# Three labelled groups instead of one grid of eleven numbers
 metric_group = function(title, ...) {
   div(class = "metric-group",
     div(class = "metric-group__title", title),
