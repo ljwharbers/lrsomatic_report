@@ -1,71 +1,4 @@
-// Checkbox-dropdown ("tickbox") column filters for the small-variant and SV tables.
-//
-// DT gives every column a free-text search box (filter = "top"), which only helps a reader
-// who already knows what the column contains — nobody remembers the ~30 VEP consequence
-// terms. For the categorical columns this replaces that box with a dropdown listing the
-// values actually present in this sample, with per-value row counts, so the filter doubles
-// as a summary of the column.
-//
-// R publishes the values (window.SNV_FACETS / window.SV_FACETS, from js_facet_defs() in
-// R/utils.R) and the column-name -> index maps (window.SNV_COLS / window.SV_COLS) that
-// every by-name lookup here goes through. R's counts are the *unfiltered baseline* (and the
-// value ordering); the number shown beside each value is recomputed on every filtering pass
-// — see "live counts" below. Five things about the DOM and about DataTables this works in,
-// each learned from internals rather than assumed:
-//
-//   1. The button goes in DT's own `div.form-group`, which is KEPT with its <input> only
-//      hidden (DT holds a reference to that input, and the div is what DT's own
-//      $td.children('div').first()/.last() lookups find). The MENU is not in the cell at
-//      all: it is a child of <body>, position:fixed, placed each time from the button's
-//      getBoundingClientRect(). Both halves of that are forced —
-//        * the cell sits inside .dataTables_scrollHead and .dataTables_scrollBody, which
-//          clip an absolutely-positioned menu. DT ships a workaround for its own filters
-//          (flip those containers to overflow:visible on a "show" event, datatables.js
-//          ~474-500) and it is unusable here: .dataTables_scrollBody is what *holds* the
-//          horizontal scroll position, so making it visible discards it — on a wide table
-//          the whole view snaps back to the first column and the menu you just opened is
-//          off screen. We therefore never trigger DT's show/hide.
-//        * a fixed-position menu left inside the cell would be duplicated, visibly, by the
-//          sizing clone in note 2: that clone clips an absolute child in a zero-height
-//          wrapper, but nothing clips a fixed one — and ticking a value causes a draw,
-//          which is when the clone is rebuilt.
-//   2. No `id` attributes anywhere in this markup, and no handlers delegated from
-//      `document` onto widget classes. DataTables rebuilds a zero-height sizing clone of
-//      the whole header in the scroll body on every draw, refilling each cell by innerHTML
-//      after stripping ids — an id here would reappear duplicated once per draw. Hence
-//      aria-expanded rather than aria-controls, handlers bound to the nodes we create, and
-//      every query rooted at api.table().header(), never at `document`. The count nodes
-//      cached for the live update are in that live header, which DT moves but never rebuilds.
-//   3. The R-side column index is NOT the DOM position: DataTables detaches the filter
-//      cells of visible:false columns. columns(':visible').indexes() translates it, and the
-//      header label above the chosen cell is compared to the column name — a reorder that
-//      broke the translation would otherwise attach a working dropdown to the wrong column.
-//   4. Ticked state lives here, in a closure, not in the DOM and not in DT's per-column
-//      search slots. That is what makes it survive a gene-panel redraw, Scroller's node
-//      recycling and the per-draw header clone.
-//   5. This predicate must be the LAST entry in $.fn.dataTable.ext.search. DataTables'
-//      _fnFilterCustom runs the predicates in push order, each narrowing the previous
-//      result, and only after the global search box and every per-column text box — so
-//      being last is exactly what makes the rows we see "everything the reader has already
-//      filtered down to", the gene-panel predicate (per_sample.qmd) included. attach()
-//      re-pushes us to the end rather than relying on script order to stay as it is.
-//
-// ---- live counts -----------------------------------------------------------------------
-// The count beside a value answers "what would I get if I ticked this", so it is measured
-// over the rows passing every *other* filter — the gene panel, the text boxes and the other
-// facet columns — while ignoring that column's own ticks. Ticking one consequence therefore
-// leaves the other consequence counts readable (the standard facet-search convention);
-// zeroed values grey out in place rather than moving, since the order stays R's.
-//
-// It is accumulated inside the matching pass, not in a scan of its own: a row that fails no
-// column belongs to every column's count, a row that fails exactly one belongs to that
-// column's only, and a row that fails two belongs to none. What makes that affordable on a
-// 167k-row table is that the tokens are precomputed once, into a per-column CSR index of
-// integer ids (starts/ids Int32Arrays keyed by DataTables row index) — splitting three
-// columns of 167k rows on every pass is the ~150-500 ms cost that made the counts static in
-// the first place. Splitting live is kept as the fallback for the pass that runs before
-// attach() has built the index, and for tests/js/test-facet-predicate.js, which has no
-// DataTables instance to build one from.
+// Checkbox-dropdown ("tickbox") column filters for the SNV and SV tables. R publishes values and column maps (window.*_FACETS / window.*_COLS); the menu lives in <body> as position:fixed because DT's scroll containers clip it; no ids or document-delegated handlers (DT clones the header every draw); ticked state lives in a closure; this predicate must stay LAST in ext.search so the live counts measure the rows every other filter leaves
 (function () {
   "use strict";
 
@@ -75,9 +8,7 @@
   var DRAW_DEBOUNCE_MS = 120;
   var LABEL_MAX = 16;
 
-  // Which tables get facets, keyed on the globals they publish from initComplete — the same
-  // identity test the gene-panel predicate in per_sample.qmd uses, which excludes the QC,
-  // ASCAT and phasing DT tables without any extra condition.
+  // Tables that get facets, keyed on the globals they publish (same test as the gene-panel predicate)
   var TABLES = [
     { key: "snv",
       elem:      function () { return window.snvTableElem; },
@@ -91,24 +22,21 @@
       requested: function () { return window.SV_FACET_COLS; } }
   ];
 
-  // key -> { colName -> Set of ticked tokens }. `null` in a Set is the "(none)" bucket.
-  // A column absent from a table's object is unconstrained.
+  // key -> { colName -> Set of ticked tokens }; null is the "(none)" bucket, an absent column is unconstrained
   var STATE    = { snv: {}, sv: {} };
   var ATTACHED = {};
   var WIDGETS  = [];      // every built widget, for the "clear all" control
   var PENDING  = {};      // per-table draw debounce timers
   var OPEN     = null;    // the one open menu
 
-  // Counting machinery, all keyed by table key. FCOLS is the facet columns that resolved in
-  // *_COLS, in payload order; everything else is parallel to it by column name.
+  // Counting machinery keyed by table; FCOLS = facet columns resolved in *_COLS, everything else parallel to it
   var FCOLS   = {};       // key -> [colName]
   var VOCAB   = {};       // key -> colName -> { strs: [token|null], map: Map, noneId: int }
   var CIDX    = {};       // key -> colName -> { starts: Int32Array, ids: Int32Array }
   var COUNTS  = {};       // key -> colName -> [rows per vocabulary id]
   var TOUCHED = {};       // key -> has the predicate run since the last flush?
 
-  // Per-pass scratch, indexed by position in FCOLS. Reused rather than reallocated: the
-  // predicate runs once per row, and only one table filters at a time.
+  // Per-pass scratch indexed by FCOLS position, reused across rows
   var SC_SRC = [], SC_LO = [], SC_HI = [], SC_TMP = [];
 
   function tableFor(node) {
@@ -121,11 +49,7 @@
                     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
-  // ---- matching ------------------------------------------------------------
-  // Mirrors how the cell was built, which is why the separator comes from R rather than
-  // being guessed here: `consequence` is VEP's "&"-joined terms rewritten to commas
-  // (R/parse_smallvariants.R) and `callers` is paste(sort(unique(caller)), collapse = ",").
-  // NA and "" both collapse to the single null bucket the dropdown labels "(none)".
+  // ---- matching: separators come from R so tokens mirror how the cell was built; NA and "" fall in the null bucket ----
   function tokens(v, sep) {
     if (v === null || v === undefined) return [null];
     var s = String(v).trim();
@@ -136,12 +60,7 @@
     return out.length ? out : [null];
   }
 
-  // ---- vocabulary ----------------------------------------------------------
-  // Token strings are interned to integer ids so a count is an array increment rather than
-  // a Map lookup. Seeded from the payload, in payload order, so a widget's option i and
-  // vocabulary id i coincide; it still auto-extends, because the fallback split path can
-  // meet a token js_facet_defs() did not list (it cannot happen with a matching payload,
-  // but a silently mis-sized array would be worse than a slightly longer one).
+  // ---- vocabulary: tokens interned to integer ids, seeded in payload order, auto-extending for the fallback split path ----
   function addTok(v, tok) {
     var id = v.strs.length;
     v.strs.push(tok);
@@ -164,8 +83,7 @@
     return v;
   }
 
-  // Distinct ids of one cell, written into `out`; returns how many. Deduplicated per row so
-  // "a,a" counts its row once, exactly as js_facet_defs()'s unique(d, by = c("row","tok")).
+  // Distinct ids of one cell into `out`, deduplicated per row like js_facet_defs()
   function idsInto(voc, toks, out) {
     var n = 0;
     for (var i = 0; i < toks.length; i++) {
@@ -186,8 +104,7 @@
     });
   }
 
-  // Set up the counting structures for a table the first time it is seen. Called from the
-  // predicate as well as from attach(), so counts exist even before the widgets do.
+  // Set up counting structures for a table on first sight (from the predicate or attach())
   function ensureTable(t) {
     if (FCOLS[t.key]) return FCOLS[t.key].length > 0;
     var defs = t.facets(), cols = t.cols();
@@ -213,11 +130,7 @@
     }
   }
 
-  // One tokenisation of every row of every facet column, into a CSR layout keyed by the
-  // DataTables row index the predicate is handed. ~6 MB for the 167k-row SNV table, against
-  // an array-of-arrays that would be an order of magnitude more. Public API only —
-  // rows().indexes() and rows().data() are in the same order, and no row is ever added to
-  // or removed from these tables, so the index stays valid for the session.
+  // Tokenise every row of every facet column once into a CSR index keyed by DataTables row index (~6 MB for 167k rows)
   function buildIndex(t, api) {
     var names = FCOLS[t.key];
     if (!names || !names.length) return;
@@ -254,19 +167,7 @@
     CIDX[t.key] = idx;
   }
 
-  // One predicate for both tables, keyed on the table node exactly as the gene-panel
-  // predicate is. OR within a column, AND across columns. Both predicates are ext.search
-  // entries, so DataTables ANDs them: a tick composes with the panel filter and with every
-  // remaining per-column text box for free.
-  //
-  // Chosen over column().search() with a regex because the token rule is the load-bearing
-  // part: as a regex it would be re-encoded in a second language with an escaping
-  // obligation (svclass values carry spaces, callers carries "clairs-to"), and an
-  // unescaped metacharacter yields a filter that matches MORE rows and says nothing.
-  //
-  // The exclude-own-column counts are accumulated here too, in the same visit — see the
-  // header. `counter` is DataTables' per-predicate loop index, which restarts at 0 for each
-  // predicate and so marks the first row of a pass.
+  // One ext.search predicate for both tables: OR within a column, AND across (DataTables ANDs it with the panel and text filters); a token rule rather than a regex avoids escaping bugs. Also accumulates the exclude-own-column counts; `counter` restarts at 0 per pass
   function facetPredicate(settings, searchData, index, rowData, counter) {
     var t = tableFor(settings.nTable);
     if (!t) return true;                                  // another DT table in the report
@@ -278,17 +179,14 @@
 
     var names = FCOLS[key], sel = STATE[key], voc = VOCAB[key], cnt = COUNTS[key];
     var cols = t.cols(), defs = t.facets(), idx = CIDX[key];
-    // rowData is the original (typed) row, searchData the rendered strings. Always the
-    // former: the SV table renders `locus`/`size` orthogonally, and mixing the two sources
-    // per column is the trap variant_key() documents on the R side.
+    // Use rowData (typed), not searchData (rendered): the SV table renders locus/size differently
     var row = rowData || searchData;
     var fails = 0, failed = -1, i;
 
     for (i = 0; i < names.length; i++) {
       var nm = names[i], chosen = sel[nm];
       var hasSel = !!(chosen && chosen.size);
-      // Once one column has failed, a column with nothing ticked can neither fail nor be
-      // counted for this row — only the single column it failed can be.
+      // After one failed column, only that column can still be counted for this row
       if (!hasSel && fails > 0) { SC_LO[i] = SC_HI[i] = 0; continue; }
 
       var src, lo, hi;
@@ -330,8 +228,7 @@
   function scheduleDraw(w) {
     clearTimeout(PENDING[w.key]);
     PENDING[w.key] = setTimeout(function () {
-      // resetPaging default: a filter change should return to the top, which is also what
-      // Scroller does with the scroll position.
+      // resetPaging default: a filter change returns to the top
       w.api.draw();
     }, DRAW_DEBOUNCE_MS);
   }
@@ -347,10 +244,7 @@
     OPEN = null;
   }
 
-  // The menu is fixed, so its coordinates are the button's viewport coordinates. Aligned
-  // to the button's left edge, flipped to its right edge (and then clamped) rather than
-  // being allowed off screen — the faceted columns sit far enough right in the SV table
-  // for that to matter — and flipped above the header when there is no room below.
+  // Fixed menu placed from the button's viewport rect: left-aligned, flipped right/up and clamped when there is no room
   function placeMenu(w) {
     var b    = w.$btn[0].getBoundingClientRect();
     var menu = w.$menu[0];
@@ -378,22 +272,17 @@
     w.$btn.attr("aria-expanded", "true");
     OPEN = w;
     placeMenu(w);
-    // preventScroll: the menu is already in the viewport, and letting the browser scroll an
-    // ancestor to "reveal" a focused field is how the table would jump under the reader.
+    // preventScroll: letting the browser reveal the focused field would jump the table
     if (w.$find.length) w.$find[0].focus({ preventScroll: true });
   }
 
-  // A fixed menu does not travel with the button, so it has to be told to. Scroll events do
-  // not bubble but they do capture, so one document-level capturing listener catches the
-  // page, the scroll body and the scroll head alike. Only ever one menu is open, and the
-  // handler leaves immediately when there is none.
+  // A fixed menu must follow its button: one capturing document scroll listener covers the page and the scroll containers
   function followButton() {
     if (!OPEN) return;
     var w = OPEN;
     var b = w.$btn[0].getBoundingClientRect();
     var clip = w.clip ? w.clip.getBoundingClientRect() : null;
-    // Scrolled out from under its own column, or off the page entirely: a menu still
-    // pointing at a column that is no longer there is worse than no menu.
+    // Column scrolled out from under the menu: close it
     if ((b.width === 0 && b.height === 0) ||
         b.bottom < 0 || b.top > window.innerHeight ||
         (clip && (b.right <= clip.left || b.left >= clip.right))) {
@@ -403,9 +292,7 @@
     placeMenu(w);
   }
 
-  // ---- widget -------------------------------------------------------------
-  // Two nodes, in two places: the button replaces the text box in the header cell, the menu
-  // is appended to <body>. See note 1 at the top for why they cannot share a parent.
+  // ---- widget: button in the header cell, menu appended to <body> (see the header note) ----
   function buttonMarkup(name) {
     return '<div class="facet">' +
              '<button type="button" class="facet__btn" aria-expanded="false"' +
@@ -450,9 +337,7 @@
     return $cb.data("none") ? null : String($cb.attr("data-tok"));
   }
 
-  // A column with nothing ticked is deliberately absent from STATE rather than holding an
-  // empty Set: the predicate reads STATE per row, 167k times per draw, and an absent key
-  // is one property lookup where a Set would be a construction and a size test.
+  // A column with nothing ticked is absent from STATE, keeping the per-row fast path cheap
   var NO_SELECTION = new Set();
 
   function readSel(w) {
@@ -493,9 +378,7 @@
     w.$container.toggleClass("facet--active", n > 0);
   }
 
-  // Paint the counts accumulated by the last filtering pass. Raw DOM, and only where the
-  // number actually changed: this runs on every draw, and the option rows live in the live
-  // header DT re-measures.
+  // Paint the counts from the last filtering pass, touching only changed numbers
   function flushCounts(key) {
     var cnt = COUNTS[key];
     if (!cnt) return;
@@ -509,8 +392,7 @@
         if (w.optLast[j] === n) continue;
         w.optLast[j] = n;
         w.numNodes[j].textContent = n.toLocaleString();
-        // The baseline R emitted is what the visible number no longer shows, so it moves
-        // into the tooltip rather than being lost.
+        // The baseline count moves into the tooltip
         w.optNodes[j].title = w.optLabel[j] + " — " + n.toLocaleString() + " of " +
                               w.optBase[j].toLocaleString() + " rows";
         w.optNodes[j].classList.toggle("facet__opt--empty", n === 0);
@@ -526,9 +408,7 @@
     });
   }
 
-  // The report's own control bar owns the reset, because with scrollY = "400px" a ticked
-  // filter can be scrolled out of sight and "the table is empty and I don't know why" is
-  // the predictable question. Absent in an older template, hence the guard.
+  // Reset lives in the report's control bar (a ticked filter can be scrolled out of sight); guarded for older templates
   function syncClearButton() {
     var el = document.getElementById("facet-clear");
     if (el) el.hidden = !anyActive();
@@ -551,9 +431,7 @@
     var $wrap  = $td.children("div").first();      // DT's div.form-group.has-feedback
     var $input = $wrap.children("input");
 
-    // Hidden, not removed: DT holds a reference to this input, and the scroll-head
-    // un-clipping handler is bound to $wrap itself. We never write to the input, so this
-    // column's DataTables search stays "" and cannot collide with the facet filter.
+    // Hidden, not removed: DT holds a reference to this input; we never write to it
     $input.hide().attr("tabindex", "-1").attr("aria-hidden", "true");
     $wrap.children("span.glyphicon").hide();
 
@@ -561,9 +439,7 @@
     $wrap.append($container);                      // inside $wrap, see note 1 at the top
     var $menu = $(menuMarkup(name, def)).appendTo(document.body);
 
-    // What the button is clipped by, so an open menu can tell that its column has been
-    // scrolled away. .dataTables_scrollHead exists only under scrollX/scrollY; the table
-    // container is the honest fallback.
+    // What clips the button, so an open menu can tell its column scrolled away
     var $cont = $(api.table().container());
     var $clip = $cont.find(".dataTables_scrollHead").first();
 
@@ -578,8 +454,7 @@
       $list:  $menu.find(".facet__list")
     };
 
-    // Option rows, in payload order, paired with their vocabulary id so the live count is
-    // an array read. Cached as raw nodes: flushCounts() touches them on every draw.
+    // Option rows in payload order, paired with vocabulary ids; cached raw nodes for flushCounts()
     var voc = VOCAB[t.key][name];
     w.optNodes = w.$list.children(".facet__opt").toArray();
     w.numNodes = w.optNodes.map(function (el) { return el.querySelector(".facet__n"); });
@@ -595,8 +470,7 @@
       openMenu(w);
     });
 
-    // Delegated within our own node — never from `document`, which the per-draw header
-    // clone would also match.
+    // Delegated within our own node, never from `document` (the header clone would match too)
     w.$menu.on("change", 'input[type="checkbox"]', function () {
       var sel = ensureSel(w), tok = tokenOf($(this));
       if (this.checked) sel.add(tok); else sel.delete(tok);
@@ -609,8 +483,7 @@
     w.$menu.find(".facet__all, .facet__none").on("click", function () {
       var on  = $(this).hasClass("facet__all");
       var sel = ensureSel(w);
-      // Only what is currently shown, which is what the button titles say — once the find
-      // box has narrowed the list, acting on the hidden values too would be a surprise.
+      // Act only on the values currently shown by the find box
       w.$list.children(".facet__opt").not(".facet__opt--hidden")
         .find('input[type="checkbox"]').each(function () {
           this.checked = on;
@@ -633,8 +506,7 @@
       });
     }
 
-    // Bound to both nodes: they are no longer in the same subtree, and Escape has to work
-    // from the find box as much as from the button.
+    // Bound to both nodes: Escape must work from the find box and the button
     w.$container.add(w.$menu).on("keydown", function (e) {
       if (e.key === "Escape" || e.keyCode === 27) {
         closeOpen();
@@ -646,9 +518,7 @@
     return w;
   }
 
-  // ---- attach -------------------------------------------------------------
-  // Note 5 at the top: whatever order the report's scripts happen to be emitted in, the
-  // counts only mean "what is left after everything else" if we filter last.
+  // ---- attach: re-push the predicate so it filters last ----
   function moveToEnd() {
     var list = $.fn.dataTable.ext.search;
     var at = list.indexOf(facetPredicate);
@@ -684,11 +554,7 @@
       return;
     }
 
-    // R drops a column it cannot offer a dropdown for — fewer than two distinct values, or
-    // gone from the frame entirely — and knitr swallows its message(), so this is where that
-    // decision becomes visible. console.info rather than warn: for `callers` on the VEP text
-    // path and the SV `caller` column it is the expected outcome, and warnings here are
-    // reserved for something actually being wrong.
+    // R drops columns it cannot offer a dropdown for and knitr swallows the message, so log it here (info: expected for `callers`/`caller`)
     var requested = t.requested() || [];
     var missing = requested.filter(function (n) { return !(n in defs); });
     if (missing.length) {
@@ -709,9 +575,7 @@
         console.warn("facet_filter: '" + name + "' is a hidden column.");
         return;
       }
-      // Decisive cross-check on the translation: the label above the cell we picked must be
-      // the column we think it is. Attaching an svtype dropdown to the locus column would
-      // otherwise look like a filter that works and filters the wrong thing.
+      // Cross-check: the header label above the chosen cell must be the expected column
       var got = $.trim($label.eq(pos).text());
       if (got !== name) {
         console.warn("facet_filter: header mismatch for '" + name + "' at visible column " +
@@ -720,8 +584,7 @@
       }
       var $td = $filter.eq(pos);
       if ($td.attr("data-type") !== "character") {
-        // A factor/logical column gets DT's own selectize control; two widgets in one cell
-        // would fight over the same input.
+        // Factor/logical columns already carry DT's selectize control
         console.warn("facet_filter: '" + name + "' has data-type '" +
                      $td.attr("data-type") + "' — leaving DT's own filter in place.");
         return;
@@ -731,8 +594,7 @@
 
     syncClearButton();
 
-    // Speed only — the predicate splits live until this exists, and stays correct either
-    // way. Guarded because a failure here must cost performance, not the filter.
+    // Speed only: the predicate splits live until the index exists; a failure here must not break the filter
     try {
       buildIndex(t, api);
     } catch (err) {
@@ -740,10 +602,7 @@
                    " tokens, falling back to splitting per draw.", err);
     }
 
-    // DataTables fires `search` at the end of _fnFilterComplete, i.e. immediately after the
-    // pass that filled the counts — no assumption about draw ordering needed. A pass that
-    // fires it without ever calling the predicate filtered everything out upstream, and the
-    // counts are then genuinely zero.
+    // DataTables fires `search` right after the pass that filled the counts
     $(node).on("search.dt", function (e) {
       if (e.target !== node) return;
       if (!TOUCHED[t.key]) resetCounts(t.key);
@@ -751,16 +610,11 @@
       flushCounts(t.key);
     });
 
-    // The numbers rendered by R are the unfiltered baseline, and --gene-panel means the
-    // table can already be filtered on load. One forced pass now, so what is on screen is
-    // what the predicate says rather than what the payload said.
+    // R's counts are the unfiltered baseline and --gene-panel can pre-filter, so force one pass now
     api.draw(false);
   }
 
-  // DT wires its own filter-row handlers after $().DataTable() returns, i.e. after init.dt
-  // has fired, and one of those is the handler that un-clips the scroll head for an open
-  // menu. Defer a tick so it exists before we touch the cell. The load sweep is the
-  // idempotent fallback for a table that initialised before this script was parsed.
+  // Defer a tick so DT's own filter-row handlers exist; the load sweep covers tables initialised before this script
   $(document).on("init.dt", function (e, settings) {
     var t = tableFor(settings.nTable);
     if (t) setTimeout(function () { attach(t); }, 0);
@@ -773,39 +627,28 @@
     syncClearButton();
   });
 
-  // The one outside-click handler. Bound to document on purpose — it tests containment
-  // against the open widget's own two nodes, not against a widget class, so the header's
-  // sizing clone is irrelevant to it. Both nodes, because the menu is in <body> and the
-  // button in the header: a click inside the menu is not inside the button's container.
+  // Single outside-click handler on document, testing containment against the widget's two nodes
   $(document).on("mousedown", function (e) {
     if (!OPEN) return;
     if (OPEN.$container[0].contains(e.target) || OPEN.$menu[0].contains(e.target)) return;
     closeOpen();
   });
 
-  // A fixed menu has to be re-placed whenever anything under it moves. Capturing, so the
-  // scroll body's and the scroll head's own scroll events reach it.
+  // Re-place the fixed menu on any scroll (capturing)
   document.addEventListener("scroll", followButton, true);
   window.addEventListener("resize", followButton);
 
-  // Which values are ticked, for inspection from the browser console and for
-  // tests/js/test-facet-predicate.js — the ticked state is otherwise unreachable without a
-  // DOM. Same reason window.svPanelState is exposed in per_sample.qmd: one shared object
-  // beats re-deriving the state from the rendered header.
+  // Ticked state, exposed for the console and tests/js/test-facet-predicate.js
   window.facetFilterState = STATE;
 
-  // The live counts of the last filtering pass, as { table: { column: [[token, n], ...] } }
-  // in payload order, for the same two audiences. A function, because the internal form is
-  // integer-keyed and only meaningful beside its vocabulary.
+  // Live counts of the last pass as { table: { column: [[token, n], ...] } }
   window.facetFilterCounts = function () {
     var out = {};
     Object.keys(COUNTS).forEach(function (key) {
       var cnt = COUNTS[key], voc = VOCAB[key];
       out[key] = {};
       Object.keys(cnt).forEach(function (nm) {
-        // Over the vocabulary, not over the count array: a value that matched no row is a
-        // 0, not a gap, and the two lengths differ whenever a token was added after the
-        // last reset.
+        // Iterate the vocabulary, not the count array: unmatched values are 0, not gaps
         var strs = voc[nm].strs, pairs = [];
         for (var id = 0; id < strs.length; id++) pairs.push([strs[id], cnt[nm][id] || 0]);
         out[key][nm] = pairs;
