@@ -37,8 +37,7 @@ if (!is.null(circos_tmp) && file.exists(circos_tmp)) {
     })
   }
 
-  # Plate and legend side by side (.circos-figure grid in report.scss; the legend drops
-  # below the plate on narrow screens). The track order is the figure's caption.
+  # Plate and legend side by side (.circos-figure grid); the track order is the caption
   tags$div(class = "circos-figure",
     tags$figure(class = "circos-container",
       tags$img(src   = paste0("data:image/svg+xml;base64,", img_b64),
