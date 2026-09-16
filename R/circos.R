@@ -15,15 +15,8 @@ SNV_COLOURS = c(
   "T>G" = "#F0D0CE"
 )
 
-# SV colours — saturated, hue-matched to --sv-* table tokens
-SV_COLOURS = c(
-  INS = "#cf5b46",
-  DEL = "#2f6db3",
-  INV = "#c08a1e",
-  DUP = "#3f7d4e"
-)
-
-SV_YPOS = c(INS = 1.0, DEL = 0.66, INV = 0.33, DUP = 0.05)
+# SV_COLOURS and SV_YPOS are defined in R/parse_severus.R, next to the code that stamps them
+# onto each row — see the note there on why there is only one copy.
 
 # CNV colours — tied to the report spine
 CNV_COLOURS = c(
@@ -191,8 +184,9 @@ draw_circos = function(snv_data = NULL,
   # track, which is how these labels ended up against the SNV dots.
   sv_track_index = get.current.track.index()
 
-  # Y-axis labels for SV track. `at`/`labels` come from SV_YPOS, the same constant
-  # severus_circos_tracks() drew the segments at, so the two cannot drift apart.
+  # Y-axis labels for SV track. `at`/`labels` come from SV_YPOS (R/parse_severus.R) — the
+  # same object severus_circos_tracks() positioned the segments from, not a second copy of
+  # its values, so the two cannot drift apart.
   sv_at = sort(SV_YPOS)
   tryCatch(
     circos.yaxis(
@@ -245,10 +239,12 @@ draw_circos = function(snv_data = NULL,
   # Y-axis labels for the copy-number track. Drawn once, outside panel.fun: in there it
   # ran per sector with a fixed sector.index, so it was re-drawn once for every
   # chromosome carrying ASCAT segments (~23 overlapping copies, which is why it rendered
-  # heavier than the SV axis) -- and not at all when no chromosome had any, since the
-  # panel returns early on that.
+  # heavier than the SV axis). The empty case keeps its old behaviour deliberately: the
+  # track is created unconditionally, but parse_ascat_segments() returns NULL when there is
+  # no ASCAT output at all, and a 0..4+ scale against a blank ring reads as "copy number is
+  # zero everywhere" rather than "no copy-number data".
   cnv_track_index = get.current.track.index()
-  tryCatch(
+  if (nrow(cnv) > 0) tryCatch(
     circos.yaxis(
       side              = "left",
       at                = c(0, 1, 2, 3, 4),

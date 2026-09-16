@@ -33,6 +33,18 @@ test_that("whatshap_totals recomputes the fraction when the column is absent", {
   expect_equal(got$fraction, 0.75)
 })
 
+test_that("whatshap_totals returns NULL when the summed columns are entirely missing", {
+  # whatshap leaves the field empty for a chromosome with no het variants. na.rm = TRUE made
+  # the sum 0, which passed the NULL guard and put a confident "Phased variants 0" in the
+  # header over a file that reported nothing at all.
+  w = list(
+    per_chrom = data.table(chromosome = c("chr1", "chr2"),
+                           variants = c("", ""), phased = c("", "")),
+    all = NULL
+  )
+  expect_null(whatshap_totals(w))
+})
+
 test_that("whatshap_totals returns NULL when there is nothing to total", {
   expect_null(whatshap_totals(NULL))
   expect_null(whatshap_totals(list(per_chrom = data.table(), all = NULL)))

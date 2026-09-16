@@ -72,8 +72,15 @@ whatshap_totals = function(whatshap) {
     # No ALL row: sum the per-chromosome rows rather than go quiet under a healthy table
     pc = whatshap$per_chrom
     if (is.null(pc) || nrow(pc) == 0) return(NULL)
-    sum1 = function(key) if (key %in% names(pc))
-      sum(suppressWarnings(as.numeric(pc[[key]])), na.rm = TRUE) else NA_real_
+    # na.rm = TRUE makes an all-missing column sum to 0, which then survives the
+    # is.na(phased) && is.na(fraction) guard below and renders a confident "0" in the header
+    # card. whatshap leaves the field empty for a chromosome with no het variants, so a file
+    # where that is true of every row is the case this distinguishes.
+    sum1 = function(key) {
+      if (!key %in% names(pc)) return(NA_real_)
+      v = suppressWarnings(as.numeric(pc[[key]]))
+      if (all(is.na(v))) NA_real_ else sum(v, na.rm = TRUE)
+    }
     phased   = sum1("phased")
     variants = sum1("variants")
     fraction = NA_real_
