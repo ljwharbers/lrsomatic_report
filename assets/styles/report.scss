@@ -78,7 +78,10 @@ $border-radius-lg:     8px;
   --impact-low:      #e4efe3;
   --impact-modifier: #f3f1ea;
 
-  // SV-type colour tokens (values match formatStyle in _sv.qmd)
+  // SV-type colour tokens (values match formatStyle in _sv.qmd). These are the table's
+  // pale row backgrounds and are deliberately NOT hue-matched to --circos-sv-* below:
+  // DUP is green here and red on the ring. The circos vars mirror SV_COLOURS, which is
+  // what the plot is drawn with, so a legend that agreed with these would lie about it.
   --sv-del:  #dbeafe;
   --sv-dup:  #dcfce7;
   --sv-inv:  #fef9c3;
