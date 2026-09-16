@@ -184,13 +184,22 @@ draw_circos = function(snv_data = NULL,
     }
   )
 
-  # Y-axis labels for SV track
+  # Ask circlize which track that was rather than counting.
+  # circos.initializeWithIdeogram() creates a track per plotType group *before* any of
+  # ours -- one for axis/labels and one for the ideogram -- so the SV track is index 4,
+  # not 3. A wrong track.index does not error, it silently draws on the neighbouring
+  # track, which is how these labels ended up against the SNV dots.
+  sv_track_index = get.current.track.index()
+
+  # Y-axis labels for SV track. `at`/`labels` come from SV_YPOS, the same constant
+  # severus_circos_tracks() drew the segments at, so the two cannot drift apart.
+  sv_at = sort(SV_YPOS)
   tryCatch(
     circos.yaxis(
       side              = "left",
-      at                = c(0.05, 0.33, 0.66, 1.0),
-      labels            = c("DUP", "INV", "DEL", "INS"),
-      track.index       = 3,
+      at                = unname(sv_at),
+      labels            = names(sv_at),
+      track.index       = sv_track_index,
       sector.index      = chromosomes[1],
       labels.niceFacing = TRUE,
       labels.cex        = 0.45
@@ -218,15 +227,6 @@ draw_circos = function(snv_data = NULL,
         }
       }
 
-      circos.yaxis(
-        side              = "left",
-        at                = c(0, 1, 2, 3, 4),
-        labels            = c("0", "1", "2", "3", "4+"),
-        sector.index      = chromosomes[1],
-        labels.niceFacing = TRUE,
-        labels.cex        = 0.40
-      )
-
       for (i in seq_len(nrow(sub_cnv))) {
         xl = sub_cnv$startpos[i]; xr = sub_cnv$endpos[i]
         maj = sub_cnv$major_cn[i]
@@ -240,6 +240,25 @@ draw_circos = function(snv_data = NULL,
                     col = CNV_COLOURS["total"], border = CNV_COLOURS["total"], lwd = 0.05)
       }
     }
+  )
+
+  # Y-axis labels for the copy-number track. Drawn once, outside panel.fun: in there it
+  # ran per sector with a fixed sector.index, so it was re-drawn once for every
+  # chromosome carrying ASCAT segments (~23 overlapping copies, which is why it rendered
+  # heavier than the SV axis) -- and not at all when no chromosome had any, since the
+  # panel returns early on that.
+  cnv_track_index = get.current.track.index()
+  tryCatch(
+    circos.yaxis(
+      side              = "left",
+      at                = c(0, 1, 2, 3, 4),
+      labels            = c("0", "1", "2", "3", "4+"),
+      track.index       = cnv_track_index,
+      sector.index      = chromosomes[1],
+      labels.niceFacing = TRUE,
+      labels.cex        = 0.40
+    ),
+    error = function(e) NULL
   )
 
   # ---- Translocation links (BND): one arc per mate-collapsed rearrangement ----
