@@ -12,13 +12,14 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
   cat("<script>window.SNV_COLS = ", js_col_index_map(names(dt_display)), ";</script>\n",
       sep = "")
 
-  # Tickbox facet values for the SNV table (see js_facet_defs() in R/utils.R), built from the display frame so names match SNV_COLS; the requested list is published too, since knitr swallows the omission message
-  snv_facet_cols = c("consequence", "impact", "callers")
+  # Tickbox facet values for the SNV table (see js_facet_defs() in R/utils.R), built from the display frame so names match SNV_COLS; the requested list is published too, since knitr swallows the omission message. The prediction-class columns exist only when the VEP run carried them, and js_facet_defs() skips the absent ones
+  snv_facet_cols = c("consequence", "impact", "callers",
+                     "sift", "polyphen", "am_class", "clinvar", "eve_class")
   cat("<script>window.SNV_FACET_COLS = ", js_vec(snv_facet_cols), ";</script>\n", sep = "")
   cat("<script>window.SNV_FACETS = ",
       js_facet_defs(dt_display,
                     cols   = snv_facet_cols,
-                    seps   = c(consequence = ",", callers = ","),
+                    seps   = c(consequence = ",", callers = ",", clinvar = ","),
                     levels = list(impact = IMPACT_LEVELS)),
       ";</script>\n", sep = "")
 }
@@ -31,6 +32,23 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
   mc_vals = if ("callers" %in% names(dt_display))
               unique(grep(",", dt_display$callers, fixed = TRUE, value = TRUE)) else
               character(0)
+
+  # Plugin columns present in this run (see VEP_ANNOTATION_FIELDS in R/parse_smallvariants.R)
+  class_cols = intersect(c("sift", "polyphen", "am_class", "clinvar", "eve_class"), names(dt_display))
+  score_cols = intersect(setdiff(VEP_SCORE_COLUMNS, "cadd"), names(dt_display))
+
+  # ClinVar variation IDs link out; display only, so sorting, filtering and the CSV keep the bare ID
+  col_defs = list(list(className = "dt-left", targets = "_all"))
+  clinvar_idx = match("clinvar_id", names(dt_display)) - 1L
+  if (!is.na(clinvar_idx)) {
+    col_defs = c(col_defs, list(list(
+      targets = clinvar_idx,
+      render  = JS("function(d, type) {",
+                   "  if (type !== 'display' || d === null || d === '') return d;",
+                   "  return '<a href=\"https://www.ncbi.nlm.nih.gov/clinvar/variation/' + d +",
+                   "         '/\" target=\"_blank\" rel=\"noopener\">' + d + '</a>';",
+                   "}"))))
+  }
 
   snv_dt = DT::datatable(
     dt_display,
@@ -46,7 +64,7 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
       scroller   = TRUE,
       deferRender = TRUE,
       pageLength = 25,
-      columnDefs = list(list(className = "dt-left", targets = "_all")),
+      columnDefs = col_defs,
       initComplete = JS("function() { window.snvTableElem = this.api().table().node(); }")
     )
   ) |>
@@ -66,6 +84,21 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
       target      = "cell",
       # Outside the impact palette so two columns do not read as one scale
       backgroundColor = DT::styleEqual(mc_vals, rep("#e6ecf5", length(mc_vals)))
+    )
+  }
+
+  # Scores stay numeric (they sort and export as numbers); rounding is display-only
+  if (length(score_cols) > 0) snv_dt = DT::formatRound(snv_dt, score_cols, digits = 3)
+  if ("cadd" %in% names(dt_display)) snv_dt = DT::formatRound(snv_dt, "cadd", digits = 1)
+
+  # One tint for the pathogenic classes across every prediction column; a third colour, so it reads as neither impact nor the callers flag
+  if (length(class_cols) > 0) {
+    snv_dt = DT::formatStyle(
+      snv_dt,
+      columns     = class_cols,
+      target      = "cell",
+      backgroundColor = DT::styleEqual(PATHOGENIC_CLASSES,
+                                       rep("#ebe3f1", length(PATHOGENIC_CLASSES)))
     )
   }
 
@@ -108,6 +141,41 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
     )
   )
 
-  tagList(snv_dt, footnote)
+  # Annotation footnote: which optional VEP annotations this run carried, so an absent column reads as "plugin not run" rather than "nothing found"
+  ann = vep_annotation_summary(attr(variant_table, "vep_fields"))
+  ann_note = if (!is.null(ann)) {
+    present = ann[present == TRUE]
+    absent  = ann[present == FALSE]
+    table_details(
+      summary = "Annotation sources",
+      tags$p(
+        "Prediction and database columns appear only for the annotations this VEP run carried;",
+        "the CSQ field read for each is in brackets.",
+        if (nrow(present) > 0) tagList(
+          tags$br(), "Present: ",
+          lapply(seq_len(nrow(present)), function(i) tagList(
+            if (i > 1) "; ", present$source[i], " (", tags$code(present$fields[i]), ")")),
+          "."
+        ),
+        if (nrow(absent) > 0) tagList(
+          tags$br(),
+          sprintf("Not in this VEP run, so no column: %s.", paste(absent$source, collapse = ", "))
+        ),
+        if (any(c("dbSNP", "COSMIC") %in% absent$source)) tagList(
+          tags$br(),
+          "dbSNP and COSMIC IDs come from the VEP cache itself; this cache carries no variation data."
+        ),
+        if (length(class_cols) > 0) tagList(
+          tags$br(),
+          "Highlighted prediction cells are calls in a pathogenic class",
+          sprintf("(%s).", paste(PATHOGENIC_CLASSES, collapse = ", ")),
+          "Each predictor's class and score are separate columns; the cache's own",
+          tags$code("deleterious(0.01)"), "form is split the same way."
+        )
+      )
+    )
+  }
+
+  tagList(snv_dt, footnote, ann_note)
 }
 ```

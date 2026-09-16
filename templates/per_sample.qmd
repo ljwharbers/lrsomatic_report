@@ -304,7 +304,7 @@ cat("</script>\n")
 
 {{< include sections/_qc.qmd >}}
 
-*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.3.1*
+*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.4.0*
 
 ```{=html}
 <script>
