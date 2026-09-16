@@ -58,13 +58,16 @@ resolve_vep_fields = function(available) {
   }, character(1))
 }
 
-# Whether the VEP cache carried dbSNP/COSMIC IDs, from the header (`##VEP=... dbSNP="156"` in a VCF, `## dbSNP 156` in text output); NA when the header says nothing either way
+# Whether the VEP cache carried dbSNP/COSMIC IDs, from the header (`##VEP=... dbSNP="156"` in a VCF, `## dbSNP version 156` in text output); NA when the header says nothing either way. The text scan is anchored at line start: every VEP text header describes its own Extra keys, and `## CLIN_SIG : ClinVar clinical significance of the dbSNP variant` matched an unanchored "dbSNP", which kept a permanently empty dbsnp column on every T2T text report
 vep_cache_sources = function(header_lines) {
   vep_line = grep("^##VEP=", header_lines, value = TRUE)
   is_text  = any(grepl("^## ENSEMBL VARIANT EFFECT PREDICTOR", header_lines))
   if (length(vep_line) == 0 && !is_text) return(c(dbsnp = NA, cosmic = NA))
-  hay = if (length(vep_line)) vep_line[1] else paste(header_lines, collapse = "\n")
-  c(dbsnp = grepl("dbSNP[= ]", hay), cosmic = grepl("COSMIC[= ]", hay))
+  said = function(key) {
+    if (length(vep_line)) grepl(paste0("\\b", key, "[= ]"), vep_line[1])
+    else any(grepl(paste0("^## ", key, "[ =]"), header_lines))
+  }
+  c(dbsnp = said("dbSNP"), cosmic = said("COSMIC"))
 }
 
 # Attach the annotation columns a file declares. `get_field(name)` returns that CSQ/Extra field as a character vector. A column whose source is not declared is not created (the plugin did not run); one declared but empty stays all NA (it ran and found nothing). The resolution is kept as attr "vep_fields" for the footnote
@@ -87,8 +90,10 @@ add_vep_annotations = function(dt, get_field, available, cache = c(dbsnp = NA, c
   for (col in intersect(names(resolved), names(dt))) {
     dt[get(col) == "", (col) := NA_character_]
   }
-  # Multi-valued custom fields arrive "&"-joined, like Consequence; the facet splits on ","
-  if ("clinvar" %in% names(dt)) dt[, clinvar := gsub("&", ",", clinvar, fixed = TRUE)]
+  # Multi-valued custom fields arrive "&"-joined, like Consequence; the facet splits on "," and the ClinVar link render splits the id cell the same way
+  for (col in intersect(c("clinvar", "clinvar_id"), names(dt))) {
+    dt[, (col) := gsub("&", ",", get(col), fixed = TRUE)]
+  }
   for (col in intersect(VEP_SCORE_COLUMNS, names(dt))) {
     dt[, (col) := suppressWarnings(as.numeric(get(col)))]
   }
@@ -175,19 +180,35 @@ parse_vep_text = function(vep_file) {
   dt[, alt := sub(".*/", "", variant_id)]
 
   # Extra keys the file declares (`## KEY : description` header lines), plus any annotation key actually present in a row, for files whose header omits them
-  cands     = unique(unlist(VEP_ANNOTATION_FIELDS, use.names = FALSE))
-  declared  = sub("^## (\\S+) : .*$", "\\1", grep("^## \\S+ : ", hdr, value = TRUE))
-  observed  = cands[vapply(cands, function(k) any(grepl(paste0("(^|;)", k, "="), dt$Extra)),
-                           logical(1))]
+  cands    = unique(unlist(VEP_ANNOTATION_FIELDS, use.names = FALSE))
+  declared = sub("^## (\\S+) : .*$", "\\1", grep("^## \\S+ : ", hdr, value = TRUE))
+
+  # One alternation pass over Extra, only for keys the header did not already declare, and the matches are extracted only from the rows that hit: one grepl() per key was 8.8 s of every render at 171k rows, this is 0.8 s
+  unseen   = setdiff(cands, declared)
+  observed = character(0)
+  if (length(unseen) > 0) {
+    xtr = as.character(dt$Extra)
+    xtr[is.na(xtr)] = ""
+    pat = paste0("(?:^|;)(", paste(unseen, collapse = "|"), ")=")
+    hit = grepl(pat, xtr, perl = TRUE)
+    if (any(hit)) {
+      hits = unlist(regmatches(xtr[hit], gregexpr(pat, xtr[hit], perl = TRUE)), use.names = FALSE)
+      observed = intersect(unseen, unique(sub("^;?(.*)=$", "\\1", hits)))
+    }
+  }
   available = union(declared, observed)
 
   # Parse the VEP Extra key=value field in one pass
-  ex = extract_extra_keys(dt$Extra, unique(c("SYMBOL", "IMPACT", "Existing_variation", "HGVSp",
+  ex = extract_extra_keys(dt$Extra, unique(c("SYMBOL", "IMPACT", "HGVSp",
                                              intersect(cands, available))))
-  dt[, symbol   := ex$SYMBOL]
-  dt[, impact   := ex$IMPACT]
-  dt[, existing := ex$Existing_variation]
-  dt[, hgvsp    := ex$HGVSp]
+  dt[, symbol := ex$SYMBOL]
+  dt[, impact := ex$IMPACT]
+  dt[, hgvsp  := ex$HGVSp]
+
+  # Existing_variation is a column of the text format, never an Extra key; reading it from Extra left it - and so dbsnp/cosmic - empty on every text report
+  dt[, existing := if ("Existing_variation" %in% names(dt)) as.character(Existing_variation)
+                   else NA_character_]
+  dt[existing %in% c("", "-"), existing := NA_character_]
 
   # dbSNP / COSMIC IDs, derived from Existing_variation
   dt = derive_dbsnp_cosmic(dt)
@@ -273,7 +294,7 @@ parse_vep_vcf = function(vep_file) {
                by = .(CHROM, POS, REF, ALT, id, caller)]
   if (nrow(dt_long) == 0) return(NULL)
 
-  # Split each entry on "|", keeping the fields used below plus whichever annotation fields this header declares
+  # Split each entry on "|", keeping the fields used below plus whichever annotation fields this header declares. `need` is not in CSQ order - a real GRCh38 header puts ClinVar_CLNSIG after CADD_PHRED - and names(parts) relies on tstrsplit() returning `keep` in the order asked for, not sorted
   resolved = resolve_vep_fields(csq_format)
   need = unique(c("Consequence", "IMPACT", "SYMBOL", "Gene", "HGVSp", "Existing_variation",
                   resolved[!is.na(resolved)]))

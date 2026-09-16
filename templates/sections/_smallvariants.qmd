@@ -16,6 +16,9 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
   snv_facet_cols = c("consequence", "impact", "callers",
                      "sift", "polyphen", "am_class", "clinvar", "eve_class")
   cat("<script>window.SNV_FACET_COLS = ", js_vec(snv_facet_cols), ";</script>\n", sep = "")
+
+  # The clinvar cell tint tests tokens, not the whole cell, so the class list has to reach the browser
+  cat("<script>window.PATHOGENIC_CLASSES = ", js_vec(PATHOGENIC_CLASSES), ";</script>\n", sep = "")
   cat("<script>window.SNV_FACETS = ",
       js_facet_defs(dt_display,
                     cols   = snv_facet_cols,
@@ -33,21 +36,41 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
               unique(grep(",", dt_display$callers, fixed = TRUE, value = TRUE)) else
               character(0)
 
-  # Plugin columns present in this run (see VEP_ANNOTATION_FIELDS in R/parse_smallvariants.R)
+  # Plugin columns present in this run (see VEP_ANNOTATION_FIELDS in R/parse_smallvariants.R). clinvar is the one multi-token class column, so it is tinted per token below rather than by styleEqual(), which matches whole cells
   class_cols = intersect(c("sift", "polyphen", "am_class", "clinvar", "eve_class"), names(dt_display))
+  equal_cols = setdiff(class_cols, "clinvar")
   score_cols = intersect(setdiff(VEP_SCORE_COLUMNS, "cadd"), names(dt_display))
 
-  # ClinVar variation IDs link out; display only, so sorting, filtering and the CSV keep the bare ID
   col_defs = list(list(className = "dt-left", targets = "_all"))
+
+  # ClinVar variation IDs link out, one link per id ("&"-joined ids are rewritten to "," by add_vep_annotations()); display only, so sorting, filtering and the CSV keep the bare ids
   clinvar_idx = match("clinvar_id", names(dt_display)) - 1L
   if (!is.na(clinvar_idx)) {
     col_defs = c(col_defs, list(list(
       targets = clinvar_idx,
       render  = JS("function(d, type) {",
                    "  if (type !== 'display' || d === null || d === '') return d;",
-                   "  return '<a href=\"https://www.ncbi.nlm.nih.gov/clinvar/variation/' + d +",
-                   "         '/\" target=\"_blank\" rel=\"noopener\">' + d + '</a>';",
+                   "  return String(d).split(',').map(function(id) {",
+                   "    id = id.trim();",
+                   "    return '<a href=\"https://www.ncbi.nlm.nih.gov/clinvar/variation/' +",
+                   "           encodeURIComponent(id) + '/\" target=\"_blank\" rel=\"noopener\">' +",
+                   "           id + '</a>';",
+                   "  }).join(', ');",
                    "}"))))
+  }
+
+  # A ClinVar cell is a token list ("Pathogenic,risk_factor"), so the tint tests the tokens; styleEqual() would leave every combined call plain
+  clinsig_idx = match("clinvar", names(dt_display)) - 1L
+  if (!is.na(clinsig_idx)) {
+    col_defs = c(col_defs, list(list(
+      targets = clinsig_idx,
+      createdCell = JS("function(td, cellData) {",
+                       "  if (cellData === null || cellData === '') return;",
+                       "  var pc = window.PATHOGENIC_CLASSES || [];",
+                       "  var hit = String(cellData).split(',').some(function(t) {",
+                       "    return pc.indexOf(t.trim()) >= 0; });",
+                       "  if (hit) $(td).css('background-color', '#ebe3f1');",
+                       "}"))))
   }
 
   snv_dt = DT::datatable(
@@ -91,11 +114,11 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
   if (length(score_cols) > 0) snv_dt = DT::formatRound(snv_dt, score_cols, digits = 3)
   if ("cadd" %in% names(dt_display)) snv_dt = DT::formatRound(snv_dt, "cadd", digits = 1)
 
-  # One tint for the pathogenic classes across every prediction column; a third colour, so it reads as neither impact nor the callers flag
-  if (length(class_cols) > 0) {
+  # One tint for the pathogenic classes across every single-valued prediction column; a third colour, so it reads as neither impact nor the callers flag. clinvar is tinted by the token-aware createdCell above
+  if (length(equal_cols) > 0) {
     snv_dt = DT::formatStyle(
       snv_dt,
-      columns     = class_cols,
+      columns     = equal_cols,
       target      = "cell",
       backgroundColor = DT::styleEqual(PATHOGENIC_CLASSES,
                                        rep("#ebe3f1", length(PATHOGENIC_CLASSES)))
