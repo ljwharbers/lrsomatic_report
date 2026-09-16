@@ -251,21 +251,6 @@ unique_panel_name = function(nm, taken) {
   cand
 }
 
-# Resolve selected panel keys to panel objects, re-read from disk (the YAML round trip list-ifies the vectors); not tryCatch-wrapped so an unresolvable panel fails the render
-resolve_selected_panels = function(keys, all_panels, assets_dir, reference = NULL) {
-  keys = setdiff(as.character(unlist(keys)), "__all__")
-  keys = keys[!is.na(keys) & nzchar(keys)]
-  if (length(keys) == 0) return(list())
-  out = list()
-  for (k in unique(keys)) {
-    p    = if (!is.null(all_panels)) all_panels[[k]] else NULL
-    path = if (!is.null(p) && !is.null(p$path)) as.character(p$path)[1] else NA_character_
-    out[[k]] = if (!is.na(path) && file.exists(path)) load_gene_panel(path, reference)
-               else resolve_gene_panel(k, assets_dir, reference)
-  }
-  out[!vapply(out, is.null, logical(1))]
-}
-
 # Pull every occurrence of a repeatable flag out of argv (optparse has no action="append"); accepts `--flag value` and `--flag=value`
 extract_repeated_option = function(args, flag) {
   args = as.character(args)
