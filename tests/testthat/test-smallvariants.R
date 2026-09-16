@@ -154,6 +154,160 @@ test_that("the VEP text path still joins, and declares VEP space", {
   expect_equal(res[symbol == "RB1"]$vaf, 0.2)   # deletion, reconciled by variant_key()
 })
 
+# --- VEP plugin annotations --------------------------------------------------
+
+# A CSQ VCF with the given Format fields, one entry per record, plus optional header lines
+write_csq_vcf = function(format, entries, extra_header = character(0)) {
+  head = paste(c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO"), collapse = "\t")
+  write_gz(c(
+    "##fileformat=VCFv4.2", extra_header,
+    paste0("##INFO=<ID=CSQ,Number=.,Type=String,Description=\"Format: ", format, "\">"),
+    head,
+    vapply(seq_along(entries), function(i)
+      paste(c("chr1", 100L * i, ".", "A", "G", ".", "PASS", paste0("CSQ=", entries[i])),
+            collapse = "\t"), character(1))))
+}
+csq_base = "Allele|Consequence|IMPACT|SYMBOL|Gene"
+
+test_that("the PolyPhen_SIFT, AlphaMissenseProtein and ClinVar plugin fields (T2T) become columns", {
+  f = write_csq_vcf(
+    paste(csq_base, "SIFT_pred|SIFT_score|PolyPhen_humvar_pred|PolyPhen_humvar_score",
+          "AlphaMissenseProtein_match|am_class|am_pathogenicity|ClinVar|ClinVar_CLNSIG", sep = "|"),
+    c("G|missense_variant|MODERATE|TP53|E1|deleterious|0|probably_damaging|0.999|gene_aa|pathogenic|0.97|12345|Pathogenic&risk_factor",
+      "G|missense_variant|MODERATE|KRAS|E2|||||aa_mismatch||||"),
+    extra_header = '##VEP="v115.2" API="v115" assembly="T2T-CHM13v2.0"')
+  v = parse_vep_vcf(f)
+  expect_equal(v$sift,           c("deleterious", NA));       expect_equal(v$sift_score,     c(0, NA))
+  expect_equal(v$polyphen,       c("probably_damaging", NA)); expect_equal(v$polyphen_score, c(0.999, NA))
+  expect_equal(v$am_class,       c("pathogenic", NA));        expect_equal(v$am_score,       c(0.97, NA))
+  expect_equal(v$clinvar,        c("Pathogenic,risk_factor", NA))   # "&" rewritten so the facet can split it
+  expect_equal(v$clinvar_id,     c("12345", NA))
+
+  # Plugins this run did not have get no column at all, and the T2T cache carries no dbSNP/COSMIC
+  expect_false(any(c("cadd", "revel", "eve_class", "eve_score", "dbsnp", "cosmic") %in% names(v)))
+  vf = attr(v, "vep_fields")
+  expect_equal(unname(vf["sift"]), "SIFT_pred")
+  expect_true(is.na(vf["cadd"])); expect_true(is.na(vf["dbsnp"]))
+
+  # The display table carries the columns and the attribute through merge()/unique()
+  tb = build_variant_table(v, NULL)
+  expect_true(all(c("sift", "sift_score", "am_class", "am_score", "clinvar", "clinvar_id") %in% names(tb)))
+  expect_false("cadd" %in% names(tb))
+  expect_equal(attr(tb, "vep_fields"), vf)
+})
+
+test_that("built-in SIFT/PolyPhen `pred(score)` splits into the same class and score columns (hg38)", {
+  f = write_csq_vcf(
+    paste(csq_base, "SIFT|PolyPhen|CLIN_SIG|am_class|am_pathogenicity|CADD_PHRED|CADD_RAW|REVEL|EVE_CLASS|EVE_SCORE", sep = "|"),
+    c("G|missense_variant|MODERATE|TP53|E1|deleterious(0.01)|benign(0)|pathogenic|likely_pathogenic|0.98|25.3|4.1|0.9|Pathogenic|0.7375145263264659",
+      "G|missense_variant|MODERATE|KRAS|E2|deleterious_low_confidence(0)|||||1.2|-0.1|||"),
+    extra_header = '##VEP="v115.2" API="v115" assembly="GRCh38.p14" COSMIC="99" dbSNP="156"')
+  v = parse_vep_vcf(f)
+  expect_equal(v$sift,       c("deleterious", "deleterious_low_confidence"))
+  expect_equal(v$sift_score, c(0.01, 0))
+  expect_equal(v$polyphen,   c("benign", NA)); expect_equal(v$polyphen_score, c(0, NA))
+  expect_equal(v$clinvar,    c("pathogenic", NA))   # the cache's CLIN_SIG when no ClinVar --custom track ran
+  expect_false("clinvar_id" %in% names(v))
+  expect_equal(v$cadd,       c(25.3, 1.2)); expect_equal(v$revel, c(0.9, NA))
+  expect_equal(v$eve_class,  c("Pathogenic", NA)); expect_equal(v$eve_score[1], 0.7375145263264659)
+  expect_true(all(c("dbsnp", "cosmic") %in% names(v)))
+  vf = attr(v, "vep_fields")
+  expect_equal(unname(vf[c("sift", "sift_score", "clinvar", "dbsnp")]),
+               c("SIFT", "SIFT", "CLIN_SIG", "Existing_variation"))
+})
+
+test_that("a CSQ header with no prediction field yields no prediction column; an undeclared cache keeps dbSNP/COSMIC", {
+  v = parse_vep_vcf(write_csq_vcf(csq_base, "G|missense_variant|MODERATE|TP53|E1"))
+  expect_false(any(names(VEP_ANNOTATION_FIELDS) %in% names(v)))
+  expect_true(all(c("dbsnp", "cosmic") %in% names(v)))   # no ##VEP line, so nothing says the cache lacks them
+  s = vep_annotation_summary(attr(v, "vep_fields"))
+  expect_equal(s[present == TRUE]$source, c("dbSNP", "COSMIC"))
+  expect_equal(s[source == "SIFT"]$fields, "")
+})
+
+test_that("the text path resolves the same plugin keys from Extra, whether declared in the header or only present in a row", {
+  cols = c("Uploaded_variation", "Location", "Allele", "Gene", "Feature", "Feature_type",
+           "Consequence", "cDNA_position", "CDS_position", "Protein_position", "Amino_acids",
+           "Codons", "Existing_variation", "Extra")
+  row = function(vid, loc, allele, gene, csq, extra)
+    paste(c(vid, loc, allele, gene, "T1", "Transcript", csq, "-", "-", "-", "-", "-", "-", extra),
+          collapse = "\t")
+  f = write_gz(c(
+    "## ENSEMBL VARIANT EFFECT PREDICTOR v115.2",
+    "## Output produced at 2026-09-15 20:41:02",
+    "## Extra column keys:",
+    "## IMPACT : Subtype of consequence type",
+    "## SYMBOL : Gene symbol",
+    "## SIFT_pred : SIFT prediction",
+    "## SIFT_score : SIFT score",
+    paste0("#", paste(cols, collapse = "\t")),
+    row("chr1_100_A/G", "chr1:100", "G", "E1", "missense_variant",
+        "IMPACT=MODERATE;SYMBOL=TP53;SIFT_pred=deleterious;SIFT_score=0.02;am_class=pathogenic;am_pathogenicity=0.9"),
+    row("chr1_200_C/T", "chr1:200", "T", "E2", "synonymous_variant", "IMPACT=LOW;SYMBOL=KRAS")))
+  v = parse_vep_text(f)
+  expect_equal(v$symbol,   c("TP53", "KRAS"))
+  expect_equal(v$sift,     c("deleterious", NA)); expect_equal(v$sift_score, c(0.02, NA))
+  expect_equal(v$am_class, c("pathogenic", NA));  expect_equal(v$am_score,   c(0.9, NA))
+  expect_false("polyphen" %in% names(v))
+  # A text header names its dbSNP/COSMIC releases; this one has neither line
+  expect_false(any(c("dbsnp", "cosmic") %in% names(v)))
+})
+
+test_that("the text path reads Existing_variation from its own column, not from Extra", {
+  cols = c("Uploaded_variation", "Location", "Allele", "Gene", "Feature", "Feature_type",
+           "Consequence", "cDNA_position", "CDS_position", "Protein_position", "Amino_acids",
+           "Codons", "Existing_variation", "Extra")
+  row = function(vid, loc, allele, existing)
+    paste(c(vid, loc, allele, "E1", "T1", "Transcript", "missense_variant",
+            "-", "-", "-", "-", "-", existing, "IMPACT=MODERATE;SYMBOL=TP53"), collapse = "\t")
+  f = write_gz(c(
+    "## ENSEMBL VARIANT EFFECT PREDICTOR v115.2",
+    "## COSMIC version 99",
+    "## dbSNP version 156",
+    "## Extra column keys:",
+    "## IMPACT : Subtype of consequence type",
+    "## SYMBOL : Gene symbol",
+    "## CLIN_SIG : ClinVar clinical significance of the dbSNP variant",
+    paste0("#", paste(cols, collapse = "\t")),
+    row("chr1_100_A/G", "chr1:100", "G", "rs886974256"),
+    row("chr1_200_C/T", "chr1:200", "T", "rs772325487,COSV100527437"),
+    row("chr1_300_G/A", "chr1:300", "A", "-")))
+  v = parse_vep_text(f)
+  expect_equal(v$existing, c("rs886974256", "rs772325487,COSV100527437", NA))
+  expect_equal(v$dbsnp,    c("rs886974256", "rs772325487", NA))
+  expect_equal(v$cosmic,   c(NA, "COSV100527437", NA))
+})
+
+test_that("vep_cache_sources reads both header shapes and stays agnostic without a VEP line", {
+  expect_equal(vep_cache_sources('##VEP="v115" dbSNP="156" COSMIC="99"'),   c(dbsnp = TRUE,  cosmic = TRUE))
+  expect_equal(vep_cache_sources('##VEP="v115" assembly="T2T-CHM13v2.0"'), c(dbsnp = FALSE, cosmic = FALSE))
+  expect_equal(vep_cache_sources(c("## ENSEMBL VARIANT EFFECT PREDICTOR v115", "## dbSNP 156")),
+               c(dbsnp = TRUE, cosmic = FALSE))
+  expect_equal(vep_cache_sources(c("## ENSEMBL VARIANT EFFECT PREDICTOR v115",
+                                   "## dbSNP version 156", "## COSMIC version 99")),
+               c(dbsnp = TRUE, cosmic = TRUE))
+  expect_equal(vep_cache_sources("##fileformat=VCFv4.2"), c(dbsnp = NA, cosmic = NA))
+})
+
+test_that("a VEP text header describing its Extra keys does not read as a dbSNP-carrying cache", {
+  # Every VEP text header carries this line, whether or not the cache has dbSNP at all
+  t2t = c("## ENSEMBL VARIANT EFFECT PREDICTOR v115.2",
+          "## assembly version T2T-CHM13v2.0",
+          "## Extra column keys:",
+          "## CLIN_SIG : ClinVar clinical significance of the dbSNP variant",
+          "## SOMATIC : Somatic status of existing variant")
+  expect_equal(vep_cache_sources(t2t), c(dbsnp = FALSE, cosmic = FALSE))
+})
+
+test_that("extract_extra_keys matches extract_extra_key and keeps '=' inside a value", {
+  ex = c("SYMBOL=TP53;HGVSp=ENSP1:p.A1T;NOTE=a=b", "-", NA, "SYMBOL=KRAS")
+  out = extract_extra_keys(ex, c("SYMBOL", "NOTE", "MISSING"))
+  expect_equal(out$SYMBOL,  c("TP53", NA, NA, "KRAS"))
+  expect_equal(out$NOTE,    c("a=b", NA, NA, NA))
+  expect_equal(out$MISSING, rep(NA_character_, 4))
+  expect_equal(extract_extra_key(ex, "SYMBOL"), out$SYMBOL)
+})
+
 # --- vaf_provenance() -------------------------------------------------------
 
 # Write a minimal gzipped VCF header (plus one record, so the scan has to stop on its own)
