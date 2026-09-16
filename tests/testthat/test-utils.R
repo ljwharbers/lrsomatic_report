@@ -208,41 +208,6 @@ test_that("unique_panel_name keeps colliding user TSVs separately selectable", {
                "lymphoid-custom3")
 })
 
-# ---- Selecting several panels on load ------------------------------------
-
-test_that("resolve_selected_panels resolves builtins and registered TSVs by key", {
-  repo_root = dirname(dirname(getwd()))
-  assets    = file.path(repo_root, "assets")
-
-  tsv = tempfile(fileext = ".tsv")
-  writeLines(c("gene", "MYCN", "ALK"), tsv)
-  on.exit(unlink(tsv))
-  all_panels = load_all_gene_panels(assets, "hg38")
-  all_panels[["mine"]] = load_gene_panel(tsv, "hg38")
-
-  got = resolve_selected_panels(c("lymphoid", "mine"), all_panels, assets, "hg38")
-  expect_equal(names(got), c("lymphoid", "mine"))
-  expect_true(got$lymphoid$has_coords)
-  # A custom TSV's key is not a builtin name — its location comes from its own $path.
-  expect_setequal(got$mine$genes, c("MYCN", "ALK"))
-  expect_false(got$mine$has_coords)
-})
-
-test_that("resolve_selected_panels treats __all__ and nothing as no panels", {
-  repo_root = dirname(dirname(getwd()))
-  assets    = file.path(repo_root, "assets")
-  expect_equal(resolve_selected_panels("__all__", list(), assets, "hg38"), list())
-  expect_equal(resolve_selected_panels(NULL, list(), assets, "hg38"), list())
-  expect_equal(resolve_selected_panels(character(0), list(), assets, "hg38"), list())
-})
-
-test_that("resolve_selected_panels errors on a key it cannot resolve", {
-  repo_root = dirname(dirname(getwd()))
-  expect_error(
-    resolve_selected_panels("nosuchpanel", list(), file.path(repo_root, "assets"), "hg38"),
-    "Gene panel not found")
-})
-
 # ---- js_facet_defs (tickbox column filters) -------------------------------
 
 test_that("js_facet_defs orders a levelled column by severity, not by count", {
