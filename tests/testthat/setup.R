@@ -16,4 +16,6 @@ source(file.path(repo_root, "R/parse_severus.R"))
 # serialises data — no circlize, nothing to skip. (R/circos.R still needs circlize for
 # the genome-wide plot, but nothing under test sources it.)
 source(file.path(repo_root, "R/sections.R"))
+# Sourced for whatshap_totals(); register_section() runs at source time, hence the order
+source(file.path(repo_root, "R/sections/whatshap.R"))
 source(file.path(repo_root, "R/circos_bnd.R"))

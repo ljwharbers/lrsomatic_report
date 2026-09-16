@@ -421,3 +421,25 @@ test_that("sv_display_columns is empty-safe and rejects a frame missing its inpu
   expect_equal(nrow(sv_display_columns(data.table())), 0L)
   expect_error(sv_display_columns(data.table(svclass = "DEL")), "missing")
 })
+
+# ---- The one copy of the SV palette that lives in another language --------
+
+test_that("--circos-sv-* in report.scss mirrors SV_COLOURS", {
+  # SV_COLOURS is what severus_circos_tracks() stamps onto every row, i.e. what the ring is
+  # actually drawn with; the HTML legend in _circos.qmd takes its swatches from these CSS
+  # vars. The two drifted once already and shipped in every report -- the legend said DEL was
+  # a muted #2f6db3 while the ring drew navy #020272, and DUP was green in the legend and red
+  # on the plot. A wrong colour here renders perfectly, so only a test catches it.
+  scss = readLines(file.path(dirname(dirname(getwd())), "assets/styles/report.scss"),
+                   warn = FALSE)
+
+  declared = function(name) {
+    pat = paste0("--circos-sv-", name, ":[[:space:]]*#[0-9A-Fa-f]{6}")
+    m   = regmatches(scss, regexpr(pat, scss))
+    expect_length(m, 1)
+    tolower(sub(".*#", "#", m))
+  }
+
+  for (nm in names(SV_COLOURS))
+    expect_equal(declared(tolower(nm)), tolower(unname(SV_COLOURS[[nm]])), info = nm)
+})
