@@ -253,12 +253,50 @@ test_that("the text path resolves the same plugin keys from Extra, whether decla
   expect_false(any(c("dbsnp", "cosmic") %in% names(v)))
 })
 
+test_that("the text path reads Existing_variation from its own column, not from Extra", {
+  cols = c("Uploaded_variation", "Location", "Allele", "Gene", "Feature", "Feature_type",
+           "Consequence", "cDNA_position", "CDS_position", "Protein_position", "Amino_acids",
+           "Codons", "Existing_variation", "Extra")
+  row = function(vid, loc, allele, existing)
+    paste(c(vid, loc, allele, "E1", "T1", "Transcript", "missense_variant",
+            "-", "-", "-", "-", "-", existing, "IMPACT=MODERATE;SYMBOL=TP53"), collapse = "\t")
+  f = write_gz(c(
+    "## ENSEMBL VARIANT EFFECT PREDICTOR v115.2",
+    "## COSMIC version 99",
+    "## dbSNP version 156",
+    "## Extra column keys:",
+    "## IMPACT : Subtype of consequence type",
+    "## SYMBOL : Gene symbol",
+    "## CLIN_SIG : ClinVar clinical significance of the dbSNP variant",
+    paste0("#", paste(cols, collapse = "\t")),
+    row("chr1_100_A/G", "chr1:100", "G", "rs886974256"),
+    row("chr1_200_C/T", "chr1:200", "T", "rs772325487,COSV100527437"),
+    row("chr1_300_G/A", "chr1:300", "A", "-")))
+  v = parse_vep_text(f)
+  expect_equal(v$existing, c("rs886974256", "rs772325487,COSV100527437", NA))
+  expect_equal(v$dbsnp,    c("rs886974256", "rs772325487", NA))
+  expect_equal(v$cosmic,   c(NA, "COSV100527437", NA))
+})
+
 test_that("vep_cache_sources reads both header shapes and stays agnostic without a VEP line", {
   expect_equal(vep_cache_sources('##VEP="v115" dbSNP="156" COSMIC="99"'),   c(dbsnp = TRUE,  cosmic = TRUE))
   expect_equal(vep_cache_sources('##VEP="v115" assembly="T2T-CHM13v2.0"'), c(dbsnp = FALSE, cosmic = FALSE))
   expect_equal(vep_cache_sources(c("## ENSEMBL VARIANT EFFECT PREDICTOR v115", "## dbSNP 156")),
                c(dbsnp = TRUE, cosmic = FALSE))
+  expect_equal(vep_cache_sources(c("## ENSEMBL VARIANT EFFECT PREDICTOR v115",
+                                   "## dbSNP version 156", "## COSMIC version 99")),
+               c(dbsnp = TRUE, cosmic = TRUE))
   expect_equal(vep_cache_sources("##fileformat=VCFv4.2"), c(dbsnp = NA, cosmic = NA))
+})
+
+test_that("a VEP text header describing its Extra keys does not read as a dbSNP-carrying cache", {
+  # Every VEP text header carries this line, whether or not the cache has dbSNP at all
+  t2t = c("## ENSEMBL VARIANT EFFECT PREDICTOR v115.2",
+          "## assembly version T2T-CHM13v2.0",
+          "## Extra column keys:",
+          "## CLIN_SIG : ClinVar clinical significance of the dbSNP variant",
+          "## SOMATIC : Somatic status of existing variant")
+  expect_equal(vep_cache_sources(t2t), c(dbsnp = FALSE, cosmic = FALSE))
 })
 
 test_that("extract_extra_keys matches extract_extra_key and keeps '=' inside a value", {
