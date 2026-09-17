@@ -137,6 +137,12 @@ jobs:
     env:
       VERSION: ${{ needs.build-push.outputs.version }}
     steps:
+      # The fixture below; checked out at the tag being built, not at main
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
       - name: Set up Apptainer
         uses: eWaterCycle/setup-apptainer@v2
         with:
@@ -149,13 +155,37 @@ jobs:
         run: |
           set -euo pipefail
           apptainer build lrsomatic-report.sif "docker://${IMAGE}:${VERSION}"
-          # Re-check through apptainer: it ignores ENTRYPOINT and runs as the invoking uid,
-          # so a layout that works under `docker run` can still fail here.
+          ls -lh lrsomatic-report.sif
+
+      # This is the artefact the pipeline actually runs on the cluster, and apptainer is not
+      # docker: it ignores ENTRYPOINT, runs as the invoking uid and does not inherit the
+      # caller's environment the same way. So it gets a real render of its own rather than a
+      # couple of --version calls.
+      - name: Smoke test the SIF
+        run: |
+          set -euo pipefail
           apptainer exec lrsomatic-report.sif render_report.R --version | tee v.txt
           grep -qx "${VERSION}" v.txt
+          # Nextflow's task monitor calls ps inside the container
           apptainer exec lrsomatic-report.sif ps --version
-          apptainer exec lrsomatic-report.sif bash -c 'test -d "$QUARTO_SHARE_PATH"'
-          ls -lh lrsomatic-report.sif
+          # The wrapper, not the environment, is what supplies QUARTO_SHARE_PATH: it is
+          # deliberately not an ENV var, because quarto's other seven variables cannot be.
+          apptainer exec lrsomatic-report.sif bash -c \
+            'for h in /opt/conda/etc/conda/activate.d/*.sh; do . "$h"; done; test -d "$QUARTO_SHARE_PATH"'
+
+          mkdir -p work/sample_dir
+          cp tests/fixtures/test_SOMATIC_VEP.vcf.gz work/sample_dir/
+          cd work
+          export HOME="$PWD" TMPDIR="$PWD"
+          apptainer exec --pwd "$PWD" ../lrsomatic-report.sif render_report.R \
+              --sample-dir sample_dir \
+              --sample-id smoke \
+              --sex male \
+              --reference auto \
+              --output smoke_report.html
+          test -s smoke_report.html
+          # The fixture carries a TP53 variant; an empty report renders cleanly without it
+          grep -q TP53 smoke_report.html
 
       - name: Push the SIF to GHCR via ORAS
         run: |
