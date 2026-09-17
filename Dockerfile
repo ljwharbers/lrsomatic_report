@@ -27,7 +27,11 @@ RUN mamba env update -n base -f /tmp/environment.yml \
  && mamba clean -afy \
  && rm -f /tmp/environment.yml
 
+# CONDA_PREFIX: activate.d holds a hook from every package that ships one, not just quarto's,
+# and some of them (activate-gcc_linux-64.sh, from the compiler runtime r-base pulls in)
+# dereference CONDA_PREFIX and fail when it is unset. There is exactly one environment here.
 ENV PATH=/opt/conda/bin:$PATH \
+    CONDA_PREFIX=/opt/conda \
     LC_ALL=C.UTF-8 \
     LANG=C.UTF-8
 
@@ -66,7 +70,9 @@ RUN chmod +x /opt/conda/share/lrsomatic_report/bin/render_report.R \
 # silently broken: an activation hook that stopped exporting something quarto needs, a
 # missing R dependency that would only show up mid-render, and a wrapper whose repo_dir
 # does not resolve.
-RUN set -eu; \
+# set +u because SHELL turns it on for every RUN, and these hooks are third-party scripts:
+# we cannot promise what else they dereference. -e stays on, from SHELL.
+RUN set +u; \
     for hook in /opt/conda/etc/conda/activate.d/*.sh; do . "$hook"; done; \
     for var in QUARTO_DENO QUARTO_PANDOC QUARTO_SHARE_PATH QUARTO_CONDA_PREFIX; do \
         eval "val=\${$var:-}"; \
