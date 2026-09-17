@@ -12,6 +12,10 @@ table_details(
   "With more than one panel ticked, each panel_hit entry names the panel it matched in",
   "square brackets.",
   tags$br(),
+  "A panel may also scope individual genes to one table — a rearrangement partner such as",
+  tags$code("IGH"), "is worth filtering SVs on but not small variants, and a coding-mutation",
+  "gene the other way round. The note under the SV table names the split for each ticked panel.",
+  tags$br(),
   "A custom list is bare symbols, which carry no coordinates, so its SVs are matched on",
   "the annotated breakend genes only — no positional window."
 )
