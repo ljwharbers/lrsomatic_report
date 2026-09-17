@@ -6,9 +6,7 @@ package:
 
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
-  # Recorded after the tag is cut (`curl -sL <url> | sha256sum`), which is why this is a
-  # placeholder rather than a stale digest from the previous release.
-  sha256: 0000000000000000000000000000000000000000000000000000000000000000
+  sha256: d3926696197882b09b2a7fe246515be94acc7069bb09a062358cc3caca2c4976
 
 build:
   number: 0
