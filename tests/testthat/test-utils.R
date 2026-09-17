@@ -3,11 +3,8 @@ test_that("setup loads without error", {
 })
 
 test_that("load_all_gene_panels resolves per-reference builtins to one entry", {
-  # Use the real assets dir
-  # When testthat runs, getwd() is in tests/testthat, so we need to go up two levels to repo root
-  repo_root = dirname(dirname(getwd()))
   for (ref in c("hg38", "t2t")) {
-    panels = load_all_gene_panels(file.path(repo_root, "assets"), ref)
+    panels = load_all_gene_panels(gene_lists_root, ref)
     expect_type(panels, "list")
     expect_true("lymphoid" %in% names(panels))
     p = panels[["lymphoid"]]
@@ -21,10 +18,8 @@ test_that("load_all_gene_panels resolves per-reference builtins to one entry", {
 test_that("every builtin panel ships for both references with matching gene sets", {
   # A builtin missing from one reference would be silently unavailable there, and a
   # gene placed on a different chromosome between the two files means a bad liftover.
-  repo_root = dirname(dirname(getwd()))
-  assets    = file.path(repo_root, "assets")
-  hg38      = load_all_gene_panels(assets, "hg38")
-  t2t       = load_all_gene_panels(assets, "t2t")
+  hg38      = load_all_gene_panels(gene_lists_root, "hg38")
+  t2t       = load_all_gene_panels(gene_lists_root, "t2t")
   expect_setequal(names(hg38), names(t2t))
   expect_true(all(c("lymphoid", "sarcoma") %in% names(hg38)))
 
@@ -45,8 +40,7 @@ test_that("every builtin panel ships for both references with matching gene sets
 })
 
 test_that("the sarcoma panel carries its fusion partners with hg38 coordinates", {
-  assets = file.path(dirname(dirname(getwd())), "assets")
-  p = resolve_gene_panel("sarcoma", assets, "hg38")
+  p = resolve_gene_panel("sarcoma", gene_lists_root, "hg38")
   expect_true(p$has_coords)
   expect_equal(p$reference, "hg38")
   expect_equal(length(p$genes), 140L)
@@ -61,54 +55,48 @@ test_that("the sarcoma panel carries its fusion partners with hg38 coordinates",
 })
 
 test_that("load_all_gene_panels skips a panel that ships only for another reference", {
-  repo_root = dirname(dirname(getwd()))
   # lymphoid ships for hg38 and t2t only, so an unrelated reference gets nothing:
   # offering it would mean matching another genome's coordinates.
-  expect_message(panels <- load_all_gene_panels(file.path(repo_root, "assets"), "hs1"),
+  expect_message(panels <- load_all_gene_panels(gene_lists_root, "hs1"),
                  "ships only for reference")
   expect_false("lymphoid" %in% names(panels))
 })
 
 test_that("load_all_gene_panels panel names are lowercase filenames without extension", {
-  repo_root = dirname(dirname(getwd()))
-  panels = load_all_gene_panels(file.path(repo_root, "assets"), "hg38")
+  panels = load_all_gene_panels(gene_lists_root, "hg38")
   expect_true(all(names(panels) == tolower(names(panels))))
 })
 
 test_that("resolve_gene_panel treats 'none' as no filtering", {
-  assets = file.path(dirname(dirname(getwd())), "assets")
-  expect_null(resolve_gene_panel("none", assets))
-  expect_null(resolve_gene_panel("NONE", assets))
-  expect_null(resolve_gene_panel(" none ", assets))
-  expect_null(resolve_gene_panel(NULL, assets))
-  expect_null(resolve_gene_panel(NA_character_, assets))
+  expect_null(resolve_gene_panel("none", gene_lists_root))
+  expect_null(resolve_gene_panel("NONE", gene_lists_root))
+  expect_null(resolve_gene_panel(" none ", gene_lists_root))
+  expect_null(resolve_gene_panel(NULL, gene_lists_root))
+  expect_null(resolve_gene_panel(NA_character_, gene_lists_root))
 })
 
 test_that("resolve_gene_panel loads the builtin variant for the given reference", {
-  assets = file.path(dirname(dirname(getwd())), "assets")
-  p = resolve_gene_panel("lymphoid", assets, "hg38")
+  p = resolve_gene_panel("lymphoid", gene_lists_root, "hg38")
   expect_true(p$has_coords)
   expect_equal(p$reference, "hg38")
   expect_true("MYC" %in% p$genes)
   # MYC's hg38 span, not the T2T one.
   expect_equal(p$start[p$interval_gene == "MYC"], 127735434L)
-  expect_equal(resolve_gene_panel("lymphoid", assets, "t2t")$reference, "t2t")
+  expect_equal(resolve_gene_panel("lymphoid", gene_lists_root, "t2t")$reference, "t2t")
 })
 
 test_that("resolve_gene_panel loads a symbol-only panel from a file path", {
-  assets = file.path(dirname(dirname(getwd())), "assets")
   tsv = tempfile(fileext = ".tsv")
   writeLines(c("gene", "BRCA1", "BRCA2"), tsv)
   on.exit(unlink(tsv))
-  p = resolve_gene_panel(tsv, assets, "hg38")
+  p = resolve_gene_panel(tsv, gene_lists_root, "hg38")
   expect_false(p$has_coords)
   expect_equal(p$genes, c("BRCA1", "BRCA2"))
   expect_null(panel_intervals(p))
 })
 
 test_that("resolve_gene_panel errors on an unknown panel rather than silently unfiltering", {
-  assets = file.path(dirname(dirname(getwd())), "assets")
-  expect_error(resolve_gene_panel("nonsense", assets, "hg38"), "Gene panel not found")
+  expect_error(resolve_gene_panel("nonsense", gene_lists_root, "hg38"), "Gene panel not found")
 })
 
 test_that("a headerless one-column panel keeps its first symbol", {
@@ -297,4 +285,41 @@ test_that("js_facet_defs output is deterministic and brace-balanced", {
   chars = strsplit(out, "")[[1]]
   expect_equal(sum(chars == "{"), sum(chars == "}"))
   expect_equal(sum(chars == "["), sum(chars == "]"))
+})
+
+# ---- --gene-lists-dir: the builtin panel set is a directory the caller chooses ----------
+
+test_that("load_all_gene_panels reads builtins from an arbitrary directory", {
+  # What --gene-lists-dir buys the caller: a panel set outside the installed tool tree,
+  # still resolved as a *builtin* (collapsed .hg38/.t2t pair, embedded in the report)
+  # rather than as a user-supplied file.
+  dir = withr::local_tempdir()
+  writeLines(c("gene", "MYC", "BCL2"), file.path(dir, "custom.hg38.tsv"))
+  writeLines(c("gene", "MYC", "BCL2"), file.path(dir, "custom.t2t.tsv"))
+
+  panels = load_all_gene_panels(dir, "hg38")
+  expect_named(panels, "custom")
+  expect_setequal(panels[["custom"]]$genes, c("MYC", "BCL2"))
+  # The bundled panels are replaced, not merged
+  expect_false("lymphoid" %in% names(panels))
+})
+
+test_that("builtin_panel_path and resolve_gene_panel honour the given directory", {
+  dir = withr::local_tempdir()
+  writeLines(c("gene", "TP53"), file.path(dir, "custom.tsv"))
+
+  expect_equal(basename(builtin_panel_path(dir, "custom")), "custom.tsv")
+  expect_null(builtin_panel_path(dir, "lymphoid"))
+  expect_setequal(resolve_gene_panel("custom", dir)$genes, "TP53")
+  # A name that is neither in this directory nor a path is still an error, not silent unfiltering
+  expect_error(resolve_gene_panel("lymphoid", dir), "Gene panel not found")
+})
+
+test_that("a per-reference builtin is picked from the given directory by suffix", {
+  dir = withr::local_tempdir()
+  writeLines(c("gene", "MYC"), file.path(dir, "custom.hg38.tsv"))
+  writeLines(c("gene", "BCL2"), file.path(dir, "custom.t2t.tsv"))
+
+  expect_setequal(resolve_gene_panel("custom", dir, "hg38")$genes, "MYC")
+  expect_setequal(resolve_gene_panel("custom", dir, "t2t")$genes, "BCL2")
 })

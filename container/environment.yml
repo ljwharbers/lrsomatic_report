@@ -1,0 +1,29 @@
+---
+# Build-time environment for the container image (Dockerfile).
+#
+# The package *names* here must match recipe/meta.yaml's requirements.run -- the container
+# workflow diffs the two and fails the build if they drift. The pins live here rather than in
+# the recipe because bioconda prefers loose pins for a noarch package, while the image should
+# be reproducible.
+#
+# procps-ng is deliberately absent: `ps` is a Nextflow task-monitoring requirement, not a
+# dependency of the tool, so the Dockerfile installs it separately.
+name: base
+channels:
+  - conda-forge
+dependencies:
+  - conda-forge::r-base=4.4.*
+  - conda-forge::quarto=1.5.*
+  - conda-forge::r-base64enc
+  - conda-forge::r-circlize
+  - conda-forge::r-data.table
+  - conda-forge::r-dplyr
+  - conda-forge::r-dt
+  - conda-forge::r-ggplot2
+  - conda-forge::r-htmltools
+  - conda-forge::r-knitr
+  - conda-forge::r-optparse
+  - conda-forge::r-quarto
+  - conda-forge::r-r.utils
+  - conda-forge::r-svglite
+  - conda-forge::r-yaml
