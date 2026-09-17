@@ -8,6 +8,9 @@ suppressPackageStartupMessages({
 # Source R modules from repo root
 # Use absolute paths to handle testthat::test_dir sourcing context
 repo_root = dirname(dirname(getwd()))
+# The builtin panel helpers take the gene-lists directory itself (--gene-lists-dir),
+# not the assets root, so tests share one path rather than recomputing it
+gene_lists_root = file.path(repo_root, "assets", "gene_lists")
 source(file.path(repo_root, "R/utils.R"))
 source(file.path(repo_root, "R/references.R"))
 source(file.path(repo_root, "R/parse_smallvariants.R"))
