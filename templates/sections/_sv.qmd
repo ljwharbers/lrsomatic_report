@@ -101,7 +101,9 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
     "         g.slice(0, 6).join(',') + ' +' + (g.length - 6) + ' more</span>';",
     "}")
 
-  # Same predicate as the row filter, so the column always agrees with what is shown.
+  # Same predicate as the row filter. Agreement is not free, though: this runs once per row
+  # node, so redraw() in per_sample.qmd has to invalidate() for a ticked panel to reach the
+  # cells of rows that were already drawn
   panel_hit_render = JS(
     "function(data, type, row) {",
     "  return window.svPanelHitLabel ? window.svPanelHitLabel(row, window.SV_COLS) : '';",
