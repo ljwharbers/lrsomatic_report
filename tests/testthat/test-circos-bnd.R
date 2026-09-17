@@ -50,7 +50,7 @@ test_that("bnd_links tolerates an empty or malformed table", {
 # ---- bnd_panel_genes -----------------------------------------------------
 
 test_that("bnd_panel_genes matches on the same window as the panel_hit column", {
-  panels = load_all_gene_panels(assets_dir, "hg38")
+  panels = load_all_gene_panels(gene_lists_root, "hg38")
   skip_if(is.null(panels$lymphoid) || !isTRUE(panels$lymphoid$has_coords))
 
   bl = bnd_links(sv_fixture(), chroms_hg38())
@@ -98,7 +98,7 @@ test_that("bnd_panel_genes returns nothing for a symbol-only panel", {
 test_that("bnd_circos_data emits every drawable arc, over only the chromosomes touched", {
   chroms = chroms_hg38()
   bl  = bnd_links(sv_fixture(), chroms)
-  res = bnd_circos_data(bl, bnd_panel_genes(bl, load_all_gene_panels(assets_dir, "hg38")),
+  res = bnd_circos_data(bl, bnd_panel_genes(bl, load_all_gene_panels(gene_lists_root, "hg38")),
                         cyto_hg38(), lens_hg38(), chroms)
 
   expect_null(res$reason)

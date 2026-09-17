@@ -1,13 +1,21 @@
 #!/usr/bin/env Rscript
+
+# Repo root relative to this script: normalizePath() the script file (resolving a bin/ symlink) before dirname()
+script_file = normalizePath(sub("--file=", "", commandArgs()[grep("--file=", commandArgs())]))
+repo_dir    = normalizePath(file.path(dirname(script_file), ".."))
+
+# --version answers before the library() block: base R only, so it still works when a
+# dependency is broken, and stays cheap enough for a per-task Nextflow `eval` call.
+if (any(commandArgs(trailingOnly = TRUE) %in% c("--version", "-V"))) {
+  cat(readLines(file.path(repo_dir, "VERSION"), warn = FALSE)[1], "\n", sep = "")
+  quit(status = 0)
+}
+
 suppressPackageStartupMessages({
   library(optparse)
   library(quarto)
   library(yaml)
 })
-
-# Repo root relative to this script: normalizePath() the script file (resolving a bin/ symlink) before dirname()
-script_file = normalizePath(sub("--file=", "", commandArgs()[grep("--file=", commandArgs())]))
-repo_dir    = normalizePath(file.path(dirname(script_file), ".."))
 
 # Source helpers (needed for detect_reference and locate_outputs below)
 source(file.path(repo_dir, "R/utils.R"))
@@ -29,6 +37,12 @@ option_list = list(
                            "(default: none, i.e. unfiltered). Repeatable — pass it several times to",
                            "open with several panels applied at once; a variant or SV is kept if it",
                            "hits any of them.")),
+  make_option("--gene-lists-dir", type = "character", default = NULL,
+              help = paste("Directory of builtin gene panel TSVs, named <panel>.tsv or",
+                           "<panel>.<hg38|t2t>.tsv (default: the bundled assets/gene_lists).",
+                           "Replaces the bundled set rather than adding to it.")),
+  make_option("--version",     action = "store_true", default = FALSE,
+              help = "Print the tool version and exit"),
   make_option("--output",      type = "character", default = NULL,
               help = "Output HTML path (default: <sample-id>_report.html in current dir)"),
   make_option("--title",       type = "character", default = NULL,
@@ -82,8 +96,10 @@ if (reference == "auto") {
 reference = tolower(reference)
 
 # ---- Load all gene panels: every builtin ships in the report, --gene-panel only sets which are checked on load; "__all__" is the internal sentinel for none ----
-assets_dir = file.path(repo_dir, "assets")
-all_panels = load_all_gene_panels(assets_dir, reference)
+gene_lists_dir = if (!is.null(opt[["gene-lists-dir"]]))
+                   normalizePath(opt[["gene-lists-dir"]], mustWork = TRUE)
+                 else file.path(repo_dir, "assets", "gene_lists")
+all_panels = load_all_gene_panels(gene_lists_dir, reference)
 
 # "none" combined with a real panel is contradictory
 if (any(vapply(gene_panels, is_no_gene_panel, logical(1))) && length(gene_panels) > 1) {
@@ -96,9 +112,9 @@ gene_panels = unique(vapply(gene_panels, function(g)
 default_panels = character(0)
 for (gp in gene_panels) {
   if (is_no_gene_panel(gp)) next
-  if (!is.null(builtin_panel_path(assets_dir, gp, reference))) {
+  if (!is.null(builtin_panel_path(gene_lists_dir, gp, reference))) {
     # Load here so a builtin that fails against this reference aborts before the render
-    invisible(tryCatch(resolve_gene_panel(gp, assets_dir, reference),
+    invisible(tryCatch(resolve_gene_panel(gp, gene_lists_dir, reference),
                        error = function(e) abort(conditionMessage(e))))
     default_panels = c(default_panels, gp)
   } else if (file.exists(gp)) {

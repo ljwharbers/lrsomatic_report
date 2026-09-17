@@ -192,27 +192,26 @@ is_no_gene_panel = function(panel_arg) {
 }
 
 # Path of a builtin panel, preferring the `reference`-specific variant; NULL if none
-builtin_panel_path = function(assets_dir, name, reference = NULL) {
+builtin_panel_path = function(gene_lists_dir, name, reference = NULL) {
   ref = normalise_reference_name(reference)
-  dir = file.path(assets_dir, "gene_lists")
-  candidates = c(if (!is.na(ref)) file.path(dir, paste0(name, ".", ref, ".tsv")),
-                 file.path(dir, paste0(name, ".tsv")))
+  candidates = c(if (!is.na(ref)) file.path(gene_lists_dir, paste0(name, ".", ref, ".tsv")),
+                 file.path(gene_lists_dir, paste0(name, ".tsv")))
   hit = candidates[file.exists(candidates)]
   if (length(hit) > 0) hit[1] else NULL
 }
 
 # Resolve a --gene-panel arg: "none", a builtin name, or a TSV path; anything else errors
-resolve_gene_panel = function(panel_arg, assets_dir, reference = NULL) {
+resolve_gene_panel = function(panel_arg, gene_lists_dir, reference = NULL) {
   if (is_no_gene_panel(panel_arg)) return(NULL)
-  builtin = builtin_panel_path(assets_dir, panel_arg, reference)
+  builtin = builtin_panel_path(gene_lists_dir, panel_arg, reference)
   if (!is.null(builtin)) return(load_gene_panel(builtin, reference))
   if (file.exists(panel_arg)) return(load_gene_panel(panel_arg, reference))
   stop("Gene panel not found (tried builtin '", panel_arg, "' and as file path)")
 }
 
 # Load all builtin panels, resolving reference-specific files to one entry and skipping panels not shipped for this reference
-load_all_gene_panels = function(assets_dir, reference = NULL) {
-  tsv_files = Sys.glob(file.path(assets_dir, "gene_lists", "*.tsv"))
+load_all_gene_panels = function(gene_lists_dir, reference = NULL) {
+  tsv_files = Sys.glob(file.path(gene_lists_dir, "*.tsv"))
   if (length(tsv_files) == 0) return(list())
 
   meta = lapply(tsv_files, .split_panel_filename)

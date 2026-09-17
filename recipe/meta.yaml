@@ -1,4 +1,4 @@
-{% set version = "1.4.0" %}
+{% set version = "1.5.0" %}
 
 package:
   name: lrsomatic-report
@@ -6,7 +6,9 @@ package:
 
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: 0cc92dbea110bd725c33a9b0ebf52778ec4b1bda7b1960004a4335a4c498f255
+  # Recorded after the tag is cut (`curl -sL <url> | sha256sum`), which is why this is a
+  # placeholder rather than a stale digest from the previous release.
+  sha256: 0000000000000000000000000000000000000000000000000000000000000000
 
 build:
   number: 0
@@ -35,6 +37,7 @@ requirements:
 test:
   commands:
     - render_report.R --help
+    - test "$(render_report.R --version)" = "{{ version }}"
 
 about:
   home: https://github.com/ljwharbers/lrsomatic_report
