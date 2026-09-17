@@ -40,8 +40,11 @@ the same time — see [Gene panels](#gene-panels).
 --gene-panel   none | builtin panel name (e.g. lymphoid) | path to a custom TSV
                (default: none — tables render unfiltered). Repeatable: pass it
                several times to apply several panels at once (union).
+--gene-lists-dir  Directory to take the builtin panels from, replacing the bundled
+               assets/gene_lists (default: the bundled set). See Gene panels.
 --output       Output HTML path  (default: <sample-id>_report.html in current dir)
 --title        Report title
+--version      Print the version and exit
 ```
 
 > **Changed in v1.1.0:**
@@ -173,6 +176,22 @@ a typo will not silently produce an unfiltered report. `none` combined with a re
 error too, rather than a case where one of the two quietly wins. See
 [`assets/gene_lists/README.md`](assets/gene_lists/README.md) for the full file format.
 
+### Supplying your own set of builtins
+
+`--gene-lists-dir` points the builtin lookup at another directory, **replacing** the bundled
+set rather than adding to it:
+
+```bash
+--gene-lists-dir /path/to/panels --gene-panel mypanel
+```
+
+Files there follow the same convention — `<name>.tsv`, or a `<name>.hg38.tsv` /
+`<name>.t2t.tsv` pair resolved against the rendered reference — and every one of them is
+embedded in the report as a tickbox, exactly as the bundled panels are. This is what lets a
+pipeline curate its own panel set without a release of this tool: a panel passed this way is a
+first-class builtin, whereas the same file passed as `--gene-panel /path/to/mypanel.tsv` is a
+user panel, named after the file and only embedded because it was named.
+
 ## Expected input layout
 
 The `--sample-dir` must be the root of a single-sample LRSomatic output. Files are discovered
@@ -243,11 +262,36 @@ unfiltered and with no tabix index, which cannot be read at render time.
 
 Auto-detection reads `##contig` lines from the VEP somatic VCF.
 
-## R package requirements
+## Installing
+
+### Container (recommended)
+
+Every release is published as a container, so nothing needs installing:
+
+```bash
+# Docker / Podman
+docker run --rm ghcr.io/ljwharbers/lrsomatic-report:1.5.0 render_report.R --version
+
+# Apptainer / Singularity — a native SIF, no docker:// conversion needed
+apptainer pull lrsomatic-report.sif oras://ghcr.io/ljwharbers/lrsomatic-report-sif:1.5.0
+apptainer exec lrsomatic-report.sif render_report.R --version
+```
+
+`render_report.R` is on `PATH` inside the image and the tool is installed at
+`/opt/conda/share/lrsomatic_report` — the same layout `recipe/build.sh` produces, so a
+future Bioconda package is a drop-in replacement.
+
+Images are built for `linux/amd64` only, by `.github/workflows/container.yml` on each `v*`
+tag. The build refuses to run unless the tag, `VERSION` and `render_report.R --version`
+all agree, and unless `container/environment.yml` and `recipe/meta.yaml` name the same
+packages.
+
+### R package requirements (running from a checkout)
 
 `recipe/meta.yaml` is the source of truth for runtime dependencies — it is what the
-Bioconda package and the pipeline's container are built from. The list below mirrors it;
-if the two ever disagree, the recipe is right.
+Bioconda package is built from, and `container/environment.yml` (the image's pinned
+version of the same list) is checked against it at build time. The list below mirrors it;
+if they ever disagree, the recipe is right.
 
 Install in your R environment if missing:
 
@@ -281,11 +325,16 @@ lrsomatic_report/
 ├── templates/per_sample.qmd    Quarto template (HTML report)
 ├── assets/
 │   ├── references/{t2t,hg38}/  Cytobands + chrom lengths (bundled, no network needed)
-│   ├── gene_lists/             lymphoid.{hg38,t2t}.tsv + README
+│   ├── gene_lists/             lymphoid.{hg38,t2t}.tsv + README (override with
+│   │                           --gene-lists-dir)
 │   ├── styles/                 report.scss (the report theme)
 │   └── js/                     bnd_circos.js (breakend circos), facet_filter.js (tickbox
 │                               column filters) — inlined at render time
-└── tests/                      testthat unit tests + tests/js (node, no dependencies)
+├── tests/                      testthat unit tests + tests/js (node, no dependencies)
+├── recipe/                     Conda recipe (Bioconda); build.sh defines the install layout
+├── container/environment.yml   Pinned deps the image is built from, checked against the recipe
+├── Dockerfile                  Container image, reproducing recipe/build.sh's layout
+└── VERSION                     Single source of truth; --version reads it
 ```
 
 ## Roadmap
