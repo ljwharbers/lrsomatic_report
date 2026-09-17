@@ -6,7 +6,7 @@ package:
 
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: bf14ba8080e83557eb61c5b88adbe2db31ebb457742ec26a9019046519f8ddac
+  sha256: 60f805619c7c38d6f3dfd81ed684729b69c23539638bcf24f22d4ffe577330ad
 
 build:
   number: 0
