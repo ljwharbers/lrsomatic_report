@@ -339,7 +339,9 @@ sv_panel_hits = function(sv_table, panels,
   label = function(genes, side, how) paste0(genes, " (", side, ", ", how, ")", tag)
 
   if (!isTRUE(panel$has_coords)) {
-    symbols = toupper(panel$genes)
+    # The SV-scoped subset, so an `applies_to = snv` gene cannot match a breakend. Falls
+    # back to `genes` for a panel object built before the scope column (test fixtures).
+    symbols = toupper(if (!is.null(panel$genes_sv)) panel$genes_sv else panel$genes)
     hit_side = function(col) {
       if (!col %in% names(sv_table)) return(rep("", n))
       vapply(sv_table[[col]], function(cell) {
