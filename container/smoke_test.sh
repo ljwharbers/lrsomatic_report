@@ -27,45 +27,47 @@ docker run --rm "$image" ps --version
 echo "== install layout =="
 docker run --rm "$image" test -f /opt/conda/share/lrsomatic_report/bin/render_report.R
 docker run --rm "$image" test -d /opt/conda/share/lrsomatic_report/assets/gene_lists
-docker run --rm "$image" bash -c 'test -d "$QUARTO_SHARE_PATH"'
 
-# Render for real as a non-root uid with HOME and TMPDIR pointed at the work dir. This is the
-# configuration a Nextflow task runs in, and the one that breaks when Quarto/Deno cannot write
-# where they expect -- `--help` never exercises it.
-echo "== quarto render as a non-root uid =="
-rm -rf smoke && mkdir -p smoke
-cat > smoke/smoke.qmd <<'QMD'
----
-title: smoke
-format: html
----
-
-```{r}
-library(ggplot2)
-library(DT)
-library(data.table)
-1 + 1
-```
-QMD
+# The real thing: render a report as a non-root uid with HOME and TMPDIR pointed at the work
+# dir, which is the configuration a Nextflow task runs in. This is what catches a Quarto or
+# Deno that cannot find its own tooling or cannot write where it expects -- `--help` exits
+# long before any of that is touched.
+echo "== render a report as a non-root uid =="
+rm -rf render && mkdir -p render/sample_dir
+cp tests/fixtures/test_SOMATIC_VEP.vcf.gz render/sample_dir/
 docker run --rm --user "$(id -u):$(id -g)" \
-    -v "$PWD/smoke:/smoke" -w /smoke \
-    -e HOME=/smoke -e TMPDIR=/smoke \
-    "$image" quarto render smoke.qmd --to html
-test -f smoke/smoke.html
+    -v "$PWD/render:/work" -w /work \
+    -e HOME=/work -e TMPDIR=/work \
+    "$image" render_report.R \
+        --sample-dir sample_dir \
+        --sample-id smoke \
+        --sex male \
+        --reference auto \
+        --output smoke_report.html
+test -s render/smoke_report.html
+# The fixture carries a TP53 variant; its absence would mean an empty report rendered cleanly
+grep -q TP53 render/smoke_report.html
 
 # --gene-lists-dir must resolve a panel directory bind-mounted from outside the image, which
-# is exactly how the pipeline supplies its own panels.
+# is exactly how the pipeline supplies its own panels. A panel named here is a *builtin*, so
+# it has to reach DEFAULT_PANELS in the rendered HTML.
 echo "== --gene-lists-dir reads a mounted directory =="
 rm -rf panels && mkdir -p panels
 printf 'gene\nTP53\nMYC\n' > panels/smokepanel.tsv
 docker run --rm --user "$(id -u):$(id -g)" \
-    -v "$PWD/panels:/panels" -w /tmp \
-    -e HOME=/tmp -e TMPDIR=/tmp \
-    "$image" Rscript -e '
-      source("/opt/conda/share/lrsomatic_report/R/utils.R")
-      p <- load_all_gene_panels("/panels", "hg38")
-      stopifnot(identical(names(p), "smokepanel"))
-      stopifnot(setequal(p[["smokepanel"]]$genes, c("TP53", "MYC")))
-      cat("gene-lists-dir OK\n")'
+    -v "$PWD/render:/work" -v "$PWD/panels:/panels" -w /work \
+    -e HOME=/work -e TMPDIR=/work \
+    "$image" render_report.R \
+        --sample-dir sample_dir \
+        --sample-id smoke2 \
+        --sex male \
+        --reference auto \
+        --gene-lists-dir /panels \
+        --gene-panel smokepanel \
+        --output smoke2_report.html
+grep -q 'const DEFAULT_PANELS' render/smoke2_report.html
+grep -q 'smokepanel' render/smoke2_report.html
+# That the bundled set is replaced rather than merged is asserted in tests/testthat, where
+# it can be checked precisely instead of by grepping rendered HTML.
 
 echo "all smoke tests passed"
