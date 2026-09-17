@@ -36,6 +36,124 @@ test_that("every builtin panel ships for both references with matching gene sets
       expect_false(any(is.na(p$start) | is.na(p$end)))
       expect_true(all(p$end >= p$start))
     }
+    # A gene scoped to one table under hg38 and the other under t2t would filter the two
+    # references' reports differently from the same panel name.
+    expect_setequal(a$genes_snv, b$genes_snv)
+    expect_setequal(a$genes_sv,  b$genes_sv)
+  }
+})
+
+# ---- applies_to: which table a panel gene filters ----
+
+# path to a temporary panel TSV with the given body lines
+panel_file = function(...) {
+  p = tempfile(fileext = ".tsv")
+  writeLines(c(...), p)
+  p
+}
+
+test_that("applies_to splits the gene sets, and blank means both", {
+  p = load_gene_panel(panel_file(
+    "gene\tchrom\tstart\tend\tapplies_to",
+    "BOTH\tchr1\t100\t200\t",
+    "ONLYSNV\t\t\t\tsnv",
+    "ONLYSV\tchr2\t300\t400\tsv",
+    "SPELLED\tchr3\t500\t600\tboth"))
+
+  expect_true(p$has_scopes)
+  expect_setequal(p$genes,     c("BOTH", "ONLYSNV", "ONLYSV", "SPELLED"))
+  expect_setequal(p$genes_snv, c("BOTH", "ONLYSNV", "SPELLED"))
+  expect_setequal(p$genes_sv,  c("BOTH", "ONLYSV", "SPELLED"))
+})
+
+test_that("only SV-scoped rows become intervals", {
+  p = load_gene_panel(panel_file(
+    "gene\tchrom\tstart\tend\tapplies_to",
+    "BOTH\tchr1\t100\t200\t",
+    "ONLYSNV\t\t\t\tsnv",
+    "ONLYSV\tchr2\t300\t400\tsv"))
+
+  expect_true(p$has_coords)
+  expect_setequal(p$interval_gene, c("BOTH", "ONLYSV"))
+  iv = panel_intervals(p)
+  expect_setequal(iv$gene, c("BOTH", "ONLYSV"))
+  # The blank chrom of the snv row must not reach the intervals as "chr" —
+  # ensure_chr_prefix("") returns "chr", which is nzchar
+  expect_false(any(iv$chrom == "chr"))
+})
+
+test_that("a panel with no applies_to column filters both tables (sarcoma's contract)", {
+  p = load_gene_panel(panel_file("gene\tchrom\tstart\tend",
+                                 "A\tchr1\t100\t200",
+                                 "B\tchr2\t300\t400"))
+  expect_false(p$has_scopes)
+  expect_equal(p$genes_snv, p$genes)
+  expect_equal(p$genes_sv,  p$genes)
+  expect_equal(length(p$interval_gene), 2L)
+
+  # and the shipped sarcoma panel is that case
+  s = resolve_gene_panel("sarcoma", gene_lists_root, "hg38")
+  expect_false(isTRUE(s$has_scopes))
+  expect_equal(s$genes_snv, s$genes)
+  expect_equal(s$genes_sv,  s$genes)
+})
+
+test_that("coordinates are required for SV-scoped rows and optional for snv rows", {
+  # blank applies_to still needs them
+  expect_error(
+    load_gene_panel(panel_file("gene\tchrom\tstart\tend\tapplies_to",
+                               "OK\tchr1\t100\t200\t",
+                               "GAPPY\t\t\t\t")),
+    "missing or non-numeric coordinates")
+  # so does an explicit sv
+  expect_error(
+    load_gene_panel(panel_file("gene\tchrom\tstart\tend\tapplies_to",
+                               "OK\tchr1\t100\t200\tsv",
+                               "GAPPY\t\t\t\tsv")),
+    "missing or non-numeric coordinates")
+  # an snv row may leave them blank
+  expect_silent(
+    load_gene_panel(panel_file("gene\tchrom\tstart\tend\tapplies_to",
+                               "OK\tchr1\t100\t200\tsv",
+                               "GAPPY\t\t\t\tsnv")))
+})
+
+test_that("an unrecognised applies_to value errors rather than defaulting", {
+  expect_error(
+    load_gene_panel(panel_file("gene\tapplies_to", "A\tboth", "B\tsnsv")),
+    "unrecognised applies_to")
+})
+
+test_that("a coordinate panel scoped entirely to snv is not in coordinate mode", {
+  # Nothing to match an SV on, however many coordinate columns it carries.
+  p = load_gene_panel(panel_file("gene\tchrom\tstart\tend\tapplies_to",
+                                 "A\tchr1\t100\t200\tsnv",
+                                 "B\tchr2\t300\t400\tsnv"))
+  expect_false(p$has_coords)
+  expect_null(panel_intervals(p))
+  expect_length(p$genes_sv, 0)
+})
+
+test_that("the lymphoid builtin scopes its rearrangement partners away from small variants", {
+  for (ref in c("hg38", "t2t")) {
+    p = resolve_gene_panel("lymphoid", gene_lists_root, ref)
+    expect_true(p$has_scopes)
+    expect_length(p$genes, 235)
+    expect_length(p$genes_sv, 128)
+    expect_length(p$genes_snv, 149)
+    expect_length(intersect(p$genes_sv, p$genes_snv), 42)
+    # Only the SV-scoped genes carry intervals
+    expect_equal(length(p$interval_gene), 128L)
+
+    # IGH is a translocation partner, not a coding-mutation target
+    expect_true("IGH" %in% p$genes_sv)
+    expect_false("IGH" %in% p$genes_snv)
+    # MYD88 is the reverse, and so has no interval to match a breakend on
+    expect_true("MYD88" %in% p$genes_snv)
+    expect_false("MYD88" %in% p$genes_sv)
+    expect_false("MYD88" %in% p$interval_gene)
+    # MYC is on both lists
+    expect_true(all(c("MYC" %in% p$genes_sv, "MYC" %in% p$genes_snv)))
   }
 })
 

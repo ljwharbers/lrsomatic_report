@@ -146,19 +146,29 @@ n_intra_bnd  = if (!is.null(sv_table) && "svclass" %in% names(sv_table))
 all_p = if (!is.null(params$all_panels) && length(params$all_panels) > 0)
           params$all_panels else list()
 
-# Each panel ships symbols and, if coordinate-carrying, intervals; windows come from R (SV_PANEL_WINDOW_*) so card and filter agree
+# Each panel ships both symbol sets (`applies_to` scopes them per table; equal when the
+# panel has no such column) and, if coordinate-carrying, intervals — already SV-scoped by
+# load_gene_panel(). Windows come from R (SV_PANEL_WINDOW_*) so filter and footnote agree
+#
+# unlist(): a panel scoped entirely to one table leaves the other set empty, and an empty
+# character vector round-trips through execute_params as NULL (see bin/render_report.R)
+js_set = function(x) paste0("new Set([",
+                            paste(js_quote(toupper(as.character(unlist(x)))), collapse = ","),
+                            "])")
+
 panel_defs = vapply(names(all_p), function(nm) {
   p    = all_p[[nm]]
-  syms = paste0("new Set([",
-                paste(js_quote(toupper(as.character(p$genes))), collapse = ","), "])")
+  syms = js_set(if (!is.null(p$genes_snv)) p$genes_snv else p$genes)
+  syms_sv = js_set(if (!is.null(p$genes_sv)) p$genes_sv else p$genes)
   ivs  = if (isTRUE(p$has_coords))
     paste0("[", paste(sprintf("[%s,%s,%s,%s]",
                               js_quote(p$chrom), as.integer(p$start), as.integer(p$end),
                               js_quote(toupper(as.character(p$interval_gene)))),
                       collapse = ","), "]")
   else "[]"
-  sprintf("%s: {symbols: %s, hasCoords: %s, intervals: %s}",
-          js_quote(nm), syms, if (isTRUE(p$has_coords)) "true" else "false", ivs)
+  sprintf("%s: {symbols: %s, symbolsSv: %s, hasCoords: %s, intervals: %s}",
+          js_quote(nm), syms, syms_sv,
+          if (isTRUE(p$has_coords)) "true" else "false", ivs)
 }, character(1))
 
 cat("<script>\n")
@@ -173,19 +183,23 @@ cat(r"----(
 // Checked panels, shared by the filter hook, row counter, panel_hit renderer and SV footnote; column maps come from R (window.*_COLS). Empty `panels` is the unfiltered state
 window.svPanelState = { panels: DEFAULT_PANELS.slice(), customGenes: new Set() };
 
-// Every checked panel as {name, symbols, hasCoords, intervals}; a row passes if it hits any (union)
+// Every checked panel as {name, symbols, symbolsSv, hasCoords, intervals}; a row passes if it hits any (union).
+// `symbols` filters small variants, `symbolsSv` the SV table's symbol-only path — they differ
+// only for a panel carrying an `applies_to` column. Intervals arrive already SV-scoped from R
 function activePanelDefs() {
   const st = window.svPanelState;
   const out = [];
   (st.panels || []).forEach(function (key) {
     if (key === "__custom__") {
-      // Pasted symbols are symbol-only; an empty box contributes nothing
+      // Pasted symbols are symbol-only and unscoped: they filter both tables
       if (st.customGenes && st.customGenes.size > 0)
-        out.push({ name: "custom", symbols: st.customGenes, hasCoords: false, intervals: [] });
+        out.push({ name: "custom", symbols: st.customGenes, symbolsSv: st.customGenes,
+                   hasCoords: false, intervals: [] });
       return;
     }
     const p = GENE_PANELS[key];
-    if (p) out.push({ name: key, symbols: p.symbols, hasCoords: p.hasCoords, intervals: p.intervals });
+    if (p) out.push({ name: key, symbols: p.symbols, symbolsSv: p.symbolsSv,
+                      hasCoords: p.hasCoords, intervals: p.intervals });
   });
   return out;
 }
@@ -227,7 +241,7 @@ function onePanelHits(row, cols, p) {
     // A VEP symbol sits on the breakend itself, so a symbol hit is always direct.
     const out = [];
     [["gene_a", "A"], ["gene_b", "B"]].forEach(function (side) {
-      const hit = splitGenes(at(side[0])).filter(function (g) { return p.symbols.has(g); });
+      const hit = splitGenes(at(side[0])).filter(function (g) { return p.symbolsSv.has(g); });
       if (hit.length) out.push(hit.join(",") + " (" + side[1] + ", direct)");
     });
     return out;
@@ -260,7 +274,7 @@ function onePanelHits(row, cols, p) {
   return out;
 }
 
-// Small variants match on gene symbol in both panel modes
+// Small variants match on gene symbol in both panel modes, against the SNV-scoped set
 function snvPanelHit(symbolCell) {
   const defs = activePanelDefs();
   if (!defs.length) return true;
@@ -292,7 +306,7 @@ cat("</script>\n")
 
 {{< include sections/_qc.qmd >}}
 
-*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v1.4.0*
+*Report generated `r format(Sys.time(), "%Y-%m-%d %H:%M")` · LRSomatic report v`r readLines(file.path(repo_dir, "VERSION"), warn = FALSE)[1]`*
 
 ```{=html}
 <script>

@@ -52,7 +52,13 @@ extract_extra_keys = function(extra_vec, keys) {
   out
 }
 
-# ---- Gene panels: plain lists (they round-trip through Quarto execute_params) of name, path, reference, has_coords, genes and, when has_coords, parallel chrom/start/end/interval_gene ----
+# ---- Gene panels: plain lists (they round-trip through Quarto execute_params) of name, path, reference, has_coords, has_scopes, genes/genes_snv/genes_sv and, when has_coords, parallel chrom/start/end/interval_gene ----
+#
+# An optional `applies_to` column scopes each gene to one table ("snv" | "sv" | blank for
+# both). `genes` stays the union; `genes_snv` and `genes_sv` are what the two tables match
+# on, and the interval vectors hold the SV-scoped rows only — which is what scopes the
+# whole coordinate path (panel_intervals, sv_panel_hits, bnd_panel_genes, the JS payload)
+# without any of them knowing the column exists.
 
 # Canonical reference names; a coordinate panel declares one and it is checked against the render
 normalise_reference_name = function(x) {
@@ -89,6 +95,28 @@ normalise_reference_name = function(x) {
   list(n_comment = n_comment, reference = declared)
 }
 
+# Normalise the optional `applies_to` column to "both" | "snv" | "sv", one per row of the
+# panel. Blank (or NA) is "both", so a column of mostly-empty cells reads the way it looks.
+# An unrecognised value is an error rather than a silent default: the whole point of
+# resolve_gene_panel()'s strictness is that a typo must not quietly change what is filtered.
+.panel_scope = function(col, genes, path) {
+  v = tolower(trimws(as.character(col)))
+  v[is.na(v)] = ""
+  out = rep(NA_character_, length(v))
+  out[v %in% c("", "both", "all")]       = "both"
+  out[v %in% c("snv", "small", "snv/indel", "smallvariant", "smallvariants")] = "snv"
+  out[v %in% c("sv", "structural")]      = "sv"
+  if (anyNA(out)) {
+    bad = which(is.na(out))
+    stop("Gene panel ", path, " has unrecognised applies_to value(s): ",
+         paste(sprintf("'%s' (%s)", v[bad], genes[bad])[seq_len(min(5, length(bad)))],
+               collapse = ", "),
+         if (length(bad) > 5) paste0(" (and ", length(bad) - 5L, " more)") else "",
+         ". Use 'snv', 'sv', or leave blank for both.")
+  }
+  out
+}
+
 # Load a gene panel TSV: `gene` column required; chrom/start/end all-or-nothing; a coordinate panel declaring another reference errors, one declaring none loads as ""
 load_gene_panel = function(path, reference = NULL) {
   if (!file.exists(path)) stop("Gene panel file not found: ", path)
@@ -117,6 +145,13 @@ load_gene_panel = function(path, reference = NULL) {
   genes = trimws(genes)
   keep  = nzchar(genes) & !is.na(genes) & genes != "-"
 
+  # Which table each gene filters. Absent column, or a blank cell, means both — so every
+  # panel written before this column existed is unaffected.
+  scope = if ("applies_to" %in% names(dt))
+            .panel_scope(dt[["applies_to"]], genes, path) else rep("both", length(genes))
+  snv_rows = keep & scope %in% c("both", "snv")
+  sv_rows  = keep & scope %in% c("both", "sv")
+
   coord_cols = c("chrom", "start", "end")
   present    = intersect(coord_cols, names(dt))
   if (length(present) > 0 && length(present) < 3) {
@@ -125,7 +160,9 @@ load_gene_panel = function(path, reference = NULL) {
          paste(coord_cols, collapse = ", "),
          ". Supply all three, or none for symbol-only matching.")
   }
-  has_coords = length(present) == 3
+  # A panel whose every row is `snv`-scoped has nothing to match SVs on, coordinate
+  # columns or not, so it is not in coordinate mode.
+  has_coords = length(present) == 3 && any(sv_rows)
 
   # A `reference` column is an alternative to the "# reference:" comment line.
   declared = hdr$reference
@@ -152,23 +189,34 @@ load_gene_panel = function(path, reference = NULL) {
     path       = path,
     reference  = if (is.na(declared_norm)) "" else declared_norm,
     has_coords = has_coords,
-    genes      = unique(genes[keep])
+    has_scopes = "applies_to" %in% names(dt),
+    # The union, kept so every reader predating the scope column still sees one gene set
+    genes      = unique(genes[keep]),
+    genes_snv  = unique(genes[snv_rows]),
+    genes_sv   = unique(genes[sv_rows])
   )
 
   if (has_coords) {
-    chrom = ensure_chr_prefix(trimws(as.character(dt[["chrom"]])))
+    # nzchar() on the *raw* column, before ensure_chr_prefix(): that turns "" into "chr",
+    # which is nzchar, so prefixing first would let a blank chromosome through
+    chrom_raw = trimws(as.character(dt[["chrom"]]))
     start = suppressWarnings(as.integer(dt[["start"]]))
     end   = suppressWarnings(as.integer(dt[["end"]]))
-    bad   = keep & (is.na(chrom) | !nzchar(chrom) | is.na(start) | is.na(end))
+    # Only rows that can match an SV need coordinates; an `snv` row is matched on its
+    # symbol alone and may leave them blank.
+    bad   = sv_rows & (is.na(chrom_raw) | !nzchar(chrom_raw) | is.na(start) | is.na(end))
     if (any(bad))
       stop("Gene panel ", path, " has missing or non-numeric coordinates for: ",
            paste(utils::head(genes[bad], 5), collapse = ", "),
-           if (sum(bad) > 5) paste0(" (and ", sum(bad) - 5L, " more)") else "")
-    out$chrom = chrom[keep]
-    out$start = start[keep]
-    out$end   = end[keep]
+           if (sum(bad) > 5) paste0(" (and ", sum(bad) - 5L, " more)") else "",
+           ". Only rows with applies_to = 'snv' may leave them blank.")
+    # Intervals are the SV-scoped rows only, which is what scopes every coordinate
+    # consumer — panel_intervals(), sv_panel_hits(), bnd_panel_genes(), the JS payload
+    out$chrom = ensure_chr_prefix(chrom_raw[sv_rows])
+    out$start = start[sv_rows]
+    out$end   = end[sv_rows]
     # `genes` is deduplicated; the interval vectors are not (one symbol can carry several loci)
-    out$interval_gene = genes[keep]
+    out$interval_gene = genes[sv_rows]
   }
 
   out
