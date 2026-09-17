@@ -256,6 +256,17 @@ test_that("a symbol-only panel matches either side's annotated gene, with no win
   expect_equal(sv_panel_hits(sv, list(has_coords = FALSE, genes = "EDGE")), c("", ""))
 })
 
+test_that("a scoped panel matches SVs on genes_sv, not on an snv-scoped gene", {
+  sv = sv_rows()
+  # SOMEGENE is annotated on side A, but the panel scopes it to small variants only.
+  scoped = list(has_coords = FALSE, genes = c("SOMEGENE", "OTHER"),
+                genes_snv = c("SOMEGENE", "OTHER"), genes_sv = "OTHER")
+  expect_equal(sv_panel_hits(sv, scoped), c("", ""))
+  # ... and it matches once the same gene is SV-scoped.
+  scoped$genes_sv = c("SOMEGENE", "OTHER")
+  expect_equal(sv_panel_hits(sv, scoped), c("SOMEGENE (A, direct)", ""))
+})
+
 test_that("no panel means no hits, and an empty table is handled", {
   expect_equal(sv_panel_hits(sv_rows(), NULL), c("", ""))
   expect_equal(sv_panel_hits(sv_rows(), list()), c("", ""))

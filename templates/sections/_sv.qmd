@@ -289,8 +289,28 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   # One HTML string, not a tagList (htmltools' newlines would render as " ,")
   code = function(x) paste0("<code>", htmltools::htmlEscape(x), "</code>")
 
+  # A panel carrying `applies_to` filters the two tables on different gene sets, which is
+  # otherwise invisible: a reader seeing IGH in panel_hit but never in the small-variant
+  # table has no way to tell that apart from a broken filter.
+  scope_note = function(p) {
+    if (!isTRUE(p$has_scopes)) return(NULL)
+    n_snv = length(unlist(p$genes_snv))
+    n_sv  = length(unlist(p$genes_sv))
+    n_all = length(unlist(p$genes))
+    # An all-"both" column is not a split, and saying "140 of 140 ... and 140" is noise
+    if (n_snv == n_all && n_sv == n_all) return(NULL)
+    sprintf(paste("This panel is <strong>scoped per table</strong> (%s column): %s of its %s",
+                  "genes filter small variants and %s filter SVs, %s of them both. A gene",
+                  "scoped to one table not appearing in the other is by design."),
+            code("applies_to"), n_snv, n_all, n_sv, n_snv + n_sv - n_all)
+  }
+
   # One note per registered panel, hidden unless ticked (updatePanelNotes() toggles `hidden`)
   panel_body = function(p) {
+    paste(c(.panel_mode_body(p), scope_note(p)), collapse = " ")
+  }
+
+  .panel_mode_body = function(p) {
     if (isTRUE(p$has_coords)) {
       sprintf(paste("Panel %s matches on <strong>breakend coordinates</strong> (%s intervals,",
                     "within %s of either breakend of a BND or %s of the span of any other",
