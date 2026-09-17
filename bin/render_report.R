@@ -96,9 +96,11 @@ if (reference == "auto") {
 reference = tolower(reference)
 
 # ---- Load all gene panels: every builtin ships in the report, --gene-panel only sets which are checked on load; "__all__" is the internal sentinel for none ----
-gene_lists_dir = if (!is.null(opt[["gene-lists-dir"]]))
-                   normalizePath(opt[["gene-lists-dir"]], mustWork = TRUE)
-                 else file.path(repo_dir, "assets", "gene_lists")
+gene_lists_dir = if (!is.null(opt[["gene-lists-dir"]])) {
+  normalizePath(opt[["gene-lists-dir"]], mustWork = TRUE)
+} else {
+  file.path(repo_dir, "assets", "gene_lists")
+}
 all_panels = load_all_gene_panels(gene_lists_dir, reference)
 
 # "none" combined with a real panel is contradictory

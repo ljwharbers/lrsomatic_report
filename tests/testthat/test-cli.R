@@ -30,3 +30,17 @@ test_that("--help lists the flags the pipeline passes", {
     expect_true(grepl(flag, help, fixed = TRUE), info = flag)
   }
 })
+
+test_that("every R source file parses", {
+  # bin/render_report.R is sourced by no unit test -- the helpers it calls are tested
+  # directly -- so a syntax error in it survives a fully green suite and only surfaces at
+  # render time. A v1.5.0 release candidate shipped exactly that: a top-level `if (...)`
+  # with `else` on the following line, which R rejects.
+  files = c(render_report,
+            list.files(file.path(repo_root, "R"), pattern = "[.]R$",
+                       recursive = TRUE, full.names = TRUE))
+  expect_gt(length(files), 1)
+  for (f in files) {
+    expect_no_error(parse(f))
+  }
+})
