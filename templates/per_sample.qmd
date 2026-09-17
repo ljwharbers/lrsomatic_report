@@ -353,7 +353,12 @@ cat("</script>\n")
 
   function redraw() {
     if (window.snvTableElem) $(window.snvTableElem).DataTable().draw();
-    if (window.svTableElem)  $(window.svTableElem).DataTable().draw();
+    // The SV table's panel_hit cell is a render over panel state, and DataTables renders a
+    // cell once, when it creates the row node (deferRender + Scroller then keep that node
+    // for every later draw). Without invalidate() a row created under a different selection
+    // keeps the label it was born with -- blank, for the whole first screenful, since
+    // DEFAULT_PANELS is empty on most runs
+    if (window.svTableElem)  $(window.svTableElem).DataTable().rows().invalidate("data").draw();
     updateCount();
     // Paint the breakend circos once before any filter; its draw.dt handler covers the rest
     if (window.bndSyncFilter) window.bndSyncFilter();
