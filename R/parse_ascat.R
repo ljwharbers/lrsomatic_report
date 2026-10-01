@@ -41,15 +41,19 @@ parse_wakhan_solutions = function(tsv_file) {
   dt
 }
 
-# Locate each solution's genome copy-number plot; try solution_<rank>/ first to avoid the aliased duplicate directory
+# Genome copy-number plot of one solution: integer_profile.html (Wakhan 0.5.0) or <sample>_<P_U_C>_genome_copynumbers_breakpoints.html (0.4.x); the subclonal plots are not matched
+WAKHAN_CN_PLOT_PATTERN = "^integer_profile\\.html$|genome_copynumbers_breakpoints\\.html$"
+
+# Locate each solution's genome copy-number plot in either Wakhan layout: the rank symlink first (solution_rank_<n> in 0.5.0, solution_<n> in 0.4.x) to avoid the aliased duplicate directory, then repository_name, the real directory in both
 locate_wakhan_cn_plots = function(wakhan_dir, solutions_dt) {
   if (is.null(wakhan_dir) || is.null(solutions_dt) || nrow(solutions_dt) == 0) return(list())
   out = lapply(seq_len(nrow(solutions_dt)), function(i) {
     row = solutions_dt[i]
-    sdir = file.path(wakhan_dir, paste0("solution_", row$solution_rank))
-    if (!dir.exists(sdir)) sdir = file.path(wakhan_dir, row$repository_name)
-    if (!dir.exists(sdir)) return(NULL)
-    hits = list.files(sdir, pattern = "genome_copynumbers_breakpoints\\.html$", full.names = TRUE)
+    sdirs = file.path(wakhan_dir, c(paste0("solution_rank_", row$solution_rank),
+                                    paste0("solution_", row$solution_rank),
+                                    row$repository_name))
+    hits = unlist(lapply(sdirs[dir.exists(sdirs)], list.files,
+                         pattern = WAKHAN_CN_PLOT_PATTERN, full.names = TRUE))
     if (length(hits) == 0) return(NULL)
     list(rank = row$solution_rank, purity = row$cell_purity, ploidy = row$ploidy, plot = hits[1])
   })
