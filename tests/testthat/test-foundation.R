@@ -168,7 +168,7 @@ test_that("ctx is passed only to a parse() that declares it", {
 })
 
 test_that("every stub section parses to NULL harmlessly", {
-  for (id in c("cna", "shatterseek", "ecdna", "reconplot", "signatures")) {
+  for (id in c("cna", "reconplot", "signatures")) {
     s = SECTIONS[[id]]
     expect_false(is.null(s), info = id)
     expect_null(run_section_parse(s, s$locate(tempdir(), "S"), list(), list()), info = id)

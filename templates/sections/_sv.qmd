@@ -69,14 +69,19 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   sv_display[, panel_hit := ""]
   # Readable locus/size/gene columns; the raw bedpe columns stay (hidden, exported, read by the JS). See sv_display_columns()
   sv_display = cbind(sv_display, sv_display_columns(sv_display, chromosomes))
-  setcolorder(sv_display, c("id", "panel_hit", "svclass", "svtype",
-                            "locus", "size", "genes",
-                            "vaf", "consequence", "impact", "caller"))
+  # Padfoot columns exist only when a Padfoot file was found (R/sections/sv.R)
+  sv_padfoot_cols = intersect(PADFOOT_COLS, names(sv_display))
+  setcolorder(sv_display, intersect(c("id", "panel_hit", "svclass", "svtype",
+                                      "locus", "size", "genes",
+                                      "vaf", "support", "consequence", "impact",
+                                      sv_padfoot_cols, "caller"), names(sv_display)))
   cat("<script>window.SV_COLS = ", js_col_index_map(names(sv_display)), ";</script>\n",
       sep = "")
 
-  # Tickbox facet values (facet_filter.js), emitted after setcolorder; `caller` has one value and is omitted
-  sv_facet_cols = c("svclass", "svtype", "impact", "consequence", "caller")
+  # Tickbox facet values (facet_filter.js), emitted after setcolorder; a column with one value
+  # (`caller` for a single-caller run) keeps its plain text box — js_facet_defs() skips it
+  sv_facet_cols = c("svclass", "svtype", "impact", "consequence", "caller",
+                    intersect("padfoot_impact", sv_padfoot_cols))
   cat("<script>window.SV_FACET_COLS = ", js_vec(sv_facet_cols), ";</script>\n", sep = "")
   cat("<script>window.SV_FACETS = ",
       js_facet_defs(sv_display,
@@ -119,8 +124,9 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
     "}")
 
   # Hidden, not dropped: the JS by-name lookups and the CSV export read these columns
-  hidden = c("chrom_a", "pos_a", "chrom_b", "pos_b", "gene_a", "gene_b",
-             "sv_len", "size_bp", "locus_sort")
+  # svtype_raw too: it differs from svtype only for a SAVANA pair typed from BP_NOTATION (footnote)
+  hidden = intersect(c("chrom_a", "pos_a", "chrom_b", "pos_b", "gene_a", "gene_b",
+                       "sv_len", "size_bp", "locus_sort", "svtype_raw"), names(sv_display))
 
   exp_opts = list(orthogonal = "export",
                   columns    = seq_len(ncol(sv_display)) - 1L)
@@ -145,7 +151,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
       pageLength = 25,
       columnDefs = list(
         list(targets = idx0("panel_hit"), render = panel_hit_render),
-        list(targets = idx0("genes"),     render = gene_render),
+        list(targets = c(idx0("genes"), idx0("padfoot_genes")), render = gene_render),
         list(targets = idx0("locus"),     render = orthogonal_render("locus_sort")),
         list(targets = idx0("size"),      render = orthogonal_render("size_bp")),
         list(targets = vapply(hidden, idx0, integer(1), USE.NAMES = FALSE),
@@ -162,6 +168,14 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
         c("#dbeafe", "#dcfce7", "#fef9c3", "#fee2e2", "#f3e8ff", "#f3e8ff")
       )
     )
+  # Padfoot's high-impact classes (HIGH_ONCO, HIGH_TSG, ...): the set is open-ended, so tint
+  # whichever HIGH* values this table actually carries
+  pf_high = if ("padfoot_impact" %in% names(sv_display))
+              sort(unique(grep("^HIGH", sv_display$padfoot_impact, value = TRUE))) else character(0)
+  if (length(pf_high) > 0) {
+    dtbl = DT::formatStyle(dtbl, columns = "padfoot_impact", target = "cell",
+                           backgroundColor = DT::styleEqual(pf_high, rep("#fee2e2", length(pf_high))))
+  }
   dtbl
 }
 ```
@@ -363,12 +377,67 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
               length(selected) >= 2)
   ), collapse = " ")
 
-  annot_note = if (!is.null(SECTION_DATA$sv$annotation_path))
-    sprintf(paste("Breakend genes are from %s, joined on record ID; records that",
-                  "annotation dropped (it keeps only FILTER PASS) have none."),
-            code(rel(SECTION_DATA$sv$annotation_path)))
-  else
-    "No SV annotation file was found, so the gene column is empty."
+  # Per caller: which VCF, how many records collapsed to how many rows, where the breakend genes
+  # came from and how many rows they reached
+  sv_prov   = SECTION_DATA$sv$callers
+  caller_lab = c(severus = "Severus", savana = "SAVANA")
+  lab = function(nm) if (nm %in% names(caller_lab)) caller_lab[[nm]] else nm
+  fmt_n = function(x) formatC(as.integer(x), format = "d", big.mark = ",")
+  caller_note = function(nm) {
+    p = sv_prov[[nm]]
+    rows = sv_table[caller == nm]
+    if (nrow(rows) == 0 && is.null(p$vcf))
+      return(sprintf("<strong>%s</strong>: no somatic SV VCF found.", lab(nm)))
+    n_tr = sum(rows$svclass == "translocation"); n_in = sum(rows$svclass == "intra-chr breakend")
+    src = if (!is.null(p$vcf))
+      sprintf("%s rearrangement%s from the %s record%s of %s%s (%s interchromosomal, %s intra-chromosomal breakend%s).",
+              fmt_n(nrow(rows)), if (nrow(rows) == 1) "" else "s",
+              fmt_n(p$n_records), if (p$n_records == 1) "" else "s", code(rel(p$vcf)),
+              if (isTRUE(p$pon_filtered)) ", the panel-of-normals-filtered calls the pipeline fed downstream" else "",
+              fmt_n(n_tr), fmt_n(n_in), if (n_in == 1) "" else "s")
+    else sprintf("%s rows from the gene-annotated TSV %s (no caller VCF).",
+                 fmt_n(nrow(rows)), code(rel(p$gene_tsv)))
+    genes = if (!is.null(p$annotation_path) && !is.null(p$vcf))
+      sprintf("Breakend genes from %s, joined on record ID: %s of %s rows have an annotation record, %s carry a gene symbol.",
+              code(rel(p$annotation_path)), fmt_n(p$n_annotated), fmt_n(nrow(rows)),
+              fmt_n(p$n_with_genes))
+    else if (!is.null(p$annotation_path)) ""
+    else "No VEP SV annotation was found for it, so its gene columns are empty."
+    typed = if (isTRUE(p$n_typed > 0))
+      sprintf(paste("SAVANA writes every rearrangement as a %s mate pair; %s same-chromosome pairs",
+                    "are typed here from %s (%s DEL, %s DUP, %s/%s INV) and treated as spans like",
+                    "Severus' own DEL/DUP/INV — sized, 100 kb panel window, no breakend arc.",
+                    "The hidden %s column keeps %s. Its VAF is %s at the first breakend."),
+              code("BND"), fmt_n(p$n_typed), code("BP_NOTATION"), code("+-"), code("-+"),
+              code("++"), code("--"), code("svtype_raw"), code("BND"), code("TUMOUR_AF"))
+    else if (nm == "savana") sprintf("Its VAF is %s at the first breakend.", code("TUMOUR_AF"))
+    else ""
+    paste0("<strong>", lab(nm), "</strong>: ", paste(c(src, genes, typed), collapse = " "))
+  }
+  callers_note = paste(vapply(names(sv_prov), caller_note, character(1)), collapse = "<br>")
+  multi_note = if (length(unique(sv_table$caller)) > 1)
+    sprintf(paste("<br>Both callers' calls are listed, so one rearrangement can appear twice —",
+                  "filter on %s. The breakend circos above follows that filter (an arc per",
+                  "visible breakend row, whichever caller); the genome-wide circos draws %s only."),
+            code("caller"), lab(SECTION_DATA$sv$circos_caller))
+  else ""
+
+  pad = SECTION_DATA$sv$padfoot
+  padfoot_note = if (isTRUE(SECTION_DATA$sv$has_padfoot)) {
+    parts = vapply(names(pad), function(nm) {
+      x = pad[[nm]]
+      how = if (is.na(x$key)) "matched no row"
+            else if (x$key == "locus") "matched on breakend coordinates only — no SV ID agreed, so check a few rows"
+            else paste("joined on", x$key)
+      sprintf("%s rows from %s (%s Padfoot rows): %s, %s of %s rows annotated.",
+              lab(nm), code(rel(x$path)), fmt_n(x$n_padfoot), how, fmt_n(x$n_joined), fmt_n(x$n_rows))
+    }, character(1))
+    sprintf(paste("<br>The %s columns are Padfoot's: %s Callers without a Padfoot file have them",
+                  "empty. %s is Padfoot's own impact class (%s values are tinted), not VEP's."),
+            code("padfoot_*"), paste(parts, collapse = " "), code("padfoot_impact"), code("HIGH*"))
+  } else ""
+
+  annot_note = paste0(callers_note, multi_note, padfoot_note)
 
   # The locus/size convention: a contiguous type is one span, a breakend two joined loci
   locus_note = sprintf(paste("%s reads as a span (%s) for a contiguous type and as two",
@@ -403,13 +472,9 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   table_details(
     summary = "How these rows and this plot are built",
     HTML(paste(
-      sprintf("%s rearrangement%s, one row each — Severus writes both sides of a breakend as two records, and mate pairs are collapsed here%s.",
-              nrow(sv_table), if (nrow(sv_table) == 1) "" else "s",
-              if (!is.na(n_trans) && !is.na(n_intra_bnd))
-                sprintf(" (%s interchromosomal, %s intra-chromosomal breakend%s)",
-                        n_trans, n_intra_bnd, if (n_intra_bnd == 1) "" else "s")
-              else ""),
-      locus_note, annot_note, panel_note, circos_note))
+      sprintf("%s row%s, one per rearrangement — both callers write each side of a breakend as its own record, and mate pairs are collapsed here.",
+              fmt_n(nrow(sv_table)), if (nrow(sv_table) == 1) "" else "s"),
+      paste0(annot_note, "<br>"), locus_note, panel_note, circos_note))
   )
 }
 ```

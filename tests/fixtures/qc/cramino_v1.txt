@@ -1,0 +1,18 @@
+File name	AITL6_B2220986_mapped.bam
+Number of alignments	3449897
+% from total alignments	86.72
+Number of reads	2992478
+Yield [Gb]	76.48
+Mean coverage	23.77
+Yield [Gb] (>25kb)	40.73
+N50	25521
+N75	21692
+Median length	23129.00
+Mean length	22167.76
+
+Median identity	99.60
+Mean identity	98.08
+Modal identity	99.7
+
+Path	AITL6_B2220986_mapped.bam
+Creation time	05/03/2026 23:37:13

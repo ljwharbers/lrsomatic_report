@@ -73,3 +73,17 @@ test_that("the whatshap section returns NULL when the stats file is absent", {
   expect_null(SECTIONS$whatshap$parse(list(stats_tsv = NULL), list()))
   expect_null(SECTIONS$whatshap$parse(list(stats_tsv = "/no/such/file.tsv"), list()))
 })
+
+test_that("the whatshap section returns NULL on a 0-byte stats file (stub runs)", {
+  f = tempfile(fileext = ".tsv"); file.create(f)
+  expect_null(suppressMessages(SECTIONS$whatshap$parse(list(stats_tsv = f), list())))
+})
+
+test_that("whatshap stats are found in the published qc/whatshap_stats/ layout", {
+  root = tempfile("ws_")
+  dir.create(file.path(root, "qc", "whatshap_stats"), recursive = TRUE)
+  for (ext in c("tsv", "gtf", "log")) writeLines("x", file.path(root, "qc", "whatshap_stats", paste0("S_whatshap_stats.", ext)))
+  on.exit(unlink(root, recursive = TRUE))
+  got = SECTIONS$whatshap$locate(root, "S")$stats_tsv
+  expect_equal(basename(got), "S_whatshap_stats.tsv")
+})

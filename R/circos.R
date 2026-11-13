@@ -5,7 +5,9 @@ suppressPackageStartupMessages({
 
 # Colour palettes — keep in sync with --circos-* in assets/styles/report.scss
 
-# SBS-6 SNV palette (SigProfiler/COSMIC standard, softened slightly toward report ink/paper)
+# SBS-6 SNV palette (SigProfiler/COSMIC standard, softened slightly toward report ink/paper).
+# No longer drawn on the genome circos (that track is a density now, see Track 1); kept as
+# the report's one definition of the SBS-6 colours, mirrored by --circos-snv-* in the SCSS
 SNV_COLOURS = c(
   "C>A" = "#2EBAED",
   "C>G" = "#1b1e22",
@@ -28,15 +30,9 @@ CNV_COLOURS = c(
 # BND/translocation link colour
 BND_COLOUR = "#8a5fa3"
 
-# Classify SNV into 6 SBS categories (C/T-ref normalised)
-.classify_mut = function(ref, alt) {
-  comp = c(A = "T", T = "A", C = "G", G = "C")
-  ref = toupper(ref); alt = toupper(alt)
-  use_comp = !(ref %in% c("C", "T"))
-  norm_ref = ifelse(use_comp, comp[ref], ref)
-  norm_alt = ifelse(use_comp, comp[alt], alt)
-  paste0(norm_ref, ">", norm_alt)
-}
+# Mutation-density track fill: warm grey, deliberately outside the SV/CN/SBS hues. The
+# legend swatch in templates/sections/_circos.qmd uses the same literal (no --circos-* var)
+DENSITY_COLOUR = "#6b655c"
 
 # Draw a circos plot to output_path (SVG or PNG by extension)
 draw_circos = function(snv_data = NULL,
@@ -53,17 +49,14 @@ draw_circos = function(snv_data = NULL,
   lens_filt  = chrom_lengths[names(chrom_lengths) %in% chromosomes]
   lens_filt  = lens_filt[chromosomes[chromosomes %in% names(lens_filt)]]
 
-  # Prepare SNV data
+  # Prepare SNV density (bin_snv_density() lives in R/parse_smallvariants.R, circlize-free)
   if (!is.null(snv_data) && nrow(snv_data) > 0) {
-    snv = as.data.table(snv_data)[nchar(ref) == 1 & nchar(alt) == 1]
-    snv = snv[chrom %in% chromosomes]
-    snv[, mut_cat := .classify_mut(ref, alt)]
-    snv[, circos_col := SNV_COLOURS[mut_cat]]
-    snv[is.na(circos_col), circos_col := "#AAAAAA"]
+    snv = as.data.table(snv_data)[nchar(ref) == 1 & nchar(alt) == 1 & chrom %in% chromosomes]
   } else {
-    snv = data.table(chrom = character(), pos = integer(),
-                     mut_cat = character(), circos_col = character())
+    snv = data.table(chrom = character(), pos = integer(), ref = character(), alt = character())
   }
+  dens = bin_snv_density(snv, lens_filt, CIRCOS_SNV_BIN)
+  dens_cap = circos_density_cap(dens$per_mb)
 
   # Prepare SV (non-BND) data
   if (!is.null(sv_nontrans) && nrow(sv_nontrans) > 0) {
@@ -112,7 +105,11 @@ draw_circos = function(snv_data = NULL,
     "start.degree" = 90,
     "gap.degree"   = gap_degrees,
     "track.margin" = c(0.006, 0.006),
-    "cell.padding" = c(0, 0, 0, 0)
+    "cell.padding" = c(0, 0, 0, 0),
+    # Arc resolution (default 500 segments per full circle). Every arc in the SVG is a
+    # flattened point list, so this scales the size of every track background, cytoband
+    # and CN rectangle; at 200 the chord error on the 680 px plate is ~0.04 px
+    "unit.circle.segments" = 200
   )
 
   # Build cytobands list as expected by circos.initializeWithIdeogram
@@ -127,30 +124,54 @@ draw_circos = function(snv_data = NULL,
                                 plotType         = c("ideogram", "labels"),
                                 labels.cex       = 0.8)
 
-  # Pre-compute jitter once so it varies per chromosome but stays reproducible
-  set.seed(42)
-
-  # ---- Track 1: SNV dots (coloured by mutation category) ------------------
+  # ---- Track 1: SNV density (SNVs per CIRCOS_SNV_BIN window) ---------------
+  # One filled area per chromosome, a vertex per window, so the SVG size no longer scales
+  # with mutation load (one point per SNV was 5-9 MB). Clipped at `dens_cap`: a single
+  # kataegis window would otherwise flatten every other bin to the baseline.
   circos.trackPlotRegion(
     factors      = chromosomes,
-    ylim         = c(0, 1),
+    ylim         = c(0, dens_cap),
     bg.border    = track_border,
     bg.col       = track_bg,
     track.height = 0.16,
     panel.fun    = function(region, value, ...) {
       chr = get.cell.meta.data("sector.index")
-      sub_snv = snv[chrom == chr]
-      if (nrow(sub_snv) == 0) return(invisible(NULL))
-      y_jitter = runif(nrow(sub_snv), 0.05, 0.95)
-      # Translucent so a dense cloud reads as a tint, not confetti.
-      circos.points(
-        x   = sub_snv$pos,
-        y   = y_jitter,
-        col = adjustcolor(sub_snv$circos_col, alpha.f = 0.65),
-        pch = 19,
-        cex = 0.18
-      )
+      d = dens[chrom == chr]
+      if (nrow(d) == 0 || all(d$per_mb == 0)) return(invisible(NULL))
+      # One vertex per window, at its midpoint, held flat to both chromosome ends. Interior
+      # vertices of a run of equal (capped) heights are dropped: they add nothing to the
+      # outline, and in a low-burden sample most windows are a run of zeros
+      y = pmin(d$per_mb, dens_cap)
+      x = c(0, (d$start + d$end) / 2, d$end[nrow(d)])
+      y = c(y[1], y, y[length(y)])
+      k = length(y)
+      keep = c(TRUE, y[-1] != y[-k]) | c(y[-k] != y[-1], TRUE)
+      x = x[keep]; y = y[keep]
+      # Closed along the baseline; every 10th vertex is enough for it to follow the arc
+      # (a 10 Mb chord is <0.05 px off the curve on the 680 px plate)
+      bx = rev(unique(c(x[seq(1, length(x), by = 10)], x[length(x)])))
+      pol = circlize(c(x, bx), c(y, rep(0, length(bx))))
+      # A plain polygon in canvas coordinates: circos.lines(area = TRUE) subdivides every
+      # segment to follow the curvature, which tripled this track's SVG weight
+      th = pol[, "theta"] * pi / 180
+      polygon(pol[, "rou"] * cos(th), pol[, "rou"] * sin(th),
+              col = adjustcolor(DENSITY_COLOUR, alpha.f = 0.55),
+              border = DENSITY_COLOUR, lwd = 0.4)
     }
+  )
+
+  dens_track_index = get.current.track.index()
+  if (nrow(snv) > 0) tryCatch(
+    circos.yaxis(
+      side              = "left",
+      at                = c(0, dens_cap),
+      labels            = c("0", paste0(formatC(dens_cap, format = "fg", digits = 3), "/Mb")),
+      track.index       = dens_track_index,
+      sector.index      = chromosomes[1],
+      labels.niceFacing = TRUE,
+      labels.cex        = 0.40
+    ),
+    error = function(e) NULL
   )
 
   # ---- Track 2: Non-BND SVs (DEL/DUP/INV/INS as horizontal segments) -----

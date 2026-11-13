@@ -138,9 +138,10 @@ test_that("the lymphoid builtin scopes its rearrangement partners away from smal
   for (ref in c("hg38", "t2t")) {
     p = resolve_gene_panel("lymphoid", gene_lists_root, ref)
     expect_true(p$has_scopes)
-    expect_length(p$genes, 235)
+    # 234: FAM46C was dropped as the former name of the already-listed TENT5C
+    expect_length(p$genes, 234)
     expect_length(p$genes_sv, 128)
-    expect_length(p$genes_snv, 149)
+    expect_length(p$genes_snv, 148)
     expect_length(intersect(p$genes_sv, p$genes_snv), 42)
     # Only the SV-scoped genes carry intervals
     expect_equal(length(p$interval_gene), 128L)

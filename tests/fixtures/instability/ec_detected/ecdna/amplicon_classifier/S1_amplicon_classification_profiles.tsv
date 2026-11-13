@@ -1,0 +1,4 @@
+sample_name	amplicon_number	amplicon_decomposition_class	ecDNA+	BFB+	ecDNA_amplicons
+S1	amplicon1	ecDNA	Positive	None detected	1
+S1	amplicon2	Linear	None detected	None detected	0
+S1	amplicon3	No amp/Invalid	None detected	None detected	0

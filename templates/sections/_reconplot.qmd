@@ -1,9 +1,79 @@
 ### ReConPlot
 
-```{r reconplot-stub}
-# STUB (WP0 scaffolding — owned by the SV/ReConPlot package). Reads
-# SECTION_DATA[["reconplot"]] (R/sections/reconplot.R). Included at the end of _sv.qmd.
-if (is.null(SECTION_DATA[["reconplot"]])) {
+```{r reconplot-info}
+# SECTION_DATA[["reconplot"]] (R/sections/reconplot.R): genome-wide + per-chromosome PNGs per SV/CN combination
+reconplot = SECTION_DATA[["reconplot"]]
+if (is.null(reconplot)) {
   section_notice("No ReConPlot figures found for this sample.")
+}
+```
+
+```{r reconplot-figures, results='asis'}
+# Raw HTML blocks inside markdown (tabset / callout fences), so Pandoc leaves the base64 alone
+if (!is.null(reconplot)) {
+  raw_html = function(tag) cat("\n```{=html}\n", as.character(tag), "\n```\n\n", sep = "")
+
+  rp_rel = function(p) {
+    root = sub("/+$", "", normalizePath(sample_dir, mustWork = FALSE))
+    full = normalizePath(p, mustWork = FALSE)
+    if (startsWith(full, paste0(root, "/"))) substring(full, nchar(root) + 2L) else p
+  }
+
+  # Chromosomes ShatterSeek called (any confidence but "none", any combination): in slim mode
+  # these are the only per-chromosome figures embedded
+  ss_high = SECTION_DATA$shatterseek$high
+  flagged = character(0)
+  if (!is.null(ss_high) && nrow(ss_high) > 0 && "chrom" %in% names(ss_high)) {
+    keep = if ("confidence" %in% names(ss_high))
+             !is.na(ss_high$confidence) & tolower(ss_high$confidence) != "none"
+           else rep(TRUE, nrow(ss_high))
+    flagged = unique(ensure_chr_prefix(as.character(ss_high$chrom[keep])))
+  }
+  full_embed = identical(as.character(embed)[1], "full")
+
+  combos = reconplot$combos
+  label = function(cb) if (cb %in% names(RECONPLOT_COMBO_LABELS)) RECONPLOT_COMBO_LABELS[[cb]] else cb
+
+  cat('<p class="report-figure__caption">Copy number (total and minor allele) with SV arcs',
+      'coloured by type, from ReConPlot; one figure set per SV caller / copy-number source.</p>\n\n')
+
+  if (length(combos) > 1) cat("::: {.panel-tabset}\n\n")
+  for (cb in names(combos)) {
+    x = combos[[cb]]
+    if (length(combos) > 1) cat("#### ", label(cb), "\n\n", sep = "")
+
+    if (!is.null(x$genome)) {
+      raw_html(embed_png(x$genome, max_width = "100%",
+                         caption = paste0(label(cb), ": genome-wide")))
+    } else {
+      raw_html(section_notice("No genome-wide ReConPlot figure for this combination."))
+    }
+
+    chroms = x$chroms
+    if (length(chroms) > 0) {
+      show = if (full_embed) names(chroms) else intersect(names(chroms), flagged)
+      folder = rp_rel(dirname(chroms[[1]]))
+      if (length(show) > 0) {
+        cat(sprintf('::: {.callout-note collapse="true" title="Per-chromosome figures (%s)"}\n\n',
+                    if (full_embed) paste(length(show), "chromosomes")
+                    else paste("chromothripsis calls:", paste(show, collapse = ", "))))
+        raw_html(htmltools::tagList(lapply(show, function(ch)
+          embed_png(chroms[[ch]], max_width = "100%", caption = paste0(label(cb), ": ", ch)))))
+        cat(":::\n\n")
+      }
+      rest = length(chroms) - length(show)
+      if (rest > 0) {
+        # One HTML string: htmltools' newlines between children would render as " ."
+        raw_html(tags$p(class = "table-footnote", HTML(
+          sprintf("%s per-chromosome figure%s %s not embedded%s; %s in <code>%s</code>. Render with <code>--embed full</code> to include all of them.",
+                  rest, if (rest == 1) "" else "s", if (rest == 1) "is" else "are",
+                  if (length(flagged) == 0) " (no ShatterSeek call to select by)"
+                  else " (only chromosomes with a ShatterSeek chromothripsis call are)",
+                  if (rest == 1) "it is" else "they are",
+                  htmltools::htmlEscape(folder)))))
+      }
+    }
+  }
+  if (length(combos) > 1) cat(":::\n\n")
 }
 ```

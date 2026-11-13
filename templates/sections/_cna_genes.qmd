@@ -1,9 +1,197 @@
 ### Gene-level copy number
 
-```{r cna-genes-stub}
-# STUB (WP0 scaffolding — owned by the CNA package). Reads SECTION_DATA[["cna"]]
-# (R/sections/cna.R). Included at the end of _ascat.qmd, after its tabset closes.
-if (is.null(SECTION_DATA[["cna"]])) {
-  section_notice("Gene-level copy number is not available for this sample.")
+```{r cna-genes-prep}
+# Reads SECTION_DATA[["cna"]] (R/sections/cna.R). Included at the end of _ascat.qmd, after
+# its tabset closes. A plain HTML table (not DT): it is short, and follows the panel chips
+# through window.registerPanelListener (script at the end of this file).
+cna = SECTION_DATA[["cna"]]
+cna_genes = if (!is.null(cna)) cna$genes else NULL
+# trimws(): formatC(format = "fg") pads to a common width
+cna_fmt = function(x, digits = 3) ifelse(is.na(x), "NA", trimws(formatC(x, format = "fg", digits = digits)))
+cna_src_label = c(wakhan = "Wakhan", ascat = "ASCAT", savana = "SAVANA",
+                  `wakhan-genes` = "Wakhan gene file")
+cna_label = function(x) ifelse(x %in% names(cna_src_label), cna_src_label[x], x)
+
+# One row per gene locus; a gene in several panels lists them all
+cna_rows = NULL
+if (!is.null(cna_genes) && nrow(cna_genes) > 0) {
+  cna_rows = cna_genes[, .(panels = paste(unique(panel), collapse = ","),
+                           role = { r = role[!is.na(role) & nzchar(role)]; if (length(r)) r[1] else NA_character_ }),
+                       by = .(gene, chrom, start, end, min_cn, max_cn, min_minor, n_segments,
+                              call, partial, loh, source, expected)]
+  cna_rows[, flagged := !is.na(call) & (call != "neutral" | loh)]
+  chrom_rank = match(cna_rows$chrom, chromosomes_for_sex("male"))
+  call_rank  = match(cna_rows$call, CNA_CALL_LEVELS)
+  call_rank[is.na(call_rank)] = length(CNA_CALL_LEVELS) + 1L
+  cna_rows = cna_rows[order(call_rank, !loh, chrom_rank, start)]
 }
+```
+
+```{r cna-genes-notices}
+cna_panels = if (length(all_panels) > 0) names(all_panels) else character(0)
+cna_no_coords = if (!is.null(cna)) cna$panels_without_coords else character(0)
+# --sex sets the expected chrX/chrY copy number; ASCAT infers sex independently (XX / XY)
+ascat_sex = if (!is.null(cna) && !is.null(cna$ascat_metrics)) toupper(cna$ascat_metrics$sex) else NA_character_
+render_male = tolower(as.character(params$sex)) %in% c("male", "xy", "m")
+sex_mismatch = !is.na(ascat_sex) && ascat_sex %in% c("XX", "XY") && (ascat_sex == "XY") != render_male
+htmltools::tagList(
+  if (sex_mismatch)
+    section_notice(paste0("ASCAT inferred sex ", ascat_sex, ", but the report was rendered with --sex ",
+                          params$sex, ". chrX/chrY gene calls assume ",
+                          if (render_male) "one copy" else "two copies", " and may be wrong."), warn = TRUE),
+  if (is.null(cna) || is.na(cna$source))
+    section_notice("No copy-number segments (Wakhan integer profile or ASCAT segments) were found for this sample, so gene-level copy number cannot be called."),
+  if (length(cna_panels) == 0)
+    section_notice("No gene panel is embedded in this report. Gene-level copy number is called for the genes of the embedded panels."),
+  if (length(cna_no_coords) > 0)
+    section_notice(paste0("Panel", if (length(cna_no_coords) > 1) "s" else "", " without gene coordinates: ",
+                          paste(cna_no_coords, collapse = ", "),
+                          ". Their genes are called only where Wakhan's own per-gene file lists them."))
+)
+```
+
+```{r cna-genes-summary, eval=!is.null(cna)}
+# Purity/ploidy of every source, the one used first; genome-level WGD / LOH
+pbs = cna$purity_by_source
+pp_txt = if (nrow(pbs) > 0) {
+  pbs = pbs[order(!used)]
+  paste0(cna_label(pbs$source), " ", cna_fmt(pbs$purity, 2), " / ", cna_fmt(pbs$ploidy, 3),
+         ifelse(pbs$used, " (used)", ""), collapse = "; ")
+} else "not available"
+g = cna$genome
+pct = function(x) if (is.null(x) || is.na(x)) "NA" else paste0(formatC(100 * x, format = "f", digits = 1), "%")
+genome_txt = if (!is.na(cna$source)) paste0(
+  "WGD: ", if (isTRUE(g$wgd)) "yes" else if (isFALSE(g$wgd)) "no" else "NA",
+  " (major allele ≥ 2 over ", pct(g$major2_fraction), " of the autosomes, ", cna_label(g$wgd_source), ")",
+  " · LOH: ", pct(g$loh_fraction), " of the autosomes",
+  if (!is.null(g$ascat_wgd) && !is.na(g$ascat_wgd))
+    paste0(" · ASCAT's own: WGD ", if (g$ascat_wgd >= 1) "yes" else "no",
+           ", LOH ", pct(g$ascat_loh), ", GI ", pct(g$ascat_gi)) else ""
+) else NULL
+tags$div(class = "cna-summary",
+  tags$p(tags$strong("Purity / ploidy: "), pp_txt),
+  if (!is.null(genome_txt)) tags$p(tags$strong("Genome: "), genome_txt)
+)
+```
+
+```{r cna-genes-table, eval=!is.null(cna_rows) && nrow(cna_rows) > 0}
+cell_cn = function(lo, hi) ifelse(is.na(lo), "–", ifelse(lo == hi, cna_fmt(lo), paste0(cna_fmt(lo), "–", cna_fmt(hi))))
+locus = paste0(cna_rows$chrom, ":", formatC(cna_rows$start, format = "d", big.mark = ","),
+               "–", formatC(cna_rows$end, format = "d", big.mark = ","))
+call_slug = gsub("[^a-z]+", "-", ifelse(is.na(cna_rows$call), "none", cna_rows$call))
+
+trs = lapply(seq_len(nrow(cna_rows)), function(i) {
+  r = cna_rows[i]
+  tags$tr(
+    `data-gene` = toupper(r$gene), `data-panels` = r$panels,
+    `data-flagged` = if (r$flagged) "1" else "0",
+    tags$td(class = "cna-genes__gene", r$gene),
+    tags$td(gsub(",", ", ", r$panels, fixed = TRUE)),
+    tags$td(class = "cna-genes__locus", locus[i]),
+    tags$td(class = "cna-genes__num", cell_cn(r$min_cn, r$max_cn)),
+    tags$td(class = "cna-genes__num", if (is.na(r$min_minor)) "–" else cna_fmt(r$min_minor)),
+    tags$td(tags$span(class = paste0("cna-call cna-call--", call_slug[i]),
+                      title = paste0("expected CN ", cna_fmt(r$expected)),
+                      if (is.na(r$call)) "no segment" else r$call),
+            if (isTRUE(r$partial)) tags$span(class = "cna-genes__partial", "partial")),
+    tags$td(if (isTRUE(r$loh)) tags$span(class = "cna-loh", "LOH") else ""),
+    tags$td(if (is.na(r$role)) "" else r$role),
+    tags$td(class = "cna-genes__source", cna_label(r$source))
+  )
+})
+
+n_flagged = sum(cna_rows$flagged)
+tags$div(id = "cna-genes", class = "cna-genes",
+  tags$div(class = "cna-genes__bar",
+    tags$label(class = "cna-genes__toggle-label",
+      tags$input(type = "checkbox", class = "cna-genes__toggle"),
+      paste0(" Show all panel genes (", formatC(nrow(cna_rows), big.mark = ","), ")")),
+    tags$span(class = "cna-genes__count")
+  ),
+  tags$div(class = "cna-genes__scroll",
+    # Opt out of Quarto's table post-processing (Bootstrap classes, odd/even striping that
+    # would not follow the rows the filter hides)
+    tags$table(class = "cna-genes__table", `data-quarto-disable-processing` = "true",
+      tags$thead(tags$tr(lapply(c("Gene", "Panel", "Locus", "Total CN", "Minor CN", "Call",
+                                  "LOH", "Role", "Source"), tags$th))),
+      tags$tbody(trs)
+    )
+  ),
+  tags$p(class = "cna-genes__empty section-notice", hidden = NA,
+         if (n_flagged == 0) "No panel gene has a copy-number change or LOH. Tick “Show all panel genes” to list them all."
+         else "No gene of the selected panel(s) has a copy-number change or LOH. Tick “Show all panel genes” to list them all.")
+)
+```
+
+```{r cna-genes-details, eval=!is.null(cna) && !is.na(cna$source)}
+pl = cna$ploidy
+low = !is.na(pl) && pl <= CNA_PLOIDY_SPLIT
+thr = if (is.na(pl)) "no ploidy is available, so no calls were made." else if (low)
+  paste0("ploidy ≤ ", CNA_PLOIDY_SPLIT, ", so amplification = total CN ≥ ", CNA_AMP_CN_LOW,
+         " and homozygous deletion = total CN 0.") else
+  paste0("ploidy > ", CNA_PLOIDY_SPLIT, ", so amplification = total CN ≥ ", CNA_AMP_CN_HIGH,
+         " and homozygous deletion = total CN < ploidy − ", CNA_LOSS_OFFSET, " = ",
+         cna_fmt(pl - CNA_LOSS_OFFSET), ".")
+male = tolower(as.character(params$sex)) %in% c("male", "xy", "m")
+seg_txt = if (identical(cna$source, "wakhan"))
+  paste0("Wakhan rank-1 integer_profile.bed (", formatC(nrow(cna$segments), big.mark = ","), " haplotype-resolved segments)") else
+  paste0("ASCAT segments_raw.txt (", formatC(nrow(cna$segments), big.mark = ","), " allele-specific segments; Wakhan profile not found)")
+n_wg = nrow(cna$wakhan_genes)
+table_details(
+  tags$p("Calls follow the COSMIC Cancer Gene Census CNA definition and are made on the total copy number ",
+         "of the segments overlapping each gene's span (", seg_txt, "). This sample: ploidy ",
+         cna_fmt(pl), " (", cna_label(cna$source), if (isTRUE(cna$ploidy_estimated)) ", estimated as the length-weighted mean CN — no solutions table" else "",
+         "), ", thr, " Otherwise gain or loss against the expected CN, round(ploidy) = ",
+         if (is.na(pl)) "NA" else round(pl),
+         if (male) paste0(" (chrX/chrY: ", if (is.na(pl)) "NA" else max(1, round(pl / 2)), ")") else "", "."),
+  tags$p("A gene spanning several segments is called amplified on its highest segment and homozygously ",
+         "deleted on its lowest; “partial” marks a gene whose segments disagree, and Total CN then shows the range. ",
+         "LOH = no minor allele on a non-zero segment where two alleles are expected. ",
+         "Neutral genes are hidden unless “Show all panel genes” is ticked; the table follows the panel selection above."),
+  tags$p("Purity / ploidy by source: ", pp_txt,
+         ". Wakhan's is the cell purity of its rank-1 solution; the calls use the ploidy of the segment source."),
+  if (n_wg > 0 || cna$wakhan_genes_dropped > 0)
+    tags$p("Wakhan's per-gene file (genes_copynumber_states.bed, ", n_wg, " rows kept) is used only for panel genes without coordinates (source “Wakhan gene file”); ",
+           cna$wakhan_genes_dropped, " of its rows were dropped as implausible (haplotype state > ", CNA_MAX_PLAUSIBLE_CN, ")."),
+  summary = "Calls, thresholds and sources"
+)
+```
+
+```{=html}
+<script>
+// Gene-level CN table: neutral rows hidden unless "Show all panel genes" is ticked; rows
+// follow the panel chips via window.registerPanelListener (panel-js-data chunk). A row shows
+// when no filter is active, or its data-panels intersect the active panels, or its gene is
+// among the custom symbols. Idempotent: listeners fire more than once per change.
+(function () {
+  var root = document.getElementById("cna-genes");
+  if (!root) return;
+  var rows = Array.prototype.slice.call(root.querySelectorAll("tbody tr[data-gene]"));
+  var toggle = root.querySelector(".cna-genes__toggle");
+  var count = root.querySelector(".cna-genes__count");
+  var empty = root.querySelector(".cna-genes__empty");
+  var state = { panels: [], customGenes: [], all: true };
+  function apply() {
+    var showAll = !!(toggle && toggle.checked);
+    var custom = new Set(state.customGenes || []);
+    var n = 0;
+    rows.forEach(function (tr) {
+      var ok = showAll || tr.getAttribute("data-flagged") === "1";
+      if (ok && !state.all) {
+        var ps = (tr.getAttribute("data-panels") || "").split(",");
+        ok = ps.some(function (p) { return state.panels.indexOf(p) >= 0; }) ||
+             custom.has(tr.getAttribute("data-gene"));
+      }
+      tr.hidden = !ok;
+      if (ok) n++;
+    });
+    if (count) count.textContent = n + " of " + rows.length + " shown";
+    if (empty) empty.hidden = n > 0;
+  }
+  if (toggle) toggle.addEventListener("change", apply);
+  if (typeof window.registerPanelListener === "function")
+    window.registerPanelListener(function (s) { state = s || state; apply(); });
+  apply();
+})();
+</script>
 ```

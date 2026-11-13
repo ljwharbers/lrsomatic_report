@@ -93,8 +93,6 @@ ascat_segments = parse_ascat_segments(outputs$ascat_segments)
 ascat_pp       = parse_ascat_purityploidy(outputs$ascat_purityploidy)
 
 # Parse Wakhan
-wakhan_solutions = parse_wakhan_solutions(outputs$wakhan_solutions)
-wakhan_cn_plots  = locate_wakhan_cn_plots(outputs$wakhan_dir, wakhan_solutions)
 
 # Parse QC
 qc_mosdepth = parse_mosdepth_summary(outputs$mosdepth_summary, names(chrom_lens))
@@ -165,20 +163,26 @@ tryCatch({
 sv_table = SECTION_DATA$sv$table
 # All small variants (SNVs + indels), unique chrom/pos/ref/alt; kept under its old name
 n_snv        = sv_counts$total
-# One rearrangement per row (mates already collapsed)
-n_sv         = if (!is.null(sv_table) && nrow(sv_table) > 0) nrow(sv_table) else
+# One rearrangement per row (mates already collapsed). With two SV callers the table holds
+# both, so the header counts come from the primary caller only (never the sum of callers).
+sv_primary_caller = SECTION_DATA$sv$circos_caller
+sv_primary = if (!is.null(sv_table) && nrow(sv_table) > 0 && "caller" %in% names(sv_table) &&
+                 length(sv_primary_caller) == 1 && !is.na(sv_primary_caller))
+               sv_table[caller == sv_primary_caller] else sv_table
+n_sv         = if (!is.null(sv_primary) && nrow(sv_primary) > 0) nrow(sv_primary) else
                if (!is.null(SECTION_DATA$sv))
                  nrow(SECTION_DATA$sv$circos$nontrans) +
                  nrow(SECTION_DATA$sv$circos$translocations) else NA_integer_
 # Interchromosomal breakends, apart from the intra-chromosomal ones
-n_trans      = if (!is.null(sv_table) && "svclass" %in% names(sv_table))
-                 sum(sv_table$svclass == "translocation", na.rm = TRUE) else NA_integer_
-n_intra_bnd  = if (!is.null(sv_table) && "svclass" %in% names(sv_table))
-                 sum(sv_table$svclass == "intra-chr breakend", na.rm = TRUE) else NA_integer_
+n_trans      = if (!is.null(sv_primary) && "svclass" %in% names(sv_primary))
+                 sum(sv_primary$svclass == "translocation", na.rm = TRUE) else NA_integer_
+n_intra_bnd  = if (!is.null(sv_primary) && "svclass" %in% names(sv_primary))
+                 sum(sv_primary$svclass == "intra-chr breakend", na.rm = TRUE) else NA_integer_
 
 # Clinical overview (R/key_findings.R); rendered by sections/_overview.qmd
 report_counts = list(small_variants = sv_counts, n_sv = n_sv,
-                     n_trans = n_trans, n_intra_bnd = n_intra_bnd)
+                     n_trans = n_trans, n_intra_bnd = n_intra_bnd,
+                     sv_caller = sv_primary_caller)
 OVERVIEW = build_overview(variant_table, SECTION_DATA, all_panels, ascat_pp, tmb_info,
                           report_counts, ctx)
 ```
@@ -199,7 +203,7 @@ js_set = function(x) paste0("new Set([",
 
 panel_defs = vapply(names(all_p), function(nm) {
   p    = all_p[[nm]]
-  syms = js_set(if (!is.null(p$genes_snv)) p$genes_snv else p$genes)
+  syms = js_set(if (isTRUE(unlist(p$has_scopes))) p$genes_snv else if (!is.null(p$genes_snv)) p$genes_snv else p$genes)
   syms_sv = js_set(if (!is.null(p$genes_sv)) p$genes_sv else p$genes)
   ivs  = if (isTRUE(p$has_coords))
     paste0("[", paste(sprintf("[%s,%s,%s,%s]",

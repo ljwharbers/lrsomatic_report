@@ -1,3 +1,103 @@
-// Genome instability styles (ShatterSeek, ecDNA) (STUB, WP0 scaffolding).
-// Imported by report.scss inside the scss:rules layer, so the $report-* variables and the
-// CSS custom properties defined there are available.
+// Genome instability styles (templates/sections/_instability.qmd: ShatterSeek, ecDNA).
+// Imported by report.scss inside the scss:rules layer: palette tokens only (var(--color-*)),
+// so the dark-mode overrides in report.scss apply without separate rules here.
+
+// One-line verdict heading each block
+.instability-verdict {
+  max-width: 78ch;
+  margin: 0 0 0.9rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--card-radius);
+  border: 1px solid var(--color-border);
+  border-left-width: 3px;
+  background: var(--color-surface);
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--color-text);
+
+  &--positive { border-left-color: var(--color-danger); }
+  &--neutral  { border-left-color: var(--color-primary); }
+  &--unknown  { border-left-color: var(--color-warning); }
+  &--negative { border-left-color: var(--color-success); color: var(--color-text-muted); font-weight: 400; }
+}
+
+.instability-scroll {
+  overflow-x: auto;
+  margin: 0 0 0.8rem;
+}
+
+.instability-table {
+  width: auto;
+  min-width: min(100%, 640px);
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+
+  th {
+    text-align: left;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  &__key   { font-family: var(--font-mono); font-weight: 600; white-space: nowrap; }
+  &__num   { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  &__loc   { font-family: var(--font-mono); font-size: 0.78rem; white-space: pre-line; }
+  &__genes { font-style: italic; }
+}
+
+.instability-muted { color: var(--color-text-muted); }
+
+.instability-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+
+  &--high {
+    color: var(--color-danger);
+    background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 35%, transparent);
+  }
+  &--other {
+    color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent);
+  }
+}
+
+// CoRAL plots: two per row on wide screens (graph beside cycles), one on narrow
+.instability-plots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 0.8rem;
+  margin: 0 0 0.6rem;
+
+  .report-figure { margin: 0; }
+}
+
+@media print {
+  .instability-plots { grid-template-columns: 1fr 1fr; }
+  .instability-table { font-size: 0.75rem; }
+}
