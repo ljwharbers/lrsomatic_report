@@ -179,23 +179,3 @@ locate_wakhan_solution_file = function(wakhan_dir, rank, repository_name = NULL,
   if (length(hit) > 0) hit[1] else NULL
 }
 
-# Genome copy-number plot of one solution: integer_profile.html (Wakhan 0.5.0) or <sample>_<P_U_C>_genome_copynumbers_breakpoints.html (0.4.x); the subclonal plots are not matched
-# DEPRECATED (v2): only the setup chunk of per_sample.qmd still calls this; the report no
-# longer embeds these HTML plots (see R/sections/cna.R). Remove together with that call.
-WAKHAN_CN_PLOT_PATTERN = "^integer_profile\\.html$|genome_copynumbers_breakpoints\\.html$"
-
-# Locate each solution's genome copy-number plot in either Wakhan layout: the rank symlink first (solution_rank_<n> in 0.5.0, solution_<n> in 0.4.x) to avoid the aliased duplicate directory, then repository_name, the real directory in both
-locate_wakhan_cn_plots = function(wakhan_dir, solutions_dt) {
-  if (is.null(wakhan_dir) || is.null(solutions_dt) || nrow(solutions_dt) == 0) return(list())
-  out = lapply(seq_len(nrow(solutions_dt)), function(i) {
-    row = solutions_dt[i]
-    sdirs = file.path(wakhan_dir, c(paste0("solution_rank_", row$solution_rank),
-                                    paste0("solution_", row$solution_rank),
-                                    row$repository_name))
-    hits = unlist(lapply(sdirs[dir.exists(sdirs)], list.files,
-                         pattern = WAKHAN_CN_PLOT_PATTERN, full.names = TRUE))
-    if (length(hits) == 0) return(NULL)
-    list(rank = row$solution_rank, purity = row$cell_purity, ploidy = row$ploidy, plot = hits[1])
-  })
-  Filter(Negate(is.null), out)
-}
