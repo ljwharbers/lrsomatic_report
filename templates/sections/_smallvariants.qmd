@@ -1,9 +1,11 @@
 ## Small variants
 
 ```{r small-variant-prepare, results='asis'}
-if (!is.null(variant_table) && nrow(variant_table) > 0) {
+# The DT and its JS globals come from variant_embed (the rows embedded under --embed); counts
+# and footnotes below still read the full variant_table
+if (!is.null(variant_embed) && nrow(variant_embed) > 0) {
   # Format the VAF as a percentage
-  dt_display = copy(variant_table)
+  dt_display = copy(variant_embed)
   if ("vaf" %in% names(dt_display)) {
     dt_display[, vaf := round(vaf * 100, 1)]
     setnames(dt_display, "vaf", "VAF%")
@@ -29,7 +31,7 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
 ```
 
 ```{r small-variant-table}
-if (!is.null(variant_table) && nrow(variant_table) > 0) {
+if (!is.null(variant_embed) && nrow(variant_embed) > 0) {
 
   # Flag cells whose VAF/DP/GT/PS came from a consensus winner; styleEqual() needs literal values
   mc_vals = if ("callers" %in% names(dt_display))

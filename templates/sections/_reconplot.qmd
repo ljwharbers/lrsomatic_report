@@ -1,0 +1,9 @@
+### ReConPlot
+
+```{r reconplot-stub}
+# STUB (WP0 scaffolding — owned by the SV/ReConPlot package). Reads
+# SECTION_DATA[["reconplot"]] (R/sections/reconplot.R). Included at the end of _sv.qmd.
+if (is.null(SECTION_DATA[["reconplot"]])) {
+  section_notice("No ReConPlot figures found for this sample.")
+}
+```

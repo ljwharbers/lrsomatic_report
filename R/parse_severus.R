@@ -298,7 +298,7 @@ sv_display_columns = function(sv_table, chrom_levels = NULL) {
              genes      = genes)
 }
 
-# Panel hits per SV row as "GENE (side, how)" labels ("" = none): coordinate panels match within the windows, symbol-only panels on VEP symbols; several panels union and add a " [name]" suffix. Mirrored by svPanelHits() in templates/per_sample.qmd
+# Panel hits per SV row as "GENE (side, how)" labels ("" = none): coordinate panels match within the windows, symbol-only panels on VEP symbols; several panels union and add a " [name]" suffix. Mirrored by svPanelHits() in templates/per_sample.qmd. Built on sv_panel_hit_table(), the long form
 sv_panel_hits = function(sv_table, panels,
                          bnd_window = SV_PANEL_WINDOW_BND,
                          other_window = SV_PANEL_WINDOW_OTHER) {
@@ -307,14 +307,15 @@ sv_panel_hits = function(sv_table, panels,
 
   ps = .as_panel_list(panels)
   if (length(ps) == 0) return(rep("", n))
-  if (length(ps) == 1) return(.sv_panel_hits_one(sv_table, ps[[1]], "", bnd_window, other_window))
 
-  per_panel = lapply(names(ps), function(nm)
-    .sv_panel_hits_one(sv_table, ps[[nm]], paste0(" [", nm, "]"), bnd_window, other_window))
-  vapply(seq_len(n), function(i) {
-    parts = unique(unlist(lapply(per_panel, `[[`, i), use.names = FALSE))
-    paste(parts[nzchar(parts)], collapse = ", ")
-  }, character(1))
+  ht = sv_panel_hit_table(sv_table, ps, bnd_window, other_window)
+  out = rep("", n)
+  if (nrow(ht) == 0) return(out)
+
+  lab = .sv_hit_labels(ht, tagged = length(ps) > 1)
+  per_row = lab[, .(hit = paste(unique(label), collapse = ", ")), by = row]
+  out[per_row$row] = per_row$hit
+  out
 }
 
 # A panel object and a list of panels are both plain lists; tell them apart by load_gene_panel()'s fields
@@ -329,39 +330,90 @@ sv_panel_hits = function(sv_table, panels,
   ps
 }
 
-# One panel's per-row labels. `tag` is appended to every label ("" for a lone panel).
-.sv_panel_hits_one = function(sv_table, panel, tag = "",
+# Long-form SV panel hits: one row per (sv row, gene, side, gap, panel), in label order.
+#   row     index into sv_table
+#   id      sv_table$id[row] (NA when the table has no id column)
+#   gene    panel gene (coordinate mode: the panel's interval_gene as written; symbol mode:
+#           the upper-cased VEP symbol)
+#   side    "A" | "B" (either breakend of a BND, or the annotated side in symbol mode) | "span"
+#   gap     0 when the locus overlaps the gene, else bp distance from the unpadded locus
+#   direct  gap == 0 (always TRUE in symbol mode: a VEP symbol sits on the breakend)
+#   panel   panel name (names(panels); a lone panel object is named by its $name)
+#   match   "coord" | "symbol" — which matching mode produced the row
+# A gene with several loci can appear more than once for one row/side, at different gaps —
+# exactly as the labels show it. `panels` is one load_gene_panel() object or a named list.
+sv_panel_hit_table = function(sv_table, panels,
+                              bnd_window = SV_PANEL_WINDOW_BND,
+                              other_window = SV_PANEL_WINDOW_OTHER) {
+  empty = data.table(row = integer(), id = character(), gene = character(),
+                     side = character(), gap = numeric(), direct = logical(),
+                     panel = character(), match = character())
+  n = if (is.null(sv_table)) 0L else nrow(sv_table)
+  ps = .as_panel_list(panels)
+  if (n == 0 || length(ps) == 0) return(empty)
+
+  parts = lapply(names(ps), function(nm) {
+    h = .sv_panel_hits_one(sv_table, ps[[nm]], bnd_window, other_window)
+    if (nrow(h) > 0) h[, panel := nm]
+    h
+  })
+  ht = rbindlist(c(list(empty[, !"id"]), parts), use.names = TRUE, fill = TRUE)
+  if (nrow(ht) == 0) return(empty)
+  ids = if ("id" %in% names(sv_table)) as.character(sv_table$id) else rep(NA_character_, n)
+  ht[, id := ids[row]]
+  ht[, direct := gap == 0]
+  ht[, names(empty), with = FALSE]
+}
+
+# Labels from the long form, in its order; consecutive symbol-mode genes on one side of one
+# row share a label ("A,B (A, direct)"), as the cell they were read from listed them.
+.sv_hit_labels = function(ht, tagged) {
+  ht = copy(ht)
+  ht[, tag := if (tagged) paste0(" [", panel, "]") else ""]
+  # Symbol-mode rows of one (row, side, panel) run collapse; coordinate rows stay one each
+  ht[, grp := rleid(row, side, panel, fifelse(match == "symbol", 0L, seq_len(.N)))]
+  ht[, .(row = row[1],
+         label = if (match[1] == "symbol")
+                   paste0(paste(gene, collapse = ","), " (", side[1], ", direct)", tag[1])
+                 else
+                   paste0(gene, " (", side, ", ",
+                          fifelse(gap == 0, "direct", fmt_bp(gap)), ")", tag)),
+     by = grp][, .(row, label)]
+}
+
+# One panel's hits, long form (row, gene, side, gap, match), in label order
+.sv_panel_hits_one = function(sv_table, panel,
                               bnd_window = SV_PANEL_WINDOW_BND,
                               other_window = SV_PANEL_WINDOW_OTHER) {
   n = nrow(sv_table)
-  if (is.null(panel)) return(rep("", n))
-
-  label = function(genes, side, how) paste0(genes, " (", side, ", ", how, ")", tag)
+  none = data.table(row = integer(), gene = character(), side = character(),
+                    gap = numeric(), match = character())
+  if (is.null(panel)) return(none)
 
   if (!isTRUE(panel$has_coords)) {
     # The SV-scoped subset, so an `applies_to = snv` gene cannot match a breakend. Falls
     # back to `genes` for a panel object built before the scope column (test fixtures).
-    symbols = toupper(if (!is.null(panel$genes_sv)) panel$genes_sv else panel$genes)
-    hit_side = function(col) {
-      if (!col %in% names(sv_table)) return(rep("", n))
-      vapply(sv_table[[col]], function(cell) {
-        if (is.na(cell) || !nzchar(cell)) return("")
+    symbols = toupper(unlist(if (!is.null(panel$genes_sv)) panel$genes_sv else panel$genes))
+    hit_side = function(col, side) {
+      if (!col %in% names(sv_table)) return(none)
+      g = lapply(sv_table[[col]], function(cell) {
+        if (is.na(cell) || !nzchar(cell)) return(character(0))
         g = trimws(unlist(strsplit(toupper(as.character(cell)), "[;,]+")))
-        g = unique(g[g %in% symbols])
-        if (length(g) == 0) "" else paste(g, collapse = ",")
-      }, character(1), USE.NAMES = FALSE)
+        unique(g[g %in% symbols])
+      })
+      data.table(row = rep.int(seq_len(n), lengths(g)),
+                 gene = as.character(unlist(g, use.names = FALSE)),
+                 side = side, gap = 0, match = "symbol")
     }
-    ha = hit_side("gene_a"); hb = hit_side("gene_b")
     # A VEP symbol sits on the breakend itself, so a symbol hit is always direct
-    return(vapply(seq_len(n), function(i) {
-      parts = c(if (nzchar(ha[i])) label(ha[i], "A", "direct"),
-                if (nzchar(hb[i])) label(hb[i], "B", "direct"))
-      paste(parts, collapse = ", ")
-    }, character(1)))
+    h = rbindlist(list(hit_side("gene_a", "A"), hit_side("gene_b", "B")))
+    if (nrow(h) == 0) return(none)
+    # Row-major, side A before B, genes in cell order (order() is stable)
+    return(h[order(row, side)])
   }
 
   iv = panel_intervals(panel)
-  if (is.null(iv) || nrow(iv) == 0) return(rep("", n))
+  if (is.null(iv) || nrow(iv) == 0) return(none)
 
   is_bnd = sv_table$svtype %in% BND_SVTYPES
   # `start`/`end` are window-padded for foverlaps(); `qlo`/`qhi` carry the unpadded locus for the distance
@@ -388,7 +440,7 @@ sv_panel_hits = function(sv_table, panels,
                qhi   = pmax(sv_table$pos_a[!is_bnd], sv_table$pos_b[!is_bnd]))
   ))
   q = q[!is.na(chrom) & !is.na(start) & !is.na(end)]
-  if (nrow(q) == 0) return(rep("", n))
+  if (nrow(q) == 0) return(none)
   q[, start := pmax(as.numeric(start), 0)]
   q[, end   := as.numeric(end)]
   q[, `:=`(qlo = as.numeric(qlo), qhi = as.numeric(qhi))]
@@ -398,16 +450,14 @@ sv_panel_hits = function(sv_table, panels,
 
   ov = data.table::foverlaps(q, iv, by.x = c("chrom", "start", "end"),
                              type = "any", nomatch = NULL)
-  if (nrow(ov) == 0) return(rep("", n))
+  if (nrow(ov) == 0) return(none)
 
   # `start`/`end` are the gene's interval here (foverlaps() renamed the query to i.start/i.end)
   ov[, gap := pmax(0, pmax(start - qhi, qlo - end))]
-  ov[, how := fifelse(gap == 0, "direct", fmt_bp(gap))]
-
-  per_row = ov[, .(hit = paste(unique(label(gene, side, how)), collapse = ", ")), by = row]
-  out = rep("", n)
-  out[per_row$row] = per_row$hit
-  out
+  # Rows in foverlaps() order, grouped by row (stable): within a row, side A's hits, then B's
+  ov = ov[order(row)]
+  # The same gene/side/gap twice (one symbol, two overlapping loci) is one label
+  unique(ov[, .(row, gene, side, gap = as.numeric(gap), match = "coord")])
 }
 
 # Parse the gene-annotated Severus TSV (filtered_SV2/SV_filtered_with_gene_annotations.tsv)

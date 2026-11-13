@@ -429,3 +429,6 @@ window.updatePanelNotes = function () {
 </script>
 )----")
 ```
+
+<!-- Nested include: the path is relative to the ROOT document (templates/per_sample.qmd) -->
+{{< include sections/_reconplot.qmd >}}

@@ -47,6 +47,13 @@ $border-radius-lg:     8px;
 /*-- scss:rules --*/
 
 @import "fonts";
+// v2 section partials (one per work package, resolved next to this file like _fonts.scss).
+// They precede the rules below, so a partial rule only beats a same-specificity rule here
+// by being more specific; _print.scss is imported at the very end of this file instead.
+@import "overview";
+@import "cna";
+@import "instability";
+@import "signatures";
 
 // ============================================================
 // CSS custom properties — light mode
@@ -1344,3 +1351,6 @@ main > p:last-child em,
   h2 { page-break-after: avoid; }
   section { page-break-inside: avoid; }
 }
+
+// Print overrides for the v2 sections; last, so it wins over everything above
+@import "print";

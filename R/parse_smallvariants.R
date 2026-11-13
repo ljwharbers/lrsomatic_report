@@ -611,3 +611,33 @@ build_variant_table = function(vep_data, vaf_data, gene_panel = NULL) {
   setattr(out, "vep_fields", vep_fields)
   out
 }
+
+# Rows of the small-variant table embedded in the HTML (STUB, WP0 scaffolding — the
+# small-variant package implements the filter).
+#
+# Contract: mode "full" returns every row; mode "slim" keeps impact HIGH/MODERATE rows,
+# ClinVar pathogenic/likely-pathogenic rows, and rows whose symbol is in any embedded panel's
+# SNV gene set (genes_snv, falling back to genes; unlist() — panels come through YAML).
+# Columns are never dropped or renamed (JS resolves them by name via SNV_COLS). The result
+# keeps the `vep_fields` attribute and every other attribute of `vt`, and carries
+# attr(, "n_full") = nrow(vt) so the template can say how many rows were left out (the full
+# table goes to the sidecar TSV, see write_full_variant_table()). NULL in, NULL out.
+# The stub embeds every row.
+slim_variant_table = function(vt, all_panels, mode = "slim") {
+  if (is.null(vt)) return(NULL)
+  # copy(): setattr() on `vt` itself would also tag the caller's full table
+  out = copy(vt)
+  setattr(out, "n_full", nrow(vt))
+  out
+}
+
+# Full small-variant table as a gzipped TSV sidecar next to the report; list columns are
+# dropped (fwrite cannot write them flat). Returns the path invisibly, NULL when nothing written.
+write_full_variant_table = function(vt, path) {
+  if (is.null(vt)) return(invisible(NULL))
+  vt = as.data.table(vt)
+  list_cols = names(vt)[vapply(vt, is.list, logical(1))]
+  if (length(list_cols) > 0) vt = vt[, setdiff(names(vt), list_cols), with = FALSE]
+  data.table::fwrite(vt, path, sep = "\t", compress = "gzip")
+  invisible(path)
+}
