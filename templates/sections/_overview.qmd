@@ -1,0 +1,10 @@
+## Overview
+
+```{r overview-stub}
+# STUB (WP0 scaffolding — owned by the overview package). Reads OVERVIEW, built in the setup
+# chunk by build_overview() (R/key_findings.R): list(findings, biomarkers, per_panel_n).
+# Panel-chip interactivity lives in assets/js/key_findings.js (window.registerPanelListener).
+if (is.null(OVERVIEW) || nrow(OVERVIEW$findings) == 0) {
+  section_notice("No key findings to summarise for this sample.")
+}
+```

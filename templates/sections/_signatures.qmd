@@ -1,0 +1,9 @@
+## Mutational signatures
+
+```{r signatures-stub}
+# STUB (WP0 scaffolding — owned by the signatures package). Reads
+# SECTION_DATA[["signatures"]] (R/sections/signatures.R).
+if (is.null(SECTION_DATA[["signatures"]])) {
+  section_notice("No mutational signature results found for this sample.")
+}
+```

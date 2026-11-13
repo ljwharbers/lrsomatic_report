@@ -58,7 +58,12 @@ div(class = "metric-groups",
          else if (!is.na(tmb_info$tmb)) "mut/Mb" else NULL)
   ),
   metric_group("Somatic variants",
-    card(lc_plural("SNVs"),  fmt_val(n_snv, 0),         "metric-snvs"),
+    # SNVs + indels over unique chrom/pos/ref/alt (count_small_variants(), R/utils.R)
+    card(lc_plural("Small variants"), fmt_val(sv_counts$total, 0), "metric-snvs",
+         subtitle = if (!is.na(sv_counts$total))
+           paste0(formatC(sv_counts$snv, format = "d", big.mark = ","), " SNVs · ",
+                  formatC(sv_counts$indel, format = "d", big.mark = ","), " indels")
+         else NULL),
     # One row per rearrangement, not per breakend record — see the note under the SV table.
     card(lc_plural("SVs"),   fmt_val(n_sv, 0),          "metric-svs",
          subtitle = if (!is.na(n_trans) && !is.na(n_intra_bnd))

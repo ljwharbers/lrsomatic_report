@@ -17,6 +17,25 @@ exists to find. Matching on coordinates needs no annotation on the row.
 Optional metadata columns (`panel`, `notes`) are ignored by the loader and kept for the
 reader.
 
+## Gene role: `role`
+
+An optional `role` column says whether a gene is an oncogene or a tumour suppressor, which
+the overview and gene-level copy number use to judge an amplification or a deletion:
+
+| `role` | Read as |
+|---|---|
+| `OG`, `oncogene` | oncogene |
+| `TSG`, `tumour suppressor`, `tumor suppressor` | tumour suppressor |
+| `both`, `OG/TSG`, `TSG/OG` | both |
+| *blank* | no role declared |
+
+Case-insensitive; anything else is a hard error, as for `applies_to`. A gene listed on
+several rows takes its first non-blank role. A file with no `role` column loads as before.
+
+Coordinates are also collected from *every* row that has them, whatever its `applies_to`
+(`panel_gene_intervals(panel, "all")`), for placing genes on the copy-number profile;
+SV matching still uses only the SV-scoped rows.
+
 ## Scoping a gene to one table: `applies_to`
 
 By default every gene filters **both** tables. An optional `applies_to` column scopes a

@@ -1,0 +1,9 @@
+### Gene-level copy number
+
+```{r cna-genes-stub}
+# STUB (WP0 scaffolding — owned by the CNA package). Reads SECTION_DATA[["cna"]]
+# (R/sections/cna.R). Included at the end of _ascat.qmd, after its tabset closes.
+if (is.null(SECTION_DATA[["cna"]])) {
+  section_notice("Gene-level copy number is not available for this sample.")
+}
+```

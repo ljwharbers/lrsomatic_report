@@ -1,0 +1,9 @@
+## Genome instability
+
+```{r instability-stub}
+# STUB (WP0 scaffolding — owned by the genome-instability package). Reads
+# SECTION_DATA[["shatterseek"]] and SECTION_DATA[["ecdna"]] (R/sections/shatterseek.R, ecdna.R).
+if (is.null(SECTION_DATA[["shatterseek"]]) && is.null(SECTION_DATA[["ecdna"]])) {
+  section_notice("No chromothripsis or ecDNA results found for this sample.")
+}
+```

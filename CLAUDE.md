@@ -17,7 +17,7 @@ Rscript bin/render_report.R \
   --reference   auto
 ```
 
-Output defaults to `<sample-id>_report.html` in the current directory. `--reference auto` reads `##contig` lines from the VEP somatic VCF to detect `t2t` vs `hg38`. Matched and tumour-only runs take the same command — every input, and the run mode itself, is discovered from `--sample-dir`.
+Output defaults to `<sample-id>_report.html` in the current directory; the full small-variant table is written beside it as `<sample-id>_small_variants.tsv.gz` (the setup chunk writes it next to the rendered `.qmd`, `bin/render_report.R` moves it). `--embed slim|full` (default `slim`) picks which small-variant rows the HTML table embeds (`slim_variant_table()`; `variant_embed` in the setup chunk — `variant_table` stays the full table for every count). `--reference auto` reads `##contig` lines from the VEP somatic VCF to detect `t2t` vs `hg38`. Matched and tumour-only runs take the same command — every input, and the run mode itself, is discovered from `--sample-dir`.
 
 `--mode` and `--somatic-vcf` were **removed** (they used to be required). Run mode is derived from `has_normal`, and the VCF supplying VAF is discovered by `locate_outputs()`. Anything still passing them fails on an unknown option.
 
@@ -46,7 +46,9 @@ Output defaults to `<sample-id>_report.html` in the current directory. `--refere
 | `circos.R` | `draw_circos()` — generates the genome-wide circos SVG using `circlize`; SBS 6-class colours hard-coded as `SNV_COLOURS` |
 | `circos_bnd.R` | The breakend circos in the SV section, R half only: `bnd_links()` picks the drawable rearrangements, `bnd_panel_genes()` the panel genes to label, `bnd_circos_data()` serialises both into `window.BND_DATA`. The plot itself is `assets/js/bnd_circos.js` |
 | `sections.R` | Section-module contract: `register_section()`, `section_notice()`, `table_details()` — see below |
-| `sections/*.R` | One file per migrated section (`sv.R`, `whatshap.R`), each calling `register_section()` |
+| `sections/*.R` | One file per migrated section (`sv.R`, `whatshap.R`, and the v2 modules `cna.R`, `shatterseek.R`, `ecdna.R`, `reconplot.R`, `signatures.R`), each calling `register_section()` |
+| `parse_padfoot.R` | Padfoot SV annotation helpers (sourced before `sections/`) |
+| `key_findings.R` | `build_overview()` — the clinical overview's findings/biomarkers, assigned to `OVERVIEW` in the setup chunk and rendered by `_overview.qmd` + `assets/js/key_findings.js` |
 
 **Assets:** `assets/references/{t2t,hg38}/` contains bundled cytobands and chromosome length TSVs — no network access needed at render time. Gene panels live in `assets/gene_lists/` as TSVs with a `gene` column.
 
@@ -66,7 +68,13 @@ To add a new section:
    - `parse(inputs, section_data)` — returns one data object for this section, or an
      empty/NULL-ish result if there's nothing to show. `section_data` holds already-parsed
      sections (registration order = parse order), for sections that depend on another (e.g.
-     circos reads `SECTION_DATA$sv$circos`).
+     circos reads `SECTION_DATA$sv$circos`). A `parse` may declare a third argument, `ctx`
+     (sample_id, sample_dir, reference, sex, all_panels, chromosomes, chrom_lens, cytobands,
+     embed, repo_dir, outputs — documented in `R/sections.R`); it is passed only when
+     `length(formals(s$parse)) >= 3`, so two-argument modules are unaffected.
+   - Parse order is `SECTION_ORDER` in `R/sections.R` (sv, whatshap, cna, shatterseek, ecdna,
+     reconplot, signatures), applied by `section_files()`; a file not named there is sourced
+     after them, alphabetically. Add a new id there if another section reads its result.
 2. Create `templates/sections/_<id>.qmd` — reads `SECTION_DATA[["<id>"]]`, renders it, and uses
    `section_notice(msg)` (from `R/sections.R`) for the "nothing to show" case instead of a raw
    `tags$div(...)`.
@@ -77,9 +85,10 @@ To add a new section:
    the same `sections/_<id>.qmd` prefix a top-level one has.
 
 `R/sections.R` holds the registry (`SECTIONS`, populated at source time) and `section_notice()`.
-The setup chunk in `per_sample.qmd` sources every file in `R/sections/`, then runs
-`SECTION_DATA[[s$id]] = s$parse(s$locate(sample_dir, sample_id), SECTION_DATA)` for each
-registered section. Sections not yet migrated (SNV, ASCAT, QC, circos) keep parsing directly
+The setup chunk in `per_sample.qmd` loads the reference data, sources every file in
+`R/sections/` in `SECTION_ORDER`, then runs
+`SECTION_DATA[[s$id]] = run_section_parse(s, s$locate(sample_dir, sample_id), SECTION_DATA, ctx)`
+for each registered section. Sections not yet migrated (SNV, ASCAT, QC, circos) keep parsing directly
 from `outputs$<key>` in the setup chunk — migrate them the same way when they next need a
 change.
 
@@ -174,9 +183,10 @@ Tested with R 4.4.1 and Quarto 1.5.57.
 ## Tests
 
 `testthat`, in `tests/testthat/`: `test-utils.R`, `test-severus.R`,
-`test-smallvariants.R`, `test-circos-bnd.R`, `test-whatshap.R`, `test-wakhan.R`. `setup.R` sources the `R/`
-files under test — including `R/sections/whatshap.R`, which must come after `R/sections.R`
-because `register_section()` runs at source time. Nothing under test needs `circlize`
+`test-smallvariants.R`, `test-circos-bnd.R`, `test-whatshap.R`, `test-wakhan.R`, `test-cli.R`,
+`test-panel-roles.R`, `test-foundation.R`. `setup.R` sources the `R/`
+files under test — including every `R/sections/*.R` (via `section_files()`, in parse order),
+which must come after `R/sections.R` because `register_section()` runs at source time. Nothing under test needs `circlize`
 (`R/circos.R`, the one file that does, is not sourced), so the suite runs without it.
 
 ```bash

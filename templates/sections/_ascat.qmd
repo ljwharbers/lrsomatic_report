@@ -104,3 +104,6 @@ render_wakhan_cn_tabs(wakhan_cn_plots)
 ```{r cn-outer-tabset-close, results='asis'}
 cat("\n:::\n\n")
 ```
+
+<!-- Nested include: the path is relative to the ROOT document (templates/per_sample.qmd) -->
+{{< include sections/_cna_genes.qmd >}}

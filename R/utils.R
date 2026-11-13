@@ -117,7 +117,42 @@ normalise_reference_name = function(x) {
   out
 }
 
+# Normalise the optional `role` column to "oncogene" | "tsg" | "both" | "", one per row.
+# Blank/NA is "" (no role declared). Like applies_to, an unrecognised value is an error.
+.panel_role = function(col, genes, path) {
+  v = tolower(trimws(as.character(col)))
+  v[is.na(v)] = ""
+  v = gsub("[[:space:]_-]+", " ", v)
+  out = rep(NA_character_, length(v))
+  out[v %in% c("", "na", "none")]                                        = ""
+  out[v %in% c("og", "oncogene", "onc")]                                 = "oncogene"
+  out[v %in% c("tsg", "tumour suppressor", "tumor suppressor",
+               "tumour suppressor gene", "tumor suppressor gene")]       = "tsg"
+  out[v %in% c("both", "og/tsg", "tsg/og", "og / tsg", "tsg / og",
+               "oncogene/tsg", "tsg/oncogene")]                          = "both"
+  if (anyNA(out)) {
+    bad = which(is.na(out))
+    stop("Gene panel ", path, " has unrecognised role value(s): ",
+         paste(sprintf("'%s' (%s)", v[bad], genes[bad])[seq_len(min(5, length(bad)))],
+               collapse = ", "),
+         if (length(bad) > 5) paste0(" (and ", length(bad) - 5L, " more)") else "",
+         ". Use 'OG'/'oncogene', 'TSG'/'tumour suppressor', 'both' ('OG/TSG'), or leave blank.")
+  }
+  out
+}
+
 # Load a gene panel TSV: `gene` column required; chrom/start/end all-or-nothing; a coordinate panel declaring another reference errors, one declaring none loads as ""
+#
+# Fields added in v2 (all additive — a panel without these columns loads as before):
+#   has_roles, role_gene / role   parallel vectors over genes with a NON-EMPTY role, one entry
+#                                 per gene (first non-empty role wins); empty when no `role`
+#                                 column. role ∈ "oncogene" | "tsg" | "both". See panel_roles().
+#   all_chrom / all_start / all_end / all_gene
+#                                 every row with valid coordinates REGARDLESS of applies_to
+#                                 (the interval vectors above stay SV-scoped); empty for a
+#                                 symbol-only panel. See panel_gene_intervals(panel, "all").
+# Empty vectors come back as NULL / list() after the Quarto execute_params YAML round trip,
+# so consumers must unlist() every vector field.
 load_gene_panel = function(path, reference = NULL) {
   if (!file.exists(path)) stop("Gene panel file not found: ", path)
 
@@ -219,6 +254,37 @@ load_gene_panel = function(path, reference = NULL) {
     out$interval_gene = genes[sv_rows]
   }
 
+  # Every row with usable coordinates, whatever its applies_to — for consumers that place
+  # genes on the genome rather than match SVs (gene-level copy number, overview). Invalid
+  # rows are skipped here; only SV-scoped rows are required to carry coordinates (above).
+  out$all_chrom = character(0)
+  out$all_start = integer(0)
+  out$all_end   = integer(0)
+  out$all_gene  = character(0)
+  if (length(present) == 3) {
+    chrom_raw = trimws(as.character(dt[["chrom"]]))
+    start = suppressWarnings(as.integer(dt[["start"]]))
+    end   = suppressWarnings(as.integer(dt[["end"]]))
+    ok = keep & !is.na(chrom_raw) & nzchar(chrom_raw) & !is.na(start) & !is.na(end)
+    out$all_chrom = ensure_chr_prefix(chrom_raw[ok])
+    out$all_start = start[ok]
+    out$all_end   = end[ok]
+    out$all_gene  = genes[ok]
+  }
+
+  # Optional per-gene role (oncogene / tsg / both); only genes with a declared role are listed
+  out$has_roles = "role" %in% names(dt)
+  out$role_gene = character(0)
+  out$role      = character(0)
+  if (out$has_roles) {
+    role = .panel_role(dt[["role"]], genes, path)
+    has  = keep & nzchar(role)
+    rg   = genes[has]
+    first = !duplicated(rg)
+    out$role_gene = rg[first]
+    out$role      = role[has][first]
+  }
+
   out
 }
 
@@ -231,6 +297,34 @@ panel_intervals = function(panel) {
                   end   = as.integer(panel$end))
   setkey(dt, chrom, start, end)
   dt
+}
+
+# Panel gene intervals as an (unkeyed) data.table(chrom, start, end, gene); zero rows when the
+# panel carries none. scope "sv" = the SV-scoped intervals panel_intervals() uses (only when
+# has_coords); "all" = every row with valid coordinates regardless of applies_to. unlist()
+# throughout: the panel may have come through the execute_params YAML round trip.
+panel_gene_intervals = function(panel, scope = c("sv", "all")) {
+  scope = match.arg(scope)
+  empty = data.table(chrom = character(), start = integer(), end = integer(),
+                     gene = character())
+  if (is.null(panel)) return(empty)
+  f = if (scope == "sv") {
+    if (!isTRUE(as.logical(unlist(panel$has_coords)))) return(empty)
+    c("chrom", "start", "end", "interval_gene")
+  } else c("all_chrom", "all_start", "all_end", "all_gene")
+  v = lapply(f, function(k) unlist(panel[[k]], use.names = FALSE))
+  if (length(v[[1]]) == 0) return(empty)
+  data.table(chrom = as.character(v[[1]]), start = as.integer(v[[2]]),
+             end = as.integer(v[[3]]), gene = as.character(v[[4]]))
+}
+
+# Declared roles of a panel as data.table(gene, role), zero rows when it declares none
+panel_roles = function(panel) {
+  g = as.character(unlist(panel$role_gene, use.names = FALSE))
+  r = as.character(unlist(panel$role, use.names = FALSE))
+  if (length(g) == 0 || length(g) != length(r))
+    return(data.table(gene = character(), role = character()))
+  data.table(gene = g, role = r)
 }
 
 # Is a --gene-panel argument the "no filtering" sentinel?
@@ -434,6 +528,69 @@ embed_png = function(path, max_width = "900px", caption = NULL) {
     ),
     if (!is.null(caption)) htmltools::tags$figcaption(class = "report-figure__caption", caption)
   )
+}
+
+# ggplot (or a zero-argument function drawing base graphics) -> svglite SVG -> base64
+# <img src="data:image/svg+xml;base64,..."> tag; width/height in inches. Same route as the
+# genome circos (svglite to a temp file, base64enc) so the report stays self-contained.
+embed_svg_plot = function(p, width, height, alt = "", class = "report-figure") {
+  if (is.null(p)) return(NULL)
+  tmp = tempfile(fileext = ".svg")
+  on.exit(unlink(tmp), add = TRUE)
+  svglite::svglite(tmp, width = width, height = height)
+  dev = grDevices::dev.cur()
+  tryCatch({
+    if (is.function(p)) p() else print(p)
+  }, finally = grDevices::dev.off(dev))
+  htmltools::tags$img(
+    class = class,
+    src   = paste0("data:image/svg+xml;base64,", base64enc::base64encode(tmp)),
+    alt   = alt,
+    style = "max-width:100%; height:auto; display:block; margin:auto;"
+  )
+}
+
+# Map canonical column names to the columns actually present in `dt`.
+# `spec` is a named character vector or list: canonical = c("candidate1", "candidate2", ...).
+# Pass 1 takes, per canonical, the first candidate present by EXACT name; pass 2 resolves the
+# rest by normalised name (lowercase, non-alphanumerics stripped), in candidate order, never
+# reusing a column already claimed — so a table carrying both `pos_1` and `Pos_1` maps each
+# to its own canonical when both are named exactly. Returns a named character vector
+# canonical -> actual column name, NA where nothing matched.
+resolve_columns = function(dt, spec) {
+  nms   = if (is.character(dt)) dt else names(dt)
+  canon = names(spec)
+  if (is.null(canon) || any(!nzchar(canon))) stop("resolve_columns(): spec must be fully named")
+  out   = setNames(rep(NA_character_, length(canon)), canon)
+  taken = character(0)
+  # Pass 1: exact names
+  for (k in canon) {
+    hit = intersect(as.character(unlist(spec[[k]])), setdiff(nms, taken))
+    if (length(hit) > 0) { out[[k]] = hit[1]; taken = c(taken, hit[1]) }
+  }
+  # Pass 2: normalised names
+  norm = function(x) gsub("[^a-z0-9]", "", tolower(x))
+  for (k in canon[is.na(out)]) {
+    free = setdiff(nms, taken)
+    for (cand in as.character(unlist(spec[[k]]))) {
+      m = free[norm(free) == norm(cand)]
+      if (length(m) > 0) { out[[k]] = m[1]; taken = c(taken, m[1]); break }
+    }
+  }
+  out
+}
+
+# Small-variant counts over unique chrom/pos/ref/alt: list(total, snv, indel). An SNV has a
+# single-base ACGT ref and alt; anything else (incl. VEP's dash-form "-"/"A") is an indel.
+# NA counts when vep_data is NULL (no VEP file), zeros for an empty table.
+count_small_variants = function(vep_data) {
+  if (is.null(vep_data))
+    return(list(total = NA_integer_, snv = NA_integer_, indel = NA_integer_))
+  if (nrow(vep_data) == 0) return(list(total = 0L, snv = 0L, indel = 0L))
+  u = unique(as.data.table(vep_data)[, .(chrom, pos, ref, alt)])
+  base = c("A", "C", "G", "T")
+  is_snv = toupper(as.character(u$ref)) %in% base & toupper(as.character(u$alt)) %in% base
+  list(total = nrow(u), snv = sum(is_snv), indel = nrow(u) - sum(is_snv))
 }
 
 # data: URI for a Wakhan Plotly HTML file, with a resize script injected so the plot fills the iframe
