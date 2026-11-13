@@ -1,3 +1,7 @@
+# locate_wakhan_cn_plots() is DEPRECATED since v2: the report draws a static profile from
+# integer_profile.bed instead (R/sections/cna.R, tested in test-cna.R). Only the setup chunk
+# of per_sample.qmd still calls it; delete it, these tests and that call together.
+#
 # Fake wakhan/ trees in the two layouts the pipeline links in. Each solution's real directory
 # holds its plots, and a rank symlink points at it, as Wakhan itself writes them.
 #   0.4.x: <P>_<U>_<C>/<sample>_<P>_<U>_<C>_genome_copynumbers_breakpoints.html, solution_<n> ->

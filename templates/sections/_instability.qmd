@@ -1,9 +1,258 @@
 ## Genome instability
 
-```{r instability-stub}
-# STUB (WP0 scaffolding — owned by the genome-instability package). Reads
-# SECTION_DATA[["shatterseek"]] and SECTION_DATA[["ecdna"]] (R/sections/shatterseek.R, ecdna.R).
-if (is.null(SECTION_DATA[["shatterseek"]]) && is.null(SECTION_DATA[["ecdna"]])) {
-  section_notice("No chromothripsis or ecDNA results found for this sample.")
+```{r instability-setup}
+# SECTION_DATA$shatterseek (R/sections/shatterseek.R) and SECTION_DATA$ecdna (R/sections/ecdna.R).
+# Both parse to list(status = "not_run") when nothing was found; NULL is treated the same.
+ss = SECTION_DATA[["shatterseek"]]
+ec = SECTION_DATA[["ecdna"]]
+ss_ok = !is.null(ss) && identical(ss$status, "ok")
+ec_status = if (is.null(ec) || is.null(ec$status)) "not_run" else ec$status
+
+inst_int = function(x) ifelse(is.na(x), "–", formatC(as.numeric(x), format = "d", big.mark = ","))
+inst_num = function(x, digits = 1) ifelse(is.na(x), "–", formatC(as.numeric(x), format = "f", digits = digits))
+inst_span = function(chrom, start, end) {
+  ifelse(is.na(start) | is.na(end), "–",
+         paste0(chrom, ":", formatC(as.numeric(start), format = "d", big.mark = ","), "–",
+                formatC(as.numeric(end), format = "d", big.mark = ",")))
 }
+inst_verdict = function(text, kind) tags$p(class = paste0("instability-verdict instability-verdict--", kind), text)
+inst_html = function(tag) cat("\n```{=html}\n", as.character(tag), "\n```\n\n", sep = "")
+# Path relative to the sample directory, for provenance lines
+inst_rel = function(p) {
+  root = sub("/+$", "", as.character(sample_dir))
+  ifelse(startsWith(p, paste0(root, "/")), substring(p, nchar(root) + 2L), p)
+}
+```
+
+### Chromothripsis
+
+```{r shatterseek-verdict}
+if (!ss_ok) {
+  section_notice("ShatterSeek was not run for this sample (no shatterseek/<combination>/*.shatterseek.tsv found).")
+} else {
+  inst_verdict(shatterseek_verdict(ss), if (nrow(ss$high) > 0) "positive" else "negative")
+}
+```
+
+```{r shatterseek-calls, results='asis', eval=ss_ok}
+# Called chromosomes per caller combination; tabs only when more than one combination ran
+ss_call_table = function(cb) {
+  d = ss$combos[[cb]]
+  if (nrow(d) == 0) return(section_notice("This combination's ShatterSeek output is empty: no chromosome was tested."))
+  h = ss$high[combo == cb]
+  if (nrow(h) == 0) return(section_notice(sprintf("No chromothripsis called by %s (%d chromosomes tested).",
+                                                  ss$labels[[cb]], nrow(d))))
+  tags$div(class = "instability-scroll",
+    tags$table(class = "instability-table",
+      tags$thead(tags$tr(lapply(c("Chromosome", "Confidence", "Tiers met", "Cluster span",
+                                  "Intra-chr SVs", "Translocations", "Oscillating CN segments"), tags$th))),
+      tags$tbody(lapply(seq_len(nrow(h)), function(i) tags$tr(
+        tags$td(class = "instability-table__key", h$chrom[i]),
+        tags$td(tags$span(class = paste0("instability-pill instability-pill--",
+                                         if (h$confidence[i] == "high") "high" else "other"),
+                          h$confidence[i])),
+        tags$td(if (nzchar(h$criteria[i])) h$criteria[i] else "–"),
+        tags$td(class = "instability-table__num", inst_span(h$chrom[i], h$start[i], h$end[i])),
+        tags$td(class = "instability-table__num", inst_int(h$n_sv[i])),
+        tags$td(class = "instability-table__num", inst_int(h$n_tra[i])),
+        tags$td(class = "instability-table__num", inst_int(h$n_oscillating[i]))
+      )))
+    )
+  )
+}
+
+if (shatterseek_disagree(ss)) {
+  inst_html(section_notice(paste(
+    "The caller combinations disagree. A call made with only one copy-number or SV source is",
+    "less robust than one every combination supports; compare the tabs below."), warn = TRUE))
+}
+if (length(ss$combos) > 1) {
+  cat("::: {.panel-tabset}\n\n")
+  for (cb in names(ss$combos)) {
+    cat("#### ", ss$labels[[cb]], "\n\n", sep = "")
+    inst_html(ss_call_table(cb))
+  }
+  cat(":::\n\n")
+} else if (nrow(ss$high) > 0) {
+  inst_html(ss_call_table(names(ss$combos)[1]))
+}
+```
+
+```{r shatterseek-all-open, results='asis', eval=ss_ok}
+cat('::: {.callout-note collapse="true" title="All chromosomes (ShatterSeek summary)"}\n\n')
+```
+
+```{r shatterseek-all, eval=ss_ok}
+ss_all = rbindlist(lapply(names(ss$combos), function(cb) {
+  d = copy(ss$combos[[cb]])
+  if (nrow(d) == 0) return(NULL)
+  d[, combination := ss$labels[[cb]]]
+}), fill = TRUE)
+if (nrow(ss_all) > 0) {
+  keep = c("combination", "chrom", "confidence", "criteria", "start", "end", "n_sv", "n_del", "n_dup",
+           "n_h2hinv", "n_t2tinv", "n_tra", "n_sv_incl_tra", "n_oscillating",
+           "q_fragment_joins", "q_chr_enrichment", "q_exp_chr", "q_exp_cluster")
+  keep = keep[keep %in% names(ss_all)]
+  ss_all = ss_all[, ..keep]
+  for (k in grep("^q_", keep, value = TRUE)) set(ss_all, j = k, value = signif(ss_all[[k]], 3))
+  setnames(ss_all,
+           c("chrom", "n_sv", "n_del", "n_dup", "n_h2hinv", "n_t2tinv", "n_tra", "n_sv_incl_tra", "n_oscillating"),
+           c("chromosome", "intra SVs", "DEL", "DUP", "h2hINV", "t2tINV", "TRA", "SVs incl. TRA", "oscillating CN (2 states)"),
+           skip_absent = TRUE)
+  DT::datatable(
+    ss_all,
+    rownames   = FALSE,
+    filter     = "top",
+    extensions = c("Buttons"),
+    options    = list(
+      dom        = "Bfrtip",
+      buttons    = c("copy", "csv"),
+      scrollX    = TRUE,
+      pageLength = 23,
+      columnDefs = list(list(className = "dt-left", targets = "_all"))
+    )
+  )
+} else {
+  section_notice("ShatterSeek output is empty.")
+}
+```
+
+```{r shatterseek-all-close, results='asis', eval=ss_ok}
+cat("\n:::\n\n")
+```
+
+```{r shatterseek-details, eval=ss_ok}
+table_details(
+  summary = "Tiers and caveats",
+  tags$p("ShatterSeek (Cortes-Ciriano et al. 2020; PCAWG-corrected CHM13 fork) tests, per chromosome,",
+         "the largest cluster of interleaved intra-chromosomal SVs against the hallmarks of chromothripsis.",
+         "A chromosome is called ", tags$strong("high"), " confidence when it meets any PCAWG high-confidence tier",
+         "(significance at BH q ≤ 0.2 across the sample's chromosomes; NA counts as a fail):"),
+  tags$ul(
+    tags$li(tags$strong("HC1"), ": ≥ 6 interleaved intra-chromosomal SVs, ≥ 7 adjacent segments oscillating between",
+            "two copy-number states, fragment joins not significant (random joins), and breakpoints enriched on the",
+            "chromosome or clustered (exponential test)."),
+    tags$li(tags$strong("HC2"), ": ≥ 3 interleaved intra-chromosomal SVs, ≥ 4 translocations, ≥ 7 oscillating segments,",
+            "fragment joins not significant."),
+    tags$li(tags$strong("HC3"), ": ≥ 40 SVs including translocations, fragment joins not significant.",
+            "PCAWG applied HC3 only to osteo-, leiomyo- and liposarcomas; here it applies to every tumour.")
+  ),
+  tags$p("PCAWG's low-confidence tier (4–6 oscillating segments) is not reported. Caveats:"),
+  tags$ul(
+    tags$li("The cut-offs were set on PCAWG short-read calls. Long-read callers report many small SVs;",
+            "intra-chromosomal SVs shorter than --shatterseek_min_svlen (default 150 bp) are excluded."),
+    tags$li("Centromeres and satellite arrays are not masked: a cluster spanning a centromere or heterochromatin",
+            "block (e.g. chr1q12, chr9q12, chr16q11.2) is more likely a mapping artefact than chromothripsis —",
+            "check the ShatterSeek figure (shatterseek/<combination>/plots/)."),
+    tags$li("Multiple-testing correction covers 23 chromosomes of one sample, not a cohort as in PCAWG."),
+    tags$li("Tumour-only Severus calls include germline SVs the panel of normals did not remove."),
+    tags$li("Insertions, single breakends and SVs touching chrY, chrM or unplaced contigs are not used;",
+            "copy number is rounded to integers.")
+  ),
+  tags$p("Source: ", lapply(names(ss$files), function(cb)
+    tags$span(tags$code(inst_rel(ss$files[[cb]])), " (", ss$labels[[cb]], ") ")))
+)
+```
+
+### Extrachromosomal DNA (ecDNA) and focal amplicons
+
+```{r ecdna-verdict}
+if (ec_status == "not_run") {
+  section_notice("ecDNA analysis (CoRAL / AmpliconClassifier) was not run for this sample (no ecdna/ output found).")
+} else {
+  inst_verdict(ecdna_verdict(ec), switch(ec_status,
+    detected      = if (isTRUE(ec$n_ecdna > 0) || isTRUE(ec$n_bfb > 0)) "positive" else "neutral",
+    unclassified  = "unknown",
+    "negative"))
+}
+```
+
+```{r ecdna-amplicons, eval=ec_status %in% c("detected", "unclassified") && nrow(ec$amplicons) > 0}
+a = ec$amplicons
+flag = function(v) {
+  if (is.na(v)) tags$span(class = "instability-muted", "–")
+  else if (v) tags$span(class = "instability-pill instability-pill--high", "yes")
+  else tags$span(class = "instability-muted", "no")
+}
+tags$div(class = "instability-scroll",
+  tags$table(class = "instability-table",
+    tags$thead(tags$tr(lapply(c("Amplicon", "Class", "ecDNA+", "BFB+", "Location", "Oncogenes",
+                                "Max CN", "Size"), tags$th))),
+    tags$tbody(lapply(seq_len(nrow(a)), function(i) tags$tr(
+      tags$td(class = "instability-table__key", paste0("amplicon", a$amplicon[i])),
+      tags$td(if (is.na(a$class[i])) tags$span(class = "instability-muted", "not classified") else a$class[i]),
+      tags$td(flag(a$ecdna[i])),
+      tags$td(flag(a$bfb[i])),
+      tags$td(class = "instability-table__loc",
+              if (is.na(a$location[i])) "–" else gsub(", ", "\n", a$location[i], fixed = TRUE)),
+      tags$td(class = "instability-table__genes", if (is.na(a$oncogenes[i])) "–" else a$oncogenes[i]),
+      tags$td(class = "instability-table__num", inst_num(a$max_cn[i])),
+      tags$td(class = "instability-table__num", if (is.na(a$size_bp[i])) "–" else fmt_bp(a$size_bp[i]))
+    )))
+  )
+)
+```
+
+```{r ecdna-plots, eval=ec_status != "not_run" && length(ec$plots) > 0}
+# CoRAL's per-amplicon plots; slim reports embed the first six and name the folder with the rest
+ec_plots = ec$plots
+ec_cap = if (identical(embed, "full")) length(ec_plots) else min(6L, length(ec_plots))
+shown = ec_plots[seq_len(ec_cap)]
+plot_caption = function(p) {
+  n = sub(".*_amplicon([0-9]+)_(graph|cycles)\\.png$", "\\1", basename(p))
+  kind = if (grepl("_graph\\.png$", p)) "breakpoint graph and copy number" else "decomposed cycles / paths"
+  paste0("Amplicon ", n, ": ", kind, " (CoRAL)")
+}
+htmltools::tagList(
+  tags$div(class = "instability-plots",
+    lapply(shown, function(p) embed_png(p, max_width = "100%", caption = plot_caption(p)))),
+  if (length(ec_plots) > ec_cap)
+    tags$p(class = "table-footnote",
+           sprintf("%d more CoRAL plot%s not embedded (--embed slim); see ", length(ec_plots) - ec_cap,
+                   if (length(ec_plots) - ec_cap == 1) "" else "s"),
+           tags$code(paste(unique(dirname(ec_plots[-seq_len(ec_cap)])), collapse = ", ")), ".")
+)
+```
+
+```{r ecdna-genes-open, results='asis', eval=ec_status == "detected" && nrow(ec$genes) > 0}
+cat('::: {.callout-note collapse="true" title="Genes on the amplicons (AmpliconClassifier)"}\n\n')
+```
+
+```{r ecdna-genes, eval=ec_status == "detected" && nrow(ec$genes) > 0}
+g = copy(ec$genes)
+g[, amplicon := ifelse(is.na(amplicon), NA_character_, paste0("amplicon", amplicon))]
+g[, gene_cn := round(gene_cn, 1)]
+setnames(g, c("gene_cn", "oncogene"), c("gene CN", "canonical oncogene"))
+DT::datatable(
+  g,
+  rownames   = FALSE,
+  filter     = "top",
+  extensions = c("Buttons"),
+  options    = list(dom = "Bfrtip", buttons = c("copy", "csv"), scrollX = TRUE, pageLength = 15,
+                    columnDefs = list(list(className = "dt-left", targets = "_all")))
+)
+```
+
+```{r ecdna-genes-close, results='asis', eval=ec_status == "detected" && nrow(ec$genes) > 0}
+cat("\n:::\n\n")
+```
+
+```{r ecdna-details, eval=ec_status != "not_run"}
+table_details(
+  summary = "Method and caveats",
+  tags$p("CoRAL reconstructs amplicon structures from the tumour long reads, seeded by ASCAT copy-number",
+         "segments above --coral_gain; AmpliconClassifier then labels each amplicon (ecDNA, BFB, complex",
+         paste0("non-cyclic, linear). Amplicons classified \"No amp/Invalid\" are not listed",
+                if (isTRUE(ec$n_invalid > 0)) sprintf(" (%d here)", ec$n_invalid), ".")),
+  tags$ul(
+    tags$li("An empty CoRAL seed file means no segment exceeded the gain threshold, so nothing was reconstructed —",
+            "a negative screen at that threshold, not proof of absence."),
+    tags$li("Without AmpliconClassifier output (e.g. a CHM13 run without --aa_data_repo, or",
+            "--skip_ampliconclassifier) amplicons are listed from CoRAL's summary and ecDNA status is unknown;",
+            "their Max CN is the copy count of CoRAL's heaviest cycle or path, not a segment copy number."),
+    tags$li("ecDNA and BFB calls are computational predictions from read-level breakpoint graphs; confirm",
+            "clinically relevant amplifications orthogonally (e.g. FISH) before acting on them.")
+  ),
+  tags$p("Source: ", lapply(unname(ec$files), function(p) tags$span(tags$code(inst_rel(p)), " ")))
+)
 ```

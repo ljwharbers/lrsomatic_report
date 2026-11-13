@@ -1,0 +1,13 @@
+#chr: chromosome number
+#start: start address for CN segment
+#end: end address for CN segment
+#hp1_coverage / hp2_coverage: median coverage for this segment, per haplotype
+#hp1_copynumber_state / hp2_copynumber_state: detected copy number state (integer/fraction), per haplotype
+#hp1_confidence / hp2_confidence: confidence score, per haplotype
+#svs_breakpoints_ids: corresponding structural variations (breakpoints) IDs from VCF file (union across haplotypes)
+#chr	start	end	hp1_coverage	hp1_copynumber_state	hp1_confidence	hp2_coverage	hp2_copynumber_state	hp2_confidence	svs_breakpoints_ids
+chr1	0	999999	13.1	1.0	0.95	13.4	1.0	0.97	severus_DUP1
+chr1	1e+06	1999999	40.2	3.0	0.81	39.9	3.0	0.84	severus_DUP1;severus_DEL2
+chr1	2e+06	2999999	0.3	0.0	0.70	0.2	0.0	0.66	
+chr2	0	4999999	13.0	1.0	0.92	0.1	0.0	0.90	
+chrX	0	2999999	13.5	1.0	0.93	0.4	0.0	0.88	

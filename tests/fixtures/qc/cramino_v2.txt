@@ -1,0 +1,22 @@
+File name	AITL6_tumor_rep1_mapped.bam
+Number of alignments	3026913
+% from total reads	100.00
+Number of reads	2993079
+Yield [Gb]	76.27
+Mean coverage	24.47
+Yield [Gb] (>25kb)	41.42
+N50	25774
+N75	21998
+Median length	24380.00
+Mean length	25456.75
+N50 aligned	25677
+N75 aligned	21904
+Median length aligned	24234.00
+Mean length aligned	25197.82
+
+Median identity	99.67
+Mean identity	99.52
+Modal identity	99.7
+
+Path	AITL6_tumor_rep1_mapped.bam
+Creation time	NA

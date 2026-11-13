@@ -1,3 +1,130 @@
-// Gene-level copy number styles (STUB, WP0 scaffolding — owned by the CNA package).
+// Gene-level copy number + static Wakhan profile (templates/sections/_cna_genes.qmd, _ascat.qmd).
 // Imported by report.scss inside the scss:rules layer, so the $report-* variables and the
 // CSS custom properties defined there are available.
+
+// Call colours: amplification/gain warm, deletion/loss cool, full strength for the COSMIC calls
+:root {
+  --cna-amp:       #b3402f;
+  --cna-amp-bg:    #f7e3df;
+  --cna-gain:      #9a5a12;
+  --cna-gain-bg:   #f6edd6;
+  --cna-homdel:    #0d4a75;
+  --cna-homdel-bg: #dbe8f5;
+  --cna-loss:      #2f6f86;
+  --cna-loss-bg:   #e3f0f3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cna-amp:       #f0a090;
+    --cna-amp-bg:    #4a2620;
+    --cna-gain:      #e3c07a;
+    --cna-gain-bg:   #3d3220;
+    --cna-homdel:    #9cc6ee;
+    --cna-homdel-bg: #1d3247;
+    --cna-loss:      #8fcbd8;
+    --cna-loss-bg:   #1d353b;
+  }
+}
+
+.cna-profile .cna-profile__img {
+  background: #fff;   // the SVG is drawn for a light plate, like the circos
+  border-radius: var(--card-radius);
+}
+
+.cna-summary {
+  margin: 0 0 0.6rem;
+  font-size: 0.86rem;
+  color: var(--color-text-muted);
+  p { margin: 0 0 0.2rem; line-height: 1.5; }
+  strong { color: var(--color-text); font-weight: 600; }
+}
+
+.cna-genes__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 1.2rem;
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.cna-genes__toggle-label { cursor: pointer; user-select: none; margin: 0; }
+
+.cna-genes__scroll {
+  max-height: 32rem;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+  background: var(--color-surface);
+}
+
+.cna-genes__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+
+  th, td {
+    padding: 0.32rem 0.6rem;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--color-surface-alt);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    z-index: 1;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+}
+
+.cna-genes__gene { font-weight: 600; font-style: italic; }
+.cna-genes__locus, .cna-genes__num { font-family: var(--font-mono); font-size: 0.78rem; }
+.cna-genes__num { text-align: right; }
+.cna-genes__source { color: var(--color-text-muted); }
+
+.cna-call {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
+
+  &--amplification       { color: var(--cna-amp);    background: var(--cna-amp-bg);    font-weight: 600; }
+  &--gain                { color: var(--cna-gain);   background: var(--cna-gain-bg); }
+  &--homozygous-deletion { color: var(--cna-homdel); background: var(--cna-homdel-bg); font-weight: 600; }
+  &--loss                { color: var(--cna-loss);   background: var(--cna-loss-bg); }
+  &--none                { font-style: italic; }
+}
+
+.cna-genes__partial {
+  margin-left: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cna-loh {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text);
+}
+
+.cna-genes__empty { margin-top: 0.6rem; }
+
+@media print {
+  .cna-genes__scroll { max-height: none; overflow: visible; }
+  .cna-genes__bar { display: none; }
+}
