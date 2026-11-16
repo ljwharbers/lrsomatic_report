@@ -9,19 +9,45 @@ locate_outputs = function(sample_dir, sample_id) {
     if (length(hits) > 0) hits[1] else NULL
   }
 
-  # Same, but excluding anything under a normal/ subtree (tumor-side QC)
-  find1_tumor = function(pattern) {
-    hits = list.files(d, pattern = pattern, recursive = TRUE, full.names = TRUE)
-    hits = hits[!grepl("/normal/", hits)]
-    if (length(hits) > 0) hits[1] else NULL
+  # QC files: one recursive listing, relative paths with a leading "/" so the "/normal/" side test and
+  # the path preferences below see only the part under sample_dir, never sample_dir itself
+  qc_rel = NULL
+  qc_files = function() {
+    if (is.null(qc_rel)) qc_rel <<- paste0("/", list.files(d, recursive = TRUE))
+    qc_rel
   }
 
-  # Normal-side files, matched on the path component since their directory has moved over time
-  find1_normal = function(pattern) {
-    hits = list.files(d, pattern = pattern, recursive = TRUE, full.names = TRUE)
-    hits = hits[grepl("/normal/", hits)]
-    if (length(hits) > 0) hits[1] else NULL
+  # Pick one QC file for `side` whose BASENAME matches `pattern`. Several can match (cramino runs on the
+  # aligned BAM and on each uBAM, all writing <id>_<type>_cramino.txt), so hits are ranked rather than
+  # taken alphabetically: under /qc/ first, then by `prefer` (regexes, in order), then away from `avoid`.
+  # `within`, when set, is a hard path requirement for loose basename patterns. The pipeline-staged
+  # layout links files flat into qc/<side>/ with no tool subdirectories, so preferences only re-rank.
+  pick_qc = function(pattern, side = c("tumor", "normal"), prefer = character(0), avoid = NULL, within = NULL) {
+    side = match.arg(side)
+    hits = qc_files()
+    hits = hits[grepl(pattern, basename(hits))]
+    is_normal = grepl("/normal/", hits, fixed = TRUE)
+    hits = if (side == "normal") hits[is_normal] else hits[!is_normal]
+    if (!is.null(within)) hits = hits[grepl(within, hits)]
+    if (length(hits) == 0) return(NULL)
+    keys = c(list(!grepl("/qc/", hits, fixed = TRUE)),
+             lapply(prefer, function(p) !grepl(p, hits)),
+             if (!is.null(avoid)) list(grepl(avoid, hits)),
+             list(hits))
+    file.path(d, substring(hits[do.call(order, keys)[1]], 2))
   }
+
+  # mosdepth: "<prefix>.mosdepth.summary.txt" (older pipeline) or "<id>_<type>.summary.txt" (current,
+  # prefix carries the type). The bare ".summary.txt" form is generic, so it must sit under qc/ or mosdepth/.
+  pick_mosdepth_summary = function(side) {
+    hit = pick_qc("\\.mosdepth\\.summary\\.txt$", side)
+    if (is.null(hit)) hit = pick_qc("\\.summary\\.txt$", side, prefer = "/mosdepth/", within = "/(qc|mosdepth)/")
+    hit
+  }
+  # ".global.dist.txt" is mosdepth's alone, with or without the ".mosdepth" infix
+  pick_mosdepth_dist = function(side) pick_qc("\\.global\\.dist\\.txt$", side, prefer = "\\.mosdepth\\.global")
+  # Aligned-BAM cramino is what the report documents; cramino_ubam* holds the raw-read twin
+  pick_cramino = function(side) pick_qc("_cramino\\.txt$", side, prefer = "/cramino_aln/", avoid = "/cramino_ubam")
 
   # --- small variants -------------------------------------------------------
   vep_somatic = find1("_SOMATIC_VEP\\.vcf\\.gz$")
@@ -53,21 +79,23 @@ locate_outputs = function(sample_dir, sample_id) {
   )
 
   # --- QC (tumor side) --------------------------------------------------------
-  mosdepth_summary = find1_tumor("\\.mosdepth\\.summary\\.txt$")
-  mosdepth_dist    = find1_tumor("\\.mosdepth\\.global\\.dist\\.txt$")
-  cramino_aln      = find1_tumor("_cramino\\.txt$")
-  flagstat         = find1_tumor("\\.flagstat$")
-  samtools_stats   = find1_tumor("\\.stats$")
+  mosdepth_summary = pick_mosdepth_summary("tumor")
+  mosdepth_dist    = pick_mosdepth_dist("tumor")
+  cramino_aln      = pick_cramino("tumor")
+  flagstat         = pick_qc("\\.flagstat$", "tumor", prefer = "/samtools/")
+  samtools_stats   = pick_qc("\\.stats$", "tumor", prefer = "/samtools/")
 
   # --- Normal-side QC (matched mode only) -----------------------------------
-  normal_mosdepth_summary = find1_normal("\\.mosdepth\\.summary\\.txt$")
-  normal_mosdepth_dist    = find1_normal("\\.mosdepth\\.global\\.dist\\.txt$")
-  normal_cramino          = find1_normal("_cramino\\.txt$")
-  normal_flagstat         = find1_normal("\\.flagstat$")
-  normal_samtools_stats   = find1_normal("\\.stats$")
+  normal_mosdepth_summary = pick_mosdepth_summary("normal")
+  normal_mosdepth_dist    = pick_mosdepth_dist("normal")
+  normal_cramino          = pick_cramino("normal")
+  normal_flagstat         = pick_qc("\\.flagstat$", "normal", prefer = "/samtools/")
+  normal_samtools_stats   = pick_qc("\\.stats$", "normal", prefer = "/samtools/")
 
   # Driven by what was found: the QC comparison renders only if there is normal data
-  has_normal = !is.null(normal_mosdepth_summary) || !is.null(normal_cramino)
+  # (any normal-side QC file counts: a run can skip mosdepth and cramino but keep samtools stats)
+  has_normal = !is.null(normal_mosdepth_summary) || !is.null(normal_cramino) ||
+    !is.null(normal_flagstat) || !is.null(normal_samtools_stats)
 
   # Run mode derived from the same evidence; its only consumer is the header badge
   mode = if (has_normal) "matched" else "tumour-only"

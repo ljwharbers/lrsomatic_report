@@ -1,0 +1,5 @@
+sample	chr	startpos	endpos	nMajor	nMinor	nAraw	nBraw
+S1.tumour	1	1	999999	1	1	1.01	0.99
+S1.tumour	1	1e+06	1999999	4	2	4.2	1.9
+S1.tumour	2	1	4999999	1	0	1.1	0.02
+S1.tumour	X	1	2999999	1	0	1.0	0.0

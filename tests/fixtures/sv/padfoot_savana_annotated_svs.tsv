@@ -1,0 +1,5 @@
+SV ID	chr_1	pos_1	chr_2	pos_2	N_supp	Vaf	Strand	Score	Impact	Role in Cancer1	Gene Name1	Pos_1	Strand_1	Repeat_Anno1	Role in Cancer2	Gene Name2	Pos_2	Strand_2	Repeat_Anno2	Type	Microhomology	VNTR	Telomere_repeat	Aligned_pos(INS)	Repeat_annot
+ID_25860	chr1	635796	chr1	636217	11	0.353	+-	8.5	HIGH_ONCO	TSG	GENEA	intron3	+	SINE/Alu	TSG, fusion	GENEA	exon10	+	NA	between_exons	2	False	False	NA	NA
+ID_26555	chr1	14311938	chr1	14311938	15	0.484	<INS>	2	MODERATE	NA	KAZN	intron3	+	NA	NA	NA	NA	NA	NA	intronic	0	False	False	chr5:1000	NA
+ID_27202	chr1	75219429	chr22	19323248	9	0.25	-+	1	LOW	oncogene	NA	intergenic	NA	NA	oncogene	GENEB	upstream	-	LINE/L1	intergenic	NA	False	False	NA	NA
+ID_99999	chr9	100	chr9	200	3	0.1	+-	0	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	False	False	NA	NA

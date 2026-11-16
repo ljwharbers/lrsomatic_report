@@ -41,6 +41,11 @@ option_list = list(
               help = paste("Directory of builtin gene panel TSVs, named <panel>.tsv or",
                            "<panel>.<hg38|t2t>.tsv (default: the bundled assets/gene_lists).",
                            "Replaces the bundled set rather than adding to it.")),
+  make_option("--embed",       type = "character", default = "slim",
+              help = paste("Small-variant rows embedded in the HTML table: slim | full",
+                           "(default: slim — HIGH/MODERATE impact, ClinVar pathogenic and",
+                           "panel-gene rows). The full table is always written next to the",
+                           "report as <sample-id>_small_variants.tsv.gz.")),
   make_option("--version",     action = "store_true", default = FALSE,
               help = "Print the tool version and exit"),
   make_option("--output",      type = "character", default = NULL,
@@ -65,6 +70,10 @@ sample_dir  = normalizePath(opt[["sample-dir"]], mustWork = TRUE)
 sample_id   = if (!is.null(opt[["sample-id"]])) opt[["sample-id"]] else basename(sample_dir)
 sex         = tolower(trimws(opt[["sex"]]))
 sex         = switch(sex, xy = "male", xx = "female", sex)  # normalise XY/XX
+
+embed       = tolower(trimws(opt[["embed"]]))
+if (!embed %in% c("slim", "full"))
+  abort(paste0("--embed must be 'slim' or 'full' (got '", opt[["embed"]], "')"))
 
 output     = if (!is.null(opt[["output"]])) opt[["output"]] else
              file.path(getwd(), paste0(sample_id, "_report.html"))
@@ -158,21 +167,29 @@ quarto::quarto_render(
     all_panels    = all_panels,
     title         = title,
     repo_dir      = repo_dir,
-    outputs       = outputs
+    outputs       = outputs,
+    embed         = embed
   ),
   quiet = FALSE
 )
 
-# Move output if Quarto wrote it next to the template
-rendered = file.path(dirname(template), basename(output))
-if (file.exists(rendered)) {
-  dest = normalizePath(output, mustWork = FALSE)
-  src  = normalizePath(rendered, mustWork = FALSE)
-  if (src != dest) {
-    ok = file.copy(rendered, output, overwrite = TRUE)
-    if (ok) file.remove(rendered)
-  }
+# Move a file Quarto/knitr wrote next to the template to `dest`
+move_out = function(rendered, dest) {
+  if (!file.exists(rendered)) return(invisible(FALSE))
+  if (normalizePath(rendered, mustWork = FALSE) == normalizePath(dest, mustWork = FALSE))
+    return(invisible(TRUE))
+  ok = file.copy(rendered, dest, overwrite = TRUE)
+  if (ok) file.remove(rendered)
+  invisible(ok)
 }
+
+# Move output if Quarto wrote it next to the template
+move_out(file.path(dirname(template), basename(output)), output)
+
+# The full small-variant table sidecar, written by the setup chunk next to the template
+sidecar = paste0(sample_id, "_small_variants.tsv.gz")
+if (move_out(file.path(dirname(template), sidecar), file.path(dirname(output), sidecar)))
+  message("Full small-variant table written to: ", file.path(dirname(output), sidecar))
 unlink(work, recursive = TRUE)
 
 if (file.exists(output)) {

@@ -1,0 +1,4 @@
+sample_name	amplicon_number	feature	gene	gene_cn	truncated	is_canonical_oncogene	ncbi_id
+S1	amplicon1	ecDNA_1	MYC	31.2	None	True	NM_002467
+S1	amplicon1	ecDNA_1	PVT1	30.8	3p	False	NR_003367
+S1	amplicon2	Linear_1	MDM2	6.1	None	True	NM_002392

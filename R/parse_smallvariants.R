@@ -611,3 +611,143 @@ build_variant_table = function(vep_data, vaf_data, gene_panel = NULL) {
   setattr(out, "vep_fields", vep_fields)
   out
 }
+
+# ClinVar significance tokens that count as pathogenic, lower-cased. Exact tokens, never a
+# substring test: "Conflicting_classifications_of_pathogenicity" contains "pathogenic"
+CLINVAR_PATHOGENIC_TOKENS = c("pathogenic", "likely_pathogenic")
+
+# Is each ClinVar significance cell pathogenic / likely pathogenic? Vectorised, NA-safe
+# (NA/"" -> FALSE). Cells are token lists: add_vep_annotations() rewrites VEP's "&" to ",",
+# ClinVar itself joins a combined call with "/" ("Pathogenic/Likely_pathogenic") and its
+# secondary terms with "|" or ",_" ("Pathogenic,_low_penetrance"), so all four separate
+# tokens and a leading "_" is dropped. Case-insensitive: the cache's CLIN_SIG is lower-case
+# ("likely_pathogenic"), the ClinVar plugin's ClinVar_CLNSIG capitalised
+clinvar_is_pathogenic = function(x) {
+  if (length(x) == 0) return(logical(0))
+  x = tolower(as.character(x))
+  x[is.na(x)] = ""
+  vapply(strsplit(x, "[,&/|]+"), function(tok) {
+    tok = sub("^[_[:space:]]+", "", trimws(tok))
+    any(tok %in% CLINVAR_PATHOGENIC_TOKENS)
+  }, logical(1))
+}
+
+# Upper-cased SNV-scope symbols of every panel in `all_panels` (a named list of panel lists
+# after the YAML round trip, so every vector is unlist()ed). A panel with an applies_to
+# column (has_scopes) contributes genes_snv only, even when that is empty (YAML NULL):
+# falling back to `genes` there would pull its SV-only genes into the SNV slim set
+panel_snv_genes = function(all_panels) {
+  if (is.null(all_panels) || length(all_panels) == 0) return(character(0))
+  g = unlist(lapply(all_panels, function(p) {
+    if (!is.list(p)) return(NULL)
+    if (isTRUE(as.logical(unlist(p$has_scopes)))) unlist(p$genes_snv)
+    else if (!is.null(p$genes_snv)) unlist(p$genes_snv)
+    else unlist(p$genes)
+  }), use.names = FALSE)
+  g = toupper(trimws(as.character(g)))
+  unique(g[!is.na(g) & nzchar(g)])
+}
+
+# Rows of the small-variant table embedded in the HTML.
+#
+# mode "full" returns every row; mode "slim" (also the default for NULL) keeps rows that are
+# impact HIGH/MODERATE, OR ClinVar pathogenic/likely pathogenic (clinvar_is_pathogenic() on
+# the `clinvar` column, when the run carried one), OR whose symbol is in any panel's SNV
+# gene set (panel_snv_genes(); case-insensitive). Columns are never dropped or renamed (JS
+# resolves them by name via SNV_COLS). The result keeps `vep_fields` and every other custom
+# attribute of `vt` (row subsetting drops them, so they are copied back), plus
+# attr(, "n_full") = nrow(vt) and attr(, "n_embedded") = rows kept. `vt` is never modified
+# by reference. NULL in, NULL out.
+slim_variant_table = function(vt, all_panels, mode = "slim") {
+  if (is.null(vt)) return(NULL)
+  if (is.null(mode) || length(mode) == 0 || is.na(mode[1])) mode = "slim"
+  mode = mode[1]
+  if (!mode %in% c("slim", "full")) stop("slim_variant_table(): unknown mode '", mode, "'")
+  src = vt
+  vt = as.data.table(vt)
+
+  if (mode == "full" || nrow(vt) == 0) {
+    out = copy(vt)
+  } else {
+    keep = rep(FALSE, nrow(vt))
+    if ("impact" %in% names(vt))
+      keep = keep | (!is.na(vt$impact) & vt$impact %in% c("HIGH", "MODERATE"))
+    if ("clinvar" %in% names(vt))
+      keep = keep | clinvar_is_pathogenic(vt$clinvar)
+    genes = panel_snv_genes(all_panels)
+    if (length(genes) > 0 && "symbol" %in% names(vt))
+      keep = keep | (!is.na(vt$symbol) & toupper(vt$symbol) %in% genes)
+    out = vt[keep]   # a new table: `vt` is untouched
+  }
+
+  # Custom attributes (vep_fields, ...) do not survive `[`; data.table's own are left alone
+  skip = c("names", "row.names", "class", ".internal.selfref", "sorted", "index",
+           "n_full", "n_embedded")
+  for (a in setdiff(names(attributes(src)), skip)) setattr(out, a, attr(src, a))
+  setattr(out, "n_full", nrow(vt))
+  setattr(out, "n_embedded", nrow(out))
+  out
+}
+
+# Window of the genome-wide circos mutation-density track, in bp
+CIRCOS_SNV_BIN = 1e6
+
+# SNV counts per `bin`-bp window for the circos density track. Pure (no circlize) so it is
+# testable. `dt` needs chrom/pos/ref/alt; only single-base substitutions are counted, and a
+# duplicated chrom/pos/ref/alt once. `chrom_lens` is a named vector of chromosome lengths
+# and fixes which chromosomes appear and their order. Every window is returned, empty ones
+# with n = 0, so the track draws as one continuous area per chromosome; the last window of a
+# chromosome ends at its length. Returns data.table(chrom, start, end, n, per_mb), 0-based
+# half-open [start, end); per_mb = n * 1e6 / bin (scaled to a full window, so a short final
+# window is not inflated into a spike).
+bin_snv_density = function(dt, chrom_lens, bin = CIRCOS_SNV_BIN) {
+  empty = data.table(chrom = character(), start = numeric(), end = numeric(),
+                     n = integer(), per_mb = numeric())
+  if (is.null(chrom_lens) || length(chrom_lens) == 0) return(empty)
+  bins = rbindlist(lapply(names(chrom_lens), function(chr) {
+    len = as.numeric(chrom_lens[[chr]])
+    if (is.na(len) || len <= 0) return(NULL)
+    st = seq(0, len - 1, by = bin)
+    data.table(chrom = chr, start = st, end = pmin(st + bin, len))
+  }))
+  if (nrow(bins) == 0) return(empty)
+  bins[, idx := as.integer(start %/% bin)]
+  bins[, n := 0L]
+
+  if (!is.null(dt) && nrow(dt) > 0 && all(c("chrom", "pos", "ref", "alt") %in% names(dt))) {
+    snv = unique(data.table(chrom = as.character(dt$chrom), pos = as.numeric(dt$pos),
+                            ref = as.character(dt$ref), alt = as.character(dt$alt)))
+    snv = snv[nchar(ref) == 1L & nchar(alt) == 1L & ref != "-" & alt != "-" &
+              chrom %in% names(chrom_lens) & !is.na(pos)]
+    # 1-based VCF positions: window k holds positions k*bin+1 .. (k+1)*bin
+    if (nrow(snv) > 0) {
+      counts = snv[, .(cnt = .N), by = .(chrom, idx = as.integer((pos - 1) %/% bin))]
+      bins[counts, n := i.cnt, on = .(chrom, idx)]
+    }
+  }
+  bins[, per_mb := n * 1e6 / bin]
+  bins[, idx := NULL]
+  bins[]
+}
+
+# Y-axis ceiling of the density track: the `q` quantile of the non-empty windows, rounded
+# up to an integer, never below 1 and never above the real maximum (rounded up). Taken over
+# non-empty windows so a low-burden sample, where most windows are 0, still gets a scale
+# set by the windows that have mutations; a kataegis window above it is clipped
+circos_density_cap = function(per_mb, q = 0.99) {
+  v = per_mb[!is.na(per_mb) & per_mb > 0]
+  if (length(v) == 0) return(1)
+  cap = ceiling(as.numeric(stats::quantile(v, q, names = FALSE)))
+  max(1, min(cap, ceiling(max(v))))
+}
+
+# Full small-variant table as a gzipped TSV sidecar next to the report; list columns are
+# dropped (fwrite cannot write them flat). Returns the path invisibly, NULL when nothing written.
+write_full_variant_table = function(vt, path) {
+  if (is.null(vt)) return(invisible(NULL))
+  vt = as.data.table(vt)
+  list_cols = names(vt)[vapply(vt, is.list, logical(1))]
+  if (length(list_cols) > 0) vt = vt[, setdiff(names(vt), list_cols), with = FALSE]
+  data.table::fwrite(vt, path, sep = "\t", compress = "gzip")
+  invisible(path)
+}

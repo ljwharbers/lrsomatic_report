@@ -18,7 +18,8 @@ register_section(list(
 
   parse = function(inputs, section_data) {
     f = inputs$stats_tsv
-    if (is.null(f) || !file.exists(f)) return(NULL)
+    # 0-byte files (stub runs) would make fread() warn into the rendered report
+    if (is.null(f) || !file.exists(f) || isTRUE(file.size(f) == 0)) return(NULL)
 
     dt = tryCatch(
       fread(f, sep = "\t", header = TRUE),

@@ -331,7 +331,23 @@ test_that("build_sv_table maps the gene-annotated TSV onto the shared schema", {
 
 SV_OUT_COLS = c("id", "svclass", "svtype", "chrom_a", "pos_a", "gene_a",
                 "chrom_b", "pos_b", "gene_b", "sv_len", "vaf",
-                "consequence", "impact")
+                "consequence", "impact", "support", "svtype_raw")
+
+test_that("the column contract is the one SV_TABLE_COLS declares", {
+  expect_equal(SV_TABLE_COLS, SV_OUT_COLS)
+})
+
+test_that("Severus read support is FORMAT/DV and svtype_raw equals svtype", {
+  v = write_severus_vcf(paste("chr1", 100, "d1", "N", "<DEL>", "60.0", "PASS",
+                              "SVTYPE=DEL;END=900;SVLEN=800", "GT:VAF:DR:DV", "0/1:0.4:6:4",
+                              sep = "\t"))
+  on.exit(unlink(v))
+  r = parse_severus_somatic_records(v)
+  expect_equal(r$support, 4L)
+  expect_equal(r$vaf, 0.4)
+  expect_equal(r$svtype_raw, "DEL")
+  expect_equal(attr(r, "n_records"), 1L)
+})
 
 test_that("both SV table builders return exactly the shared column contract", {
   sv = write_severus_vcf(mate_pair())

@@ -130,7 +130,9 @@ jobs:
 
   build-sif:
     needs: build-push
-    runs-on: ubuntu-latest
+    # Pinned: the Apptainer 1.4.4 .deb depends on libfuse3-3, which newer runner images
+    # no longer ship, so `ubuntu-latest` fails at "Set up Apptainer" before anything is built.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write

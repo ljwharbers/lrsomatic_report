@@ -3,6 +3,13 @@
 ```{r cn-setup}
 has_any_ascat_plot = !is.null(outputs$ascat_plots) &&
   any(vapply(outputs$ascat_plots, function(x) !is.null(x) && file.exists(x), logical(1)))
+# Copy-number section module (R/sections/cna.R); NULL when no CN output was found
+cna = SECTION_DATA[["cna"]]
+cna_profiles   = if (!is.null(cna)) cna$profiles else list()
+cna_wakhan_dir = if (!is.null(cna)) cna$wakhan_dir else NA_character_
+cna_has_wakhan = !is.na(cna_wakhan_dir) && dir.exists(cna_wakhan_dir)
+cna_solutions  = if (!is.null(cna) && nrow(cna$solutions) > 0) cna$solutions else NULL
+embed_full     = identical(embed, "full")
 ```
 
 ```{r cn-outer-tabset-open, results='asis'}
@@ -48,11 +55,12 @@ if (!is.null(p)) p else section_notice("Plot not produced — ASCAT may have fai
 cat("\n:::\n\n")
 ```
 
-```{r ascat-diag-open, results='asis', eval=has_any_ascat_plot}
+<!-- Diagnostic PNGs only with --embed full; the slim report names where they are -->
+```{r ascat-diag-open, results='asis', eval=has_any_ascat_plot && embed_full}
 cat('::: {.callout-note collapse="true" title="Diagnostic plots"}\n\n')
 ```
 
-```{r ascat-diagnostics, eval=has_any_ascat_plot}
+```{r ascat-diagnostics, eval=has_any_ascat_plot && embed_full}
 # Each diagnostic is its own captioned figure; a NULL (file absent) simply drops out.
 htmltools::tagList(
   embed_png(outputs$ascat_plots$before_gc,  max_width = "700px", caption = "Pre-GC correction"),
@@ -61,8 +69,18 @@ htmltools::tagList(
 )
 ```
 
-```{r ascat-diag-close, results='asis', eval=has_any_ascat_plot}
+```{r ascat-diag-close, results='asis', eval=has_any_ascat_plot && embed_full}
 cat("\n:::\n\n")
+```
+
+```{r ascat-diag-slim, eval=has_any_ascat_plot && !embed_full}
+diag_found = Filter(function(x) !is.null(x) && file.exists(x),
+                    outputs$ascat_plots[c("before_gc", "after_gc", "tumour_sep")])
+if (length(diag_found) > 0)
+  tags$p(class = "table-footnote",
+         "ASCAT's diagnostic plots (GC correction, tumour separation) are not embedded; ",
+         "render with ", tags$code("--embed full"), " to include them, or open them in the ",
+         tags$code("ascat/"), " output directory.")
 ```
 
 ```{r cn-wakhan-tab-header, results='asis'}
@@ -70,37 +88,78 @@ cat("\n### Wakhan\n\n")
 ```
 
 ```{r wakhan-status}
-if (!outputs$has_wakhan) {
+if (!cna_has_wakhan) {
   section_notice("Wakhan was not run for this sample.")
-} else if (is.null(wakhan_solutions) && is.null(outputs$wakhan_heatmap) && length(wakhan_cn_plots) == 0) {
-  section_notice("Wakhan output directory found, but no recognised solutions table or plots inside it.")
+} else if (is.null(cna_solutions) && length(cna_profiles) == 0) {
+  section_notice("Wakhan output directory found, but no recognised solutions table or integer copy-number profile inside it.")
 }
 ```
 
 ```{r wakhan-solutions-table}
-if (!is.null(wakhan_solutions)) {
+if (!is.null(cna_solutions)) {
   DT::datatable(
-    wakhan_solutions,
+    cna_solutions,
     rownames = FALSE,
-    options  = list(dom = "t", pageLength = nrow(wakhan_solutions))
+    options  = list(dom = "t", pageLength = nrow(cna_solutions))
   )
 }
 ```
 
-```{r wakhan-heatmap}
-p = embed_html_iframe(outputs$wakhan_heatmap, height = "600px")
-if (!is.null(p)) htmltools::tags$figure(class = "report-figure", p,
-  htmltools::tags$figcaption(class = "report-figure__caption", "Ploidy × purity solutions"))
+```{r wakhan-profile-helper}
+# One static haplotype-resolved profile (cna_profile_plot(), R/sections/cna.R) as a
+# captioned figure. Replaces the embedded Wakhan Plotly HTML (tens of MB per report).
+wakhan_profile_figure = function(pr) {
+  p = cna_profile_plot(pr$segments, chromosomes, chrom_lens, labels = c("HP1", "HP2"))
+  if (is.null(p)) return(NULL)
+  fmt = function(x) if (is.na(x)) "NA" else trimws(formatC(x, format = "fg", digits = 3))
+  min_w = round(CNA_PROFILE_MIN_FRAC * sum(as.numeric(chrom_lens[chromosomes]), na.rm = TRUE), -5)
+  tags$figure(
+    class = "report-figure cna-profile",
+    embed_svg_plot(p, width = 10, height = 3.1,
+                   alt = paste0("Wakhan rank ", pr$rank, " haplotype-resolved copy-number profile"),
+                   class = "cna-profile__img"),
+    tags$figcaption(class = "report-figure__caption",
+      paste0("Rank ", pr$rank, " solution (purity ", fmt(pr$purity), ", ploidy ", fmt(pr$ploidy),
+             "): integer copy number per haplotype, fainter = lower Wakhan confidence. ",
+             "Segments above ", CNA_PROFILE_YCAP, " are drawn at the cap with their value marked; ",
+             "segments shorter than ", fmt_bp(min_w), " are widened so they stay visible."))
+  )
+}
 ```
 
-```{r wakhan-cn-plots-header, results='asis', eval=length(wakhan_cn_plots) > 0}
-cat('\n<p class="report-figure__caption">Genome copy number + breakpoints, one tab per ranked solution</p>\n\n')
+```{r wakhan-profile, eval=length(cna_profiles) > 0}
+wakhan_profile_figure(cna_profiles[[1]])
 ```
 
-```{r wakhan-cn-plots, eval=length(wakhan_cn_plots) > 0}
-render_wakhan_cn_tabs(wakhan_cn_plots)
+```{r wakhan-more-open, results='asis', eval=length(cna_profiles) > 1 && embed_full}
+cat('::: {.callout-note collapse="true" title="Other ranked solutions"}\n\n')
+```
+
+```{r wakhan-more, eval=length(cna_profiles) > 1 && embed_full}
+do.call(htmltools::tagList, lapply(cna_profiles[-1], wakhan_profile_figure))
+```
+
+```{r wakhan-more-close, results='asis', eval=length(cna_profiles) > 1 && embed_full}
+cat("\n:::\n\n")
+```
+
+```{r wakhan-originals, eval=cna_has_wakhan}
+n_more = max(0L, length(cna_profiles) - 1L)
+heatmap_name = if (!is.null(cna) && !is.na(cna$wakhan_heatmap))
+                 file.path("wakhan", basename(cna$wakhan_heatmap)) else
+                 "wakhan/*_heatmap_ploidy_purity.html"
+tags$p(class = "table-footnote",
+  if (n_more > 0 && !embed_full)
+    tagList(n_more, if (n_more == 1) " further ranked solution is" else " further ranked solutions are",
+            " drawn only with ", tags$code("--embed full"), ". "),
+  "Wakhan's interactive plots are not embedded in this report; they are in the pipeline output: ",
+  tags$code("wakhan/solution_rank_N/integer_profile.html"), " per ranked solution, and the ploidy × purity heatmap ",
+  tags$code(heatmap_name), ".")
 ```
 
 ```{r cn-outer-tabset-close, results='asis'}
 cat("\n:::\n\n")
 ```
+
+<!-- Nested include: the path is relative to the ROOT document (templates/per_sample.qmd) -->
+{{< include sections/_cna_genes.qmd >}}

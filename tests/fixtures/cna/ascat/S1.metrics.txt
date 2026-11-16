@@ -1,0 +1,2 @@
+sex	purity	ploidy	goodness_of_fit	LOH	WGD	GI
+XY	0.81	2.1	97.5	0.12	1	0.3

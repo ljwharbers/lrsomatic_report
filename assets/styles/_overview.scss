@@ -1,0 +1,311 @@
+// Clinical overview styles (templates/sections/_overview.qmd: key findings, genome-wide
+// biomarkers, sequencing row; assets/js/key_findings.js toggles rows).
+// Imported by report.scss inside the scss:rules layer: palette tokens only (var(--color-*)),
+// so the dark-mode overrides in report.scss apply without separate rules here.
+// Print rules live in _print.scss.
+
+:root {
+  // Tier accents. Tier is also written as text in every row and the border style differs
+  // per tier (solid / dashed / dotted), so neither colour nor greyscale printing is needed
+  // to tell them apart
+  --kf-tier-1: var(--color-danger);
+  --kf-tier-2: var(--color-warning);
+  --kf-tier-3: var(--color-text-muted);
+}
+
+// Findings (wide, left) beside biomarkers (narrow, right); stacked on narrow screens
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2.3fr) minmax(250px, 1fr);
+  gap: 22px 28px;
+  align-items: start;
+  margin: 0.4rem 0 1.4rem;
+
+  @media (max-width: 991.98px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  h3 { margin-top: 0.4rem; }
+}
+
+// ── Key findings ───────────────────────────────────────────────────────────────────────
+.kf-intro {
+  font-size: 0.84rem;
+  color: var(--color-text-muted);
+  margin: 0 0 0.5rem;
+  max-width: 78ch;
+}
+
+.kf-caveat {
+  font-size: 0.84rem;
+  margin: 0 0 0.7rem;
+  padding: 0.45rem 0.8rem;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-surface);
+  border-radius: 0 var(--card-radius) var(--card-radius) 0;
+  max-width: 78ch;
+}
+
+.kf-legend {
+  list-style: none;
+  margin: 0 0 0.8rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.74rem;
+  color: var(--color-text-muted);
+}
+
+.kf-legend__item {
+  padding-left: 8px;
+  border-left: 4px solid var(--kf-tier-3);
+  max-width: 34ch;
+  line-height: 1.35;
+
+  strong { color: var(--color-text); font-weight: 600; }
+
+  &.kf-tier-1 { border-left: 4px solid var(--kf-tier-1); }
+  &.kf-tier-2 { border-left: 4px dashed var(--kf-tier-2); }
+  &.kf-tier-3 { border-left: 3px dotted var(--kf-tier-3); }
+}
+
+.kf-need-list {
+  padding: 0.8rem 1rem;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--card-radius);
+  background: var(--color-surface);
+  margin: 0 0 0.8rem;
+}
+
+.kf-need-list__text {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.kf-hints { display: flex; flex-wrap: wrap; gap: 8px; }
+
+// Same chip shape as .panel-toggle: clicking one ticks that chip
+.kf-hint {
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  cursor: pointer;
+
+  &:hover { border-color: var(--color-primary); }
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
+  }
+}
+
+// Written by the panel listener; only printed (the chips are hidden in print)
+.kf-print-panels { display: none; }
+
+.kf-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+  background: var(--color-surface);
+}
+
+.kf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--color-text);
+
+  th {
+    text-align: left;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 7px 10px;
+    vertical-align: top;
+  }
+
+  // One tbody per gene: the rule separates genes, not the alterations within one
+  tbody.kf-group + tbody.kf-group { border-top: 1px solid var(--color-border); }
+  tr.kf-row--cont td { padding-top: 2px; }
+
+  // `hidden` must win over any display a theme gives table rows
+  tr[hidden], tbody[hidden] { display: none !important; }
+
+  th.kf-vaf, td.kf-vaf { text-align: right; white-space: nowrap; }
+}
+
+.kf-row {
+  td.kf-tier { border-left: 4px solid var(--kf-tier-3); white-space: nowrap; }
+  &.kf-tier-1 td.kf-tier { border-left: 4px solid var(--kf-tier-1); }
+  &.kf-tier-2 td.kf-tier { border-left: 4px dashed var(--kf-tier-2); }
+  &.kf-tier-3 td.kf-tier { border-left: 3px dotted var(--kf-tier-3); }
+  &.kf-tier-3 { color: var(--color-text-muted); }
+
+  // A gene's further alterations: tier label, gene and lists are printed by the head line only
+  // (the per-line tier stripe stays, so a tier-3 line under a tier-1 gene still reads as such)
+  &.kf-row--cont .kf-tier__label,
+  &.kf-row--cont td.kf-gene > *,
+  &.kf-row--cont td.kf-lists { visibility: hidden; }
+}
+
+.kf-tier__label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.kf-tier-1 .kf-tier__label { color: var(--kf-tier-1); }
+.kf-tier-2 .kf-tier__label { color: var(--kf-tier-2); }
+
+.kf-gene__symbol {
+  display: block;
+  font-weight: 600;
+  font-style: italic;   // gene symbols are italic by convention
+}
+
+.kf-gene__role,
+.kf-alt__type,
+.kf-alt__locus,
+.kf-vaf__dp,
+.kf-gene__flag {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.kf-alt__type {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
+.kf-alt__text, .kf-alt__locus, .kf-vaf { font-family: var(--font-mono); font-size: 0.78rem; }
+.kf-alt__text { word-break: break-word; }
+.kf-evidence { min-width: 22ch; }
+.kf-gene__flag { font-weight: 600; }
+.kf-lists { font-size: 0.74rem; color: var(--color-text-muted); }
+
+.kf-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0.5rem 0 0;
+}
+
+.kf-toggle-low {
+  padding: 4px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+
+  &:hover { border-color: var(--color-primary); color: var(--color-text); }
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
+  }
+}
+
+.kf-count {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+.kf-empty { margin-top: 0.2rem; }
+
+// ── Genome-wide biomarkers ─────────────────────────────────────────────────────────────
+.bm-list {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+  padding: 4px 14px;
+}
+
+.bm-row {
+  padding: 8px 0 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+  border-left: 3px solid transparent;
+  margin-left: -10px;
+
+  &:last-child { border-bottom: none; }
+
+  // Sources disagree (purity, WGD, chromothripsis) or the status is unknown
+  &.bm-warn { border-left-color: var(--color-warning); }
+  &.bm-not_run .bm-value { color: var(--color-text-muted); font-style: italic; font-weight: 400; }
+}
+
+.bm-label {
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.bm-value {
+  font-family: var(--font-mono);
+  font-size: 0.98rem;
+  font-weight: 500;
+  font-feature-settings: "tnum" 1;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.bm-flag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: var(--color-warning);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 45%, transparent);
+}
+
+.bm-detail, .bm-items {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.bm-items {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 0;
+}
+
+// ── Sequencing row (secondary) ─────────────────────────────────────────────────────────
+.overview-sequencing {
+  margin: 0 0 1.2rem;
+
+  .metric-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+  .metric-card { padding: 8px 12px 7px; }
+  .metric-card__value { font-size: 1.05rem; }
+}
+
+// Print-only footer line (shown by _print.scss)
+.overview-print-footer { display: none; }
