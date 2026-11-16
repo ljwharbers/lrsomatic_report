@@ -14,17 +14,16 @@
   --cna-loss-bg:   #e3f0f3;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --cna-amp:       #f0a090;
-    --cna-amp-bg:    #4a2620;
-    --cna-gain:      #e3c07a;
-    --cna-gain-bg:   #3d3220;
-    --cna-homdel:    #9cc6ee;
-    --cna-homdel-bg: #1d3247;
-    --cna-loss:      #8fcbd8;
-    --cna-loss-bg:   #1d353b;
-  }
+// The dark-mode mixin is defined in report.scss (scss:defaults); bare declarations land on html
+@include dark-mode {
+  --cna-amp:       #f0a090;
+  --cna-amp-bg:    #4a2620;
+  --cna-gain:      #e3c07a;
+  --cna-gain-bg:   #3d3220;
+  --cna-homdel:    #9cc6ee;
+  --cna-homdel-bg: #1d3247;
+  --cna-loss:      #8fcbd8;
+  --cna-loss-bg:   #1d353b;
 }
 
 .cna-profile .cna-profile__img {

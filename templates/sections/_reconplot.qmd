@@ -9,7 +9,7 @@ if (is.null(reconplot)) {
 ```
 
 ```{r reconplot-figures, results='asis'}
-# Raw HTML blocks inside markdown (tabset / callout fences), so Pandoc leaves the base64 alone
+# Raw HTML blocks inside markdown (tabset fences), so Pandoc leaves the base64 alone
 if (!is.null(reconplot)) {
   raw_html = function(tag) cat("\n```{=html}\n", as.character(tag), "\n```\n\n", sep = "")
 
@@ -18,62 +18,99 @@ if (!is.null(reconplot)) {
     full = normalizePath(p, mustWork = FALSE)
     if (startsWith(full, paste0(root, "/"))) substring(full, nchar(root) + 2L) else p
   }
+  plural = function(n, one, many = paste0(one, "s")) paste(n, if (n == 1) one else many)
 
-  # Chromosomes ShatterSeek called (any confidence but "none", any combination): in slim mode
-  # these are the only per-chromosome figures embedded
-  ss_high = SECTION_DATA$shatterseek$high
-  flagged = character(0)
-  if (!is.null(ss_high) && nrow(ss_high) > 0 && "chrom" %in% names(ss_high)) {
-    keep = if ("confidence" %in% names(ss_high))
-             !is.na(ss_high$confidence) & tolower(ss_high$confidence) != "none"
-           else rep(TRUE, nrow(ss_high))
-    flagged = unique(ensure_chr_prefix(as.character(ss_high$chrom[keep])))
-  }
   full_embed = identical(as.character(embed)[1], "full")
+  # Slim mode: per-chromosome figures of chromosomes with a high-impact call only, and no
+  # genome-wide figure (reconplot_chromosomes() in R/sections/reconplot.R says which and why)
+  sel = reconplot_chromosomes(OVERVIEW$findings, SECTION_DATA$sv$table,
+                              SECTION_DATA$shatterseek$high)
 
   combos = reconplot$combos
   label = function(cb) if (cb %in% names(RECONPLOT_COMBO_LABELS)) RECONPLOT_COMBO_LABELS[[cb]] else cb
 
   cat('<p class="report-figure__caption">Copy number (total and minor allele) with SV arcs',
-      'coloured by type, from ReConPlot; one figure set per SV caller / copy-number source.</p>\n\n')
+      'coloured by type, from ReConPlot; one figure set per SV caller / copy-number source.',
+      if (!full_embed) paste(
+        'Shown: the chromosomes with a high-impact call, that is a ShatterSeek chromothripsis',
+        'call or an SV Padfoot rated HIGH_ONCO (always), or a tier 1–2 SV or copy-number key finding',
+        'of the ticked gene list(s).'),
+      '</p>\n\n')
 
   if (length(combos) > 1) cat("::: {.panel-tabset}\n\n")
   for (cb in names(combos)) {
     x = combos[[cb]]
     if (length(combos) > 1) cat("#### ", label(cb), "\n\n", sep = "")
+    chroms = x$chroms
+    # reconplot/<combo>/, which holds genome_wide/ and per_chromosome/
+    any_fig = if (length(chroms) > 0) chroms[[1]] else x$genome
+    folder = rp_rel(dirname(dirname(any_fig)))
 
-    if (!is.null(x$genome)) {
-      raw_html(embed_png(x$genome, max_width = "100%",
-                         caption = paste0(label(cb), ": genome-wide")))
-    } else {
-      raw_html(section_notice("No genome-wide ReConPlot figure for this combination."))
+    if (full_embed) {
+      if (!is.null(x$genome))
+        raw_html(embed_png(x$genome, max_width = "100%",
+                           caption = paste0(label(cb), ": genome-wide")))
+      if (length(chroms) > 0)
+        raw_html(tags$div(class = "rp-grid", lapply(names(chroms), function(ch)
+          embed_png(chroms[[ch]], max_width = "100%", caption = paste0(label(cb), ": ", ch)))))
+      next
     }
 
-    chroms = x$chroms
-    if (length(chroms) > 0) {
-      show = if (full_embed) names(chroms) else intersect(names(chroms), flagged)
-      folder = rp_rel(dirname(chroms[[1]]))
-      if (length(show) > 0) {
-        cat(sprintf('::: {.callout-note collapse="true" title="Per-chromosome figures (%s)"}\n\n',
-                    if (full_embed) paste(length(show), "chromosomes")
-                    else paste("chromothripsis calls:", paste(show, collapse = ", "))))
-        raw_html(htmltools::tagList(lapply(show, function(ch)
-          embed_png(chroms[[ch]], max_width = "100%", caption = paste0(label(cb), ": ", ch)))))
-        cat(":::\n\n")
-      }
-      rest = length(chroms) - length(show)
-      if (rest > 0) {
-        # One HTML string: htmltools' newlines between children would render as " ."
-        raw_html(tags$p(class = "table-footnote", HTML(
-          sprintf("%s per-chromosome figure%s %s not embedded%s; %s in <code>%s</code>. Render with <code>--embed full</code> to include all of them.",
-                  rest, if (rest == 1) "" else "s", if (rest == 1) "is" else "are",
-                  if (length(flagged) == 0) " (no ShatterSeek call to select by)"
-                  else " (only chromosomes with a ShatterSeek chromothripsis call are)",
-                  if (rest == 1) "it is" else "they are",
-                  htmltools::htmlEscape(folder)))))
-      }
+    show = names(chroms)[names(chroms) %in% sel$chrom]
+    if (length(show) == 0) {
+      raw_html(section_notice(if (length(chroms) == 0)
+        "No per-chromosome ReConPlot figure for this combination."
+        else "No chromosome has a chromothripsis call, an SV Padfoot rated HIGH_ONCO or a tier 1–2 SV or copy-number key finding in any gene list."))
+    } else {
+      s = sel[match(show, chrom)]
+      figs = lapply(seq_along(show), function(i) {
+        tags$div(class = "rp-fig",
+                 `data-always` = if (s$always[i]) "1" else "0",
+                 `data-panels` = s$panels[i], `data-genes` = s$genes[i],
+                 hidden = if (!s$always[i]) NA,
+                 embed_png(chroms[[show[i]]], max_width = "100%",
+                           caption = paste0(show[i], ": ", s$reasons[i])))
+      })
+      raw_html(tags$div(class = "rp-grid", figs,
+        tags$p(class = "rp-none table-footnote", hidden = if (any(s$always)) NA,
+               "None of these chromosomes carries a finding of the ticked gene list(s); tick a list to show its chromosomes.")))
+    }
+    rest = length(chroms) - length(show)
+    omitted = c(if (!is.null(x$genome)) "the genome-wide figure",
+                if (rest > 0) plural(rest, "other per-chromosome figure"))
+    if (length(omitted) > 0) {
+      # One HTML string: htmltools' newlines between children would render as " ."
+      raw_html(tags$p(class = "table-footnote", HTML(sprintf(
+        "Not embedded: %s; see <code>%s</code>. Render with <code>--embed full</code> to include every figure.",
+        paste(omitted, collapse = " and "), htmltools::htmlEscape(folder)))))
     }
   }
   if (length(combos) > 1) cat(":::\n\n")
+
+  # List-dependent figures follow the gene-list chips, through the overview's own predicate
+  # (window.keyFindings.kfRowMatches, looked up per call: key_findings.js is inlined later)
+  if (!full_embed && any(!sel$always)) raw_html(tags$script(HTML('
+(function () {
+  function apply(s) {
+    var kf = window.keyFindings;
+    document.querySelectorAll(".rp-grid").forEach(function (grid) {
+      var shown = 0;
+      grid.querySelectorAll(".rp-fig").forEach(function (fig) {
+        var on = fig.getAttribute("data-always") === "1";
+        if (!on && kf && s) {
+          var genes = (fig.getAttribute("data-genes") || "").split(",");
+          on = kf.kfRowMatches({ gene: genes[0] || "", genes: genes, tier: 1,
+                                 panels: (fig.getAttribute("data-panels") || "").split(",") }, s);
+        }
+        fig.hidden = !on;
+        if (on) shown++;
+      });
+      var none = grid.querySelector(".rp-none");
+      if (none) none.hidden = shown > 0;
+    });
+  }
+  if (typeof window.registerPanelListener === "function")
+    window.registerPanelListener(function (s) { apply(s); });
+})();')))
 }
 ```

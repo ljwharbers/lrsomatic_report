@@ -34,7 +34,23 @@ BND_COLOUR = "#8a5fa3"
 # legend swatch in templates/sections/_circos.qmd uses the same literal (no --circos-* var)
 DENSITY_COLOUR = "#6b655c"
 
-# Draw a circos plot to output_path (SVG or PNG by extension)
+# Canvas half-width when driver labels are drawn: the ring outside the chromosome names that
+# assets/js/circos_drivers.js writes gene labels into (1 = circlize's default, no ring)
+CIRCOS_LABEL_CANVAS = 1.34
+
+# Draw a circos plot to output_path (SVG or PNG by extension).
+#
+# label_loci  data.table(gene, chrom, pos) or NULL: genes the browser may label (one row per
+#             gene; circos_label_loci() in R/key_findings.R). When non-empty the canvas widens
+#             to CIRCOS_LABEL_CANVAS to leave a label ring, and every placeable gene gets an
+#             anchor in SVG user units, read off the open device with grconvertX/Y (svglite's
+#             device units are its viewBox units, y already pointing down).
+# Returns list(path, anchors = data.table(gene, chrom, pos, theta, x, y) | NULL,
+#              geometry = list(width, height, cx, cy, r_anchor, r_label, r_max) | NULL)
+#   theta  degrees, counter-clockwise from 3 o'clock (circlize's convention; in SVG space a
+#          point at radius r is (cx + r cos theta, cy - r sin theta))
+#   r_anchor  just outside the chromosome-name track; r_label where labels start; r_max the
+#             canvas edge
 draw_circos = function(snv_data = NULL,
                        sv_nontrans = NULL,
                        sv_trans = NULL,
@@ -42,7 +58,8 @@ draw_circos = function(snv_data = NULL,
                        cytobands,
                        chrom_lengths,
                        chromosomes,
-                       output_path) {
+                       output_path,
+                       label_loci = NULL) {
 
   # Filter cytobands and lengths to displayed chromosomes
   cyto_filt = cytobands[cytobands$chrom %in% chromosomes, ]
@@ -83,6 +100,15 @@ draw_circos = function(snv_data = NULL,
                      major_cn = numeric(), minor_cn = numeric(), total_cn = numeric())
   }
 
+  # Driver-label loci on the plotted chromosomes, inside the chromosome
+  lab = if (!is.null(label_loci) && nrow(label_loci) > 0)
+          as.data.table(label_loci)[chrom %in% names(lens_filt) & !is.na(pos)] else NULL
+  if (!is.null(lab) && nrow(lab) > 0) {
+    lab = lab[!duplicated(gene)]
+    lab[, pos := pmin(pmax(as.numeric(pos), 0), as.numeric(lens_filt[chrom]))]
+  } else lab = NULL
+  canvas = if (is.null(lab)) 1 else CIRCOS_LABEL_CANVAS
+
   # Open device
   ext = tolower(tools::file_ext(output_path))
   if (ext == "svg") {
@@ -109,7 +135,9 @@ draw_circos = function(snv_data = NULL,
     # Arc resolution (default 500 segments per full circle). Every arc in the SVG is a
     # flattened point list, so this scales the size of every track background, cytoband
     # and CN rectangle; at 200 the chord error on the 680 px plate is ~0.04 px
-    "unit.circle.segments" = 200
+    "unit.circle.segments" = 200,
+    "canvas.xlim" = c(-canvas, canvas),
+    "canvas.ylim" = c(-canvas, canvas)
   )
 
   # Build cytobands list as expected by circos.initializeWithIdeogram
@@ -293,7 +321,35 @@ draw_circos = function(snv_data = NULL,
     }
   }
 
+  # Driver-label anchors, in device units = SVG user units (svglite). Track 1 is the
+  # chromosome-name track circos.initializeWithIdeogram() made, the outermost one
+  anchors = NULL; geometry = NULL
+  if (!is.null(lab) && ext == "svg") {
+    s1 = get.all.sector.index()[1]
+    r_names = get.cell.meta.data("cell.top.radius", sector.index = s1, track.index = 1)
+    # circlize() takes one sector per call
+    pol = do.call(rbind, lapply(seq_len(nrow(lab)), function(i)
+      circlize(lab$pos[i], 0, sector.index = lab$chrom[i], track.index = 1)))
+    theta = pol[, "theta"]
+    dev_x = function(v) grconvertX(v, "user", "device")
+    dev_y = function(v) grconvertY(v, "user", "device")
+    cx = dev_x(0); cy = dev_y(0)
+    unit = dev_x(1) - cx
+    r_anchor = (r_names + 0.015) * unit
+    th = theta * pi / 180
+    anchors = data.table(gene = lab$gene, chrom = lab$chrom, pos = lab$pos,
+                         theta = round(theta, 3),
+                         x = round(dev_x(r_anchor / unit * cos(th)), 2),
+                         y = round(dev_y(r_anchor / unit * sin(th)), 2))
+    sz = dev.size("in") * 72
+    geometry = list(width = round(sz[1], 2), height = round(sz[2], 2),
+                    cx = round(cx, 2), cy = round(cy, 2),
+                    r_anchor = round(r_anchor, 2),
+                    r_label  = round((r_names + 0.07) * unit, 2),
+                    r_max    = round(canvas * unit, 2))
+  }
+
   circos.clear()
   dev.off()
-  invisible(output_path)
+  invisible(list(path = output_path, anchors = anchors, geometry = geometry))
 }

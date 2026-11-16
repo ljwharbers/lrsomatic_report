@@ -24,7 +24,8 @@ In page order:
     and dominant mutational signatures. A biomarker whose tool did not run reads "not run".
   - **Sequencing** cards: mean coverage, read N50, error rate, phased germline variants.
 - **Circos overview** — ideogram, somatic **SNV density** (per 1 Mb window), non-breakend SVs
-  and ASCAT copy number, with translocation links.
+  and ASCAT copy number, with translocation links, and the tier 1–2 key-finding genes of the
+  ticked gene list(s) labelled around the outside.
 - **Copy number profile** — ASCAT plots; a static haplotype-resolved **Wakhan** profile of the
   rank-1 solution with the solutions table; and **gene-level copy number** for every gene of the
   embedded gene lists (see [Copy-number calls](#copy-number-calls)).
@@ -217,7 +218,11 @@ one of them. Slim mode embeds:
   pathogenic, or in an embedded gene list's small-variant genes — the table says how many of
   the total are shown, and the full table is always in `<sample-id>_small_variants.tsv.gz`;
 - the rank-1 Wakhan profile only;
-- ReConPlot per-chromosome figures only for chromosomes ShatterSeek called;
+- no genome-wide ReConPlot figure (at page width it is unreadable), and per-chromosome
+  figures only for chromosomes with a high-impact call: a ShatterSeek chromothripsis call or
+  an SV Padfoot rated `HIGH_ONCO` (always shown), or a tier 1–2 SV or copy-number key finding
+  of a gene list (shown while that list is ticked). Padfoot's plain `HIGH` does not count: it
+  is common in large fragile-site genes;
 - the first six CoRAL amplicon plots;
 - no ASCAT diagnostic plots (GC correction, tumour separation).
 
@@ -228,6 +233,15 @@ key findings) is computed from the full table in either mode.
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 `wakhan/*_heatmap_ploidy_purity.html`; the report names them.
 
+> **Changed in 2.0.0rc2:**
+> - The genome circos **labels the key findings**: the tier 1–2 genes of the ticked gene
+>   list(s), outside the ideogram, bold for tier 1. They follow the chips, like the overview;
+>   with no list ticked there are none.
+> - **ReConPlot**: slim mode drops the genome-wide figure and embeds per-chromosome figures for
+>   chromosomes with a high-impact call (see [Report size](#report-size-and---embed)).
+> - A **light / dark mode toggle** in the header. The choice is remembered by the browser; a
+>   printout is always light.
+>
 > **Changed in v2.0** (released first as the pre-release `2.0.0rc1`, so the pipeline can test
 > against a real image; the final `2.0.0` changes only `VERSION` and `recipe/meta.yaml`):
 > - New **clinical overview** at the top: key findings by gene list, genome-wide biomarkers
@@ -563,8 +577,8 @@ lrsomatic_report/
 │   │                           --gene-lists-dir)
 │   ├── signatures/             COSMIC aetiology lookup
 │   ├── styles/                 report.scss and its section / print partials
-│   └── js/                     bnd_circos.js, facet_filter.js, key_findings.js — inlined
-│                               at render time
+│   └── js/                     bnd_circos.js, circos_drivers.js, facet_filter.js,
+│                               key_findings.js — inlined at render time
 ├── tests/                      testthat unit tests + tests/js (node, no dependencies)
 ├── recipe/                     Conda recipe (Bioconda); build.sh defines the install layout
 ├── container/                  environment.yml (pinned deps, checked against the recipe),

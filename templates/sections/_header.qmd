@@ -10,8 +10,39 @@ tags$header(
   div(class = "report-hero__badges",
     tags$span(class = paste("report-badge", mode_css), toupper(outputs$mode)),
     tags$span(class = "report-badge is-meta", toupper(params$reference)),
-    tags$span(class = "report-badge is-meta", toupper(params$sex))
-  )
+    tags$span(class = "report-badge is-meta", toupper(params$sex)),
+    # Light/dark toggle: script below; the stored choice is applied before first paint by the
+    # include-in-header script of templates/per_sample.qmd (same storage key)
+    tags$button(type = "button", class = "theme-toggle", `aria-pressed` = "false",
+                title = "Switch between light and dark mode",
+                tags$span(class = "theme-toggle__icon", `aria-hidden` = "true"),
+                tags$span(class = "theme-toggle__label", "Dark mode"))
+  ),
+  tags$script(HTML('
+(function () {
+  var KEY = "lrsomatic-report-theme", root = document.documentElement;
+  var btn = document.querySelector(".theme-toggle");
+  if (!btn) return;
+  var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function current() {
+    var t = root.getAttribute("data-theme");
+    return t === "dark" || t === "light" ? t : (mq && mq.matches ? "dark" : "light");
+  }
+  function sync() {
+    var dark = current() === "dark";
+    btn.setAttribute("aria-pressed", dark ? "true" : "false");
+    btn.querySelector(".theme-toggle__label").textContent = dark ? "Light mode" : "Dark mode";
+    btn.querySelector(".theme-toggle__icon").textContent = dark ? "\\u2600" : "\\u263E";
+  }
+  btn.addEventListener("click", function () {
+    var next = current() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    sync();
+  });
+  if (mq && mq.addEventListener) mq.addEventListener("change", sync);
+  sync();
+})();'))
 )
 ```
 
