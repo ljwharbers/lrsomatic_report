@@ -1,0 +1,151 @@
+## Mutational signatures
+
+```{r signatures-setup}
+# SECTION_DATA[["signatures"]] from R/sections/signatures.R (SigProfilerAssignment, COSMIC)
+sig = SECTION_DATA[["signatures"]]
+sig_has = !is.null(sig) && length(sig$contexts) > 0
+```
+
+```{r signatures-notice}
+if (!sig_has) section_notice("SigProfilerAssignment was not run for this sample.")
+```
+
+```{r signatures-intro, eval=sig_has, results='asis'}
+cat(paste0(
+  '<p class="sig-intro">A mutational signature is a characteristic pattern of mutations left ',
+  'by a particular process, such as ageing, a DNA-repair defect or an exposure. The ',
+  'signatures below are the COSMIC reference signatures that best reconstruct this sample\'s ',
+  'mutations; the <em>cosine similarity</em> says how well they do (1 = perfect).</p>\n\n'))
+```
+
+```{r signatures-tabs, eval=sig_has, results='asis'}
+sig_fmt_int = function(x) formatC(x, format = "d", big.mark = ",")
+sig_names = c(SBS = "Single-base substitutions (SBS)", DBS = "Doublet-base substitutions (DBS)",
+              ID = "Small insertions and deletions (ID)")
+sig_tab_labels = c(SBS = "SBS", DBS = "DBS", ID = "ID")
+
+# Raw HTML through a fenced block, so Pandoc leaves the markup alone
+sig_html = function(x) cat("\n```{=html}\n", as.character(x), "\n```\n\n", sep = "")
+
+sig_flag_badges = function(flags) {
+  lapply(flags, function(f)
+    tags$span(class = paste0("sig-badge sig-badge--", gsub("_", "-", f)), SIG_FLAG_LABELS[[f]]))
+}
+
+sig_fit_line = function(k, cx) {
+  st = cx$stats
+  parts = list(
+    tags$span(class = "sig-fit__item",
+              tags$strong(sig_fmt_int(st$total)), " mutations"),
+    tags$span(class = "sig-fit__item",
+              "cosine similarity ",
+              tags$strong(if (is.na(st$cosine)) "not available" else sprintf("%.3f", st$cosine)))
+  )
+  if (length(cx$flags) == 0) {
+    parts = c(parts, list(tags$span(class = "sig-badge sig-badge--ok", "Reliable fit")))
+  } else {
+    parts = c(parts, sig_flag_badges(cx$flags))
+  }
+  out = list(tags$div(class = "sig-fit", parts))
+  if (length(cx$flags) > 0) {
+    why = c(few_mutations = sprintf("fewer than %s %s mutations", sig_fmt_int(SIG_MIN_MUTATIONS[[k]]), k),
+            poor_fit = sprintf("cosine similarity below %.2f", SIG_MIN_COSINE))[cx$flags]
+    out = c(out, list(tags$div(class = "sig-caution",
+      tags$strong("Interpret with caution: "),
+      paste0(paste(why, collapse = " and "),
+             ". These signatures are left out of the overview."))))
+  }
+  out
+}
+
+sig_table = function(act) {
+  if (is.null(act) || nrow(act) == 0)
+    return(section_notice("No signature assigned: SigProfilerAssignment attributed none of these mutations to a COSMIC signature."))
+  rows = lapply(seq_len(nrow(act)), function(i) {
+    r = act[i]
+    aet = if (!r$in_lookup) tags$span(class = "sig-unknown", "not in lookup") else r$aetiology
+    tags$tr(class = if (isTRUE(r$artefact)) "sig-row--artefact" else NULL,
+      tags$td(class = "sig-name", r$signature,
+              if (isTRUE(r$artefact)) tags$span(class = "sig-badge sig-badge--artefact",
+                                                title = "COSMIC lists this as a possible sequencing artefact",
+                                                "artefact")),
+      tags$td(aet, if (nzchar(r$note)) tags$div(class = "sig-note", r$note)),
+      tags$td(class = "sig-num", sig_fmt_int(round(r$mutations))),
+      tags$td(class = "sig-num",
+              tags$span(class = "sig-pct",
+                        tags$span(class = "sig-pct__bar", style = sprintf("width:%.1f%%", r$pct)),
+                        tags$span(class = "sig-pct__val", sprintf("%.1f%%", r$pct)))))
+  })
+  # Opt out of Quarto's table post-processing, which adds Bootstrap's .table and 25% colgroups
+  tags$table(class = "sig-table", `data-quarto-disable-processing` = "true",
+    tags$thead(tags$tr(tags$th("Signature"), tags$th("Proposed aetiology"),
+                       tags$th(class = "sig-num", "Mutations"), tags$th(class = "sig-num", "Share"))),
+    tags$tbody(rows))
+}
+
+sig_plot = function(k, cx) {
+  if (is.null(cx$matrix)) return(section_notice("Mutation matrix not found; no profile to plot."))
+  cap = switch(k,
+    SBS = "Observed SBS96 profile: substitution class, with the trinucleotide context (5′, reference, 3′ base) below each bar",
+    DBS = "Observed DBS78 profile: reference dinucleotide class, with the substituted dinucleotide below each bar",
+    ID  = "Observed ID83 profile: Del/Ins of 1 bp (C or T), of repeat units (2–5+ bp) and microhomology-mediated deletions (MH); below each bar the repeat or microhomology length")
+  tags$figure(class = "report-figure sig-figure",
+    embed_svg_plot(plot_sig_profile(cx$matrix, k), width = 10, height = 2.9,
+                   alt = paste(k, "mutational profile"), class = "sig-figure__img"),
+    tags$figcaption(class = "report-figure__caption", cap))
+}
+
+absent = setdiff(names(SIG_CONTEXTS), names(sig$contexts))
+
+cat("::: {.panel-tabset}\n\n")
+for (k in intersect(names(SIG_CONTEXTS), names(sig$contexts))) {
+  cx = sig$contexts[[k]]
+  cat("### ", sig_tab_labels[[k]],
+      if (length(cx$flags) > 0) " · caution" else "", "\n\n", sep = "")
+  sig_html(tagList(
+    tags$p(class = "sig-context-name", sig_names[[k]]),
+    sig_fit_line(k, cx),
+    sig_table(cx$activities),
+    sig_plot(k, cx)
+  ))
+}
+cat(":::\n\n")
+
+if (length(absent) > 0) {
+  sig_html(section_notice(sprintf(
+    "No %s fit found. SigProfilerAssignment skips a context in which the sample has no mutations.",
+    paste(absent, collapse = " or "))))
+}
+```
+
+```{r signatures-details, eval=sig_has}
+sig_paths = unlist(lapply(names(sig$contexts), function(k) {
+  f = sig$contexts[[k]]$files
+  c(f$activities, f$stats, f$matrix)
+}), use.names = FALSE)
+no_stats = names(sig$contexts)[vapply(sig$contexts, function(cx) is.null(cx$files$stats), logical(1))]
+
+table_details(
+  summary = "Method and sources",
+  tags$p(sprintf(
+    "COSMIC reference signatures v%s fitted with SigProfilerAssignment (cosmic_fit) to the PASS somatic SNVs, doublets and indels.%s",
+    if (is.na(sig$cosmic_version)) "(version not recorded)" else sig$cosmic_version,
+    if (!is.na(sig$lookup_version) && !identical(sig$lookup_version, sig$cosmic_version))
+      sprintf(" Aetiologies are taken from the bundled COSMIC v%s lookup.", sig$lookup_version) else "")),
+  tags$p(sprintf(paste0(
+    "A context is flagged \"few mutations\" below %s SBS, %s DBS or %s ID mutations, and \"poor fit\" ",
+    "when the cosine similarity is below %.2f. Signatures contributing at least %s%% in an unflagged ",
+    "context are carried to the overview. Proposed aetiologies are COSMIC's, abbreviated; \"Unknown\" ",
+    "means COSMIC proposes none (or none was certain enough to state here)."),
+    sig_fmt_int(SIG_MIN_MUTATIONS[["SBS"]]), sig_fmt_int(SIG_MIN_MUTATIONS[["DBS"]]),
+    sig_fmt_int(SIG_MIN_MUTATIONS[["ID"]]), SIG_MIN_COSINE, SIG_DOMINANT_MIN_PCT)),
+  tags$p(paste0(
+    "ID83 signatures are always fitted against COSMIC's GRCh37 reference set, whatever genome the ",
+    "sample was aligned to (only SBS and DBS signatures are build-specific). Long-read indel calls in ",
+    "homopolymers can inflate replication-slippage and mismatch-repair indel signatures.")),
+  if (length(no_stats) > 0)
+    tags$p(sprintf("No solution statistics file for %s: cosine similarity is unavailable and the mutation total is the matrix sum.",
+                   paste(no_stats, collapse = ", "))),
+  tags$p("Files:", lapply(sig_paths, function(p) tags$code(class = "sig-path", p)))
+)
+```

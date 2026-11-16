@@ -1,0 +1,148 @@
+// Mutational signatures section (templates/sections/_signatures.qmd).
+// Imported by report.scss inside the scss:rules layer: palette tokens only (var(--color-*)),
+// so the dark-mode overrides in report.scss apply without separate rules here.
+
+.sig-intro {
+  max-width: 78ch;
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+  margin: 0 0 0.9rem;
+}
+
+.sig-context-name {
+  font-family: var(--font-sans);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0.2rem 0 0.4rem;
+}
+
+// Fit line: total · cosine · badges
+.sig-fit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin: 0 0 0.6rem;
+  font-size: 0.86rem;
+
+  strong { font-family: var(--font-mono); font-weight: 600; }
+}
+
+// Same pill as .report-badge, in the section's own namespace
+.sig-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+
+  &--ok {
+    color: var(--color-success);
+    background: color-mix(in srgb, var(--color-success) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-success) 35%, transparent);
+  }
+  &--few-mutations,
+  &--poor-fit {
+    color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent);
+  }
+  &--artefact {
+    margin-left: 6px;
+    color: var(--color-text-muted);
+    background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
+    box-shadow: inset 0 0 0 1px var(--color-border);
+  }
+}
+
+.sig-caution {
+  margin: 0 0 0.8rem;
+  padding: 0.5rem 0.9rem;
+  border-left: 3px solid var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 7%, var(--color-surface));
+  border-radius: 0 var(--card-radius) var(--card-radius) 0;
+  font-size: 0.84rem;
+  max-width: 78ch;
+}
+
+// Compact signature table (plain HTML, no DT)
+.sig-table {
+  width: auto;
+  min-width: min(100%, 560px);
+  max-width: 100%;
+  margin: 0 0 1rem;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  font-size: 0.85rem;
+
+  th, td {
+    padding: 0.35rem 0.8rem;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--font-sans);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    background: var(--color-surface-alt);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+
+  .sig-num  { text-align: right; font-family: var(--font-mono); white-space: nowrap; }
+  .sig-name { font-family: var(--font-mono); font-weight: 600; white-space: nowrap; }
+  .sig-note { font-size: 0.74rem; color: var(--color-text-muted); }
+  .sig-unknown { font-style: italic; color: var(--color-text-muted); }
+
+  // Artefact rows stay visible but recede
+  .sig-row--artefact td { color: var(--color-text-muted); }
+}
+
+// Share: value over a thin bar scaled to the signature's percentage
+.sig-pct {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 70px;
+}
+.sig-pct__bar {
+  display: block;
+  height: 3px;
+  margin-top: 3px;
+  order: 2;
+  align-self: flex-start;
+  border-radius: 2px;
+  background: var(--color-primary);
+  opacity: 0.55;
+}
+.sig-pct__val { order: 1; }
+
+// The profile plot is drawn on white, so its plate stays light in dark mode. Doubled class:
+// this partial is imported before report.scss's own .report-figure rule, which would win a tie.
+.report-figure.sig-figure {
+  background: #ffffff;
+
+  .sig-figure__img { max-width: 100%; height: auto; display: block; margin: auto; }
+  .report-figure__caption { color: #6a6f76; }
+}
+
+.sig-path {
+  display: block;
+  font-size: 0.72rem;
+  word-break: break-all;
+}

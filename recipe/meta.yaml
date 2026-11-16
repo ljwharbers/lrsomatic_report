@@ -1,4 +1,4 @@
-{% set version = "1.6.1" %}
+{% set version = "2.0.0rc2" %}
 
 package:
   name: lrsomatic-report
@@ -6,7 +6,8 @@ package:
 
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: 60f805619c7c38d6f3dfd81ed684729b69c23539638bcf24f22d4ffe577330ad
+  # Recorded after the tag is cut, in a follow-up commit; container/check_sha256.sh verifies it.
+  sha256: c244fd0a72de7dfe31985969e67ef19335f159767bc777313721188405e779a9
 
 build:
   number: 0

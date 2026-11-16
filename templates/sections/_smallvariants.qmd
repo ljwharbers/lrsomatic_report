@@ -1,9 +1,11 @@
 ## Small variants
 
 ```{r small-variant-prepare, results='asis'}
-if (!is.null(variant_table) && nrow(variant_table) > 0) {
+# The DT and its JS globals come from variant_embed (the rows embedded under --embed); counts
+# and footnotes below still read the full variant_table
+if (!is.null(variant_embed) && nrow(variant_embed) > 0) {
   # Format the VAF as a percentage
-  dt_display = copy(variant_table)
+  dt_display = copy(variant_embed)
   if ("vaf" %in% names(dt_display)) {
     dt_display[, vaf := round(vaf * 100, 1)]
     setnames(dt_display, "vaf", "VAF%")
@@ -29,7 +31,22 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
 ```
 
 ```{r small-variant-table}
-if (!is.null(variant_table) && nrow(variant_table) > 0) {
+# Rows left out under --embed slim: say so above the table, and where the rest are
+n_full_sv     = if (!is.null(variant_table)) nrow(variant_table) else 0L
+n_embedded_sv = if (!is.null(variant_embed)) nrow(variant_embed) else 0L
+slim_note = if (n_embedded_sv < n_full_sv) section_notice(tagList(
+  sprintf(paste("Showing %s of %s small variants: protein-affecting (HIGH/MODERATE impact),",
+                "ClinVar pathogenic/likely pathogenic, and all variants in gene-list genes."),
+          formatC(n_embedded_sv, format = "d", big.mark = ","),
+          formatC(n_full_sv, format = "d", big.mark = ",")),
+  "The complete table is in", tags$code(small_variants_tsv), "next to this report."
+)) else NULL
+
+if (is.null(variant_table) || n_full_sv == 0) {
+  section_notice("No somatic small-variant annotation (VEP) output was found for this sample.")
+} else if (n_embedded_sv == 0) {
+  slim_note
+} else {
 
   # Flag cells whose VAF/DP/GT/PS came from a consensus winner; styleEqual() needs literal values
   mc_vals = if ("callers" %in% names(dt_display))
@@ -150,11 +167,13 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
       } else {
         "No VAF source VCF was found, so the VAF, depth, genotype and phase set columns are empty."
       },
-      if (length(mc_vals) > 0) tagList(
+      # n_multi counts the FULL table, so the caveat stands even when slimming dropped every
+      # multi-caller row (mc_vals, the highlight, only sees the embedded ones)
+      if (n_multi > 0) tagList(
         tags$br(),
         tags$span(
           class = "table-footnote__warn",
-          sprintf(paste("%s variants were reported by more than one caller (highlighted).",
+          sprintf(paste("%s variants were reported by more than one caller (highlighted where shown).",
                         "Their VAF, depth, genotype and phase set come from whichever caller",
                         "won the consensus merge, so those columns need not correspond to the",
                         "callers column beside them."),
@@ -199,6 +218,6 @@ if (!is.null(variant_table) && nrow(variant_table) > 0) {
     )
   }
 
-  tagList(snv_dt, footnote, ann_note)
+  tagList(slim_note, snv_dt, footnote, ann_note)
 }
 ```

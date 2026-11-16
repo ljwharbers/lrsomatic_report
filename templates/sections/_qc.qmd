@@ -24,18 +24,40 @@ htmltools::tagList(
 ### Alignment statistics (samtools flagstat)
 
 ```{r flagstat-table, results='asis'}
+# Number formatting shared with the cramino table below; NULL/NA -> "N/A"
+fmt_qc = function(x, digits = 0) {
+  if (is.null(x) || length(x) == 0 || is.na(x[1])) return("N/A")
+  formatC(as.numeric(x[1]), format = "f", digits = digits, big.mark = ",")
+}
+# Keys are parse_flagstat()'s (FLAGSTAT_LABELS order). "mapped" counts every mapped record,
+# secondary and supplementary included; "primary mapped" is the per-read figure.
+FLAGSTAT_DISPLAY = c(
+  total              = "Total records",
+  primary            = "Primary records",
+  secondary          = "Secondary alignments",
+  supplementary      = "Supplementary alignments",
+  duplicate          = "Duplicates",
+  primary_duplicates = "Primary duplicates",
+  mapped             = "Mapped records (incl. secondary/supplementary)",
+  primary_mapped     = "Primary mapped reads",
+  paired             = "Paired in sequencing"
+)
+flagstat_df = function(fs) {
+  keys = intersect(names(FLAGSTAT_DISPLAY), names(fs))
+  data.frame(metric = unname(FLAGSTAT_DISPLAY[keys]),
+             value = vapply(keys, function(k) fmt_qc(fs[[k]]), character(1)),
+             row.names = NULL)
+}
 show_normal_fs = outputs$has_normal && length(qc_normal_flagstat) > 0
 if (show_normal_fs) cat("**Tumour**\n\n")
 if (length(qc_flagstat) > 0) {
-  fs = data.frame(metric = names(qc_flagstat), value = unlist(qc_flagstat))
-  print(knitr::kable(fs, row.names = FALSE))
+  print(knitr::kable(flagstat_df(qc_flagstat), row.names = FALSE))
 } else {
   cat("Flagstat file not available.\n")
 }
 if (show_normal_fs) {
   cat("\n\n**Normal**\n\n")
-  fs_n = data.frame(metric = names(qc_normal_flagstat), value = unlist(qc_normal_flagstat))
-  print(knitr::kable(fs_n, row.names = FALSE))
+  print(knitr::kable(flagstat_df(qc_normal_flagstat), row.names = FALSE))
 }
 ```
 :::
@@ -46,15 +68,22 @@ if (show_normal_fs) {
 ```{r cramino-table, results='asis'}
 make_quality_df = function(cr, st) {
   rows = list()
-  rows[["N50 (bp)"]]       = fmt_val(cr$n50, 0)
-  rows[["Yield (Gb)"]]     = fmt_val(cr$yield_gb)
-  rows[["% mapped"]]       = fmt_val(cr$mapped_pct)
-  rows[["# reads"]]        = fmt_val(cr$n_reads, 0)
+  # cramino 2.0 reports N50 twice: over full read lengths ("N50") and over the aligned part of
+  # each read ("N50 aligned"). 1.x has only the first, which is then left unqualified.
+  if (!is.na(cr$n50_aligned)) {
+    rows[["Read N50, full read length (bp)"]] = fmt_qc(cr$n50)
+    rows[["Read N50, aligned portion (bp)"]]  = fmt_qc(cr$n50_aligned)
+  } else {
+    rows[["Read N50 (bp)"]] = fmt_qc(cr$n50)
+  }
+  rows[["Yield (Gb)"]]     = fmt_qc(cr$yield_gb, 2)
+  rows[["% mapped"]]       = fmt_qc(cr$mapped_pct, 2)
+  rows[["# reads"]]        = fmt_qc(cr$n_reads)
   if (!is.null(st)) {
-    rows[["Avg read length (bp)"]] = fmt_val(st$avg_length, 0)
-    rows[["Max read length (bp)"]] = fmt_val(st$max_length, 0)
-    rows[["Avg base quality"]]     = fmt_val(st$avg_quality)
-    rows[["Bases mapped (Gb)"]]    = fmt_val(st$bases_mapped / 1e9)
+    rows[["Avg read length (bp)"]] = fmt_qc(st$avg_length)
+    rows[["Max read length (bp)"]] = fmt_qc(st$max_length)
+    rows[["Avg base quality"]]     = fmt_qc(st$avg_quality, 1)
+    rows[["Bases mapped (Gb)"]]    = fmt_qc(st$bases_mapped / 1e9, 2)
     rows[["Error rate"]]           = if (!is.na(st$error_rate))
       paste0(formatC(st$error_rate * 100, format = "f", digits = 3), "%") else "N/A"
   }

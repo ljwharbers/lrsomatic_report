@@ -1,0 +1,6 @@
+# reference: hg38
+# test panel: no roles, no scopes
+gene	chrom	start	end
+EWSR1	chr22	29268009	29300525
+ATF1	chr12	50763710	50821162
+CDKN2A	chr9	21967752	21995301

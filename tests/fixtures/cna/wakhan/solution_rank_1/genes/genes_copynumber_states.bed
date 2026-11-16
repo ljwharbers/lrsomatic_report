@@ -1,0 +1,8 @@
+#chr: chromosome number
+#start: start address gene
+#end: end address of gene
+#gene: name of gene
+#chr	start	end	gene	actual_coverage_hp1	actual_coverage_hp2	adjusted_coverage_hp1	adjusted_coverage_hp2	hp1_state	hp2_state
+chr3	100	900	PANELONLY	28.1	27.9	27.9	27.9	2	2
+chr4	47458499	48667072	ARTEFACT	14.17	15.0	3302.24	3302.24	394	394
+chr5	100	900	OTHER	13.0	13.0	13.97	13.97	1	1

@@ -26,9 +26,22 @@ test_that("--help lists the flags the pipeline passes", {
                                  stdout = TRUE, stderr = TRUE))
   help = paste(out, collapse = "\n")
   for (flag in c("--sample-dir", "--sample-id", "--sex", "--reference",
-                 "--gene-panel", "--gene-lists-dir", "--output")) {
+                 "--gene-panel", "--gene-lists-dir", "--output", "--embed")) {
     expect_true(grepl(flag, help, fixed = TRUE), info = flag)
   }
+  # The help names both accepted --embed values
+  expect_true(grepl("slim | full", help, fixed = TRUE))
+})
+
+test_that("--embed rejects anything but slim or full, before any rendering", {
+  d = tempfile("sample")
+  dir.create(d)
+  out = suppressWarnings(system2("Rscript",
+    c(render_report, "--sample-dir", d, "--sex", "male", "--embed", "bogus"),
+    stdout = TRUE, stderr = TRUE))
+  expect_equal(attr(out, "status"), 1L)
+  expect_true(any(grepl("--embed must be 'slim' or 'full'", out, fixed = TRUE)))
+  expect_false(dir.exists(file.path(getwd(), "._render")))
 })
 
 test_that("every R source file parses", {

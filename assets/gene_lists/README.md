@@ -17,6 +17,30 @@ exists to find. Matching on coordinates needs no annotation on the row.
 Optional metadata columns (`panel`, `notes`) are ignored by the loader and kept for the
 reader.
 
+## Gene role: `role`
+
+An optional `role` column says whether a gene is an oncogene or a tumour suppressor. The
+overview's key findings use it to tier an alteration (a truncating variant or homozygous
+deletion of an oncogene drops a tier, an amplification of a tumour suppressor is not listed,
+a second hit in a tumour suppressor is lifted — see the main README), and the gene-level
+copy-number table shows it:
+
+| `role` | Read as |
+|---|---|
+| `OG`, `oncogene`, `onc` | oncogene |
+| `TSG`, `tumour suppressor`, `tumor suppressor` (optionally `… gene`) | tumour suppressor |
+| `both`, `OG/TSG`, `TSG/OG`, `oncogene/TSG`, `TSG/oncogene` | both |
+| *blank*, `NA`, `none` | no role declared |
+
+Case-insensitive; anything else is a hard error, as for `applies_to`. A gene listed on
+several rows takes its first non-blank role. A file with no `role` column loads as before.
+A blank role means *not declared*, not "neither": leave it blank rather than guess.
+
+Coordinates are also collected from *every* row that has them, whatever its `applies_to`
+(`panel_gene_intervals(panel, "all")`), for placing genes on the copy-number profile;
+SV matching still uses only the SV-scoped rows. Coordinates on an `snv` row are
+therefore used for **gene-level copy number only**: they never make that gene match an SV.
+
 ## Scoping a gene to one table: `applies_to`
 
 By default every gene filters **both** tables. An optional `applies_to` column scopes a
@@ -96,11 +120,13 @@ report, so the reader can retick them without re-rendering.
 
 | File | Contents |
 |---|---|
-| `lymphoid.{hg38,t2t}.tsv` | 235 non-Hodgkin lymphoma genes, **scoped per table** — see below |
+| `lymphoid.{hg38,t2t}.tsv` | 234 non-Hodgkin lymphoma genes, **scoped per table**, with roles — see below |
 | `sarcoma.hg38.tsv` | 140 soft-tissue and bone sarcoma genes — tumour suppressors, amplification targets and recurrent fusion partners — GENCODE v46 gene spans |
 | `sarcoma.t2t.tsv` | the same 140 genes, spans from the CHM13v2.0 RefSeq Liftoff v5.1 annotation |
 
 `sarcoma` carries no `applies_to` column, so every one of its genes filters both tables.
+It carries no `role` column either: its `notes` are free text with no explicit
+oncogene/TSG class, and roles are not inferred.
 
 ### `lymphoid`
 
@@ -113,11 +139,45 @@ Merged from two curated NHL lists that are deliberately not interchangeable:
   coding-mutation content; its `TSG`/`OG` class and remarks are kept in `notes`.
 
 42 genes are on both lists and carry a blank `applies_to`; the 86 bed-only genes are `sv`
-and the 107 twist-only genes are `snv`, giving 235 rows. The beds are 4-column,
+and the 106 twist-only genes are `snv`, giving 234 rows (107 and 235 before `FAM46C` was
+dropped, see below). The beds are 4-column,
 headerless, CRLF and carry no trailing newline (`wc -l` reports 127 for 128 genes), and
 their coordinates are already 1-based inclusive gene spans in the same convention as the
 other builtins — no BED half-open conversion is applied. `TRA/D` is kept verbatim: it is
 not an HGNC symbol, but it is an `sv` row and so is matched positionally.
+
+**`role`** is the twist list's class, copied out of `notes` (which is unchanged): `OG` →
+`oncogene` (74), `TSG` → `tsg` (64), and the ten context-dependent `TSG/OG; …` entries
+(`RHOA`, `IRF4`, `IKZF1`, `PAX5`, `FOXO1`, `BCL11B`, `ETV6`, `RUNX1`, `SUZ12`, `TCF3`)
+→ `both`. The 86 bed-only `sv` rows have no class in their source and are left blank.
+
+**Coordinates on the `snv` rows.** The 106 twist-only genes originally had none. They now
+carry gene spans derived exactly as the `sarcoma` spans are (method and paths below), so
+that the copy-number section can call them; they stay `snv`-scoped, so these spans are
+never used for SV matching. Two needed special handling, recorded in each file's header:
+
+- `CRLF2` is pseudoautosomal (PAR1) and annotated on both `chrX` and `chrY`; the `chrX`
+  copy is shipped (both reference builds mask the `chrY` PAR).
+- `U2AF1` (t2t only) is absent from the Liftoff annotation; its span comes from
+  `GCF_009914755.1_T2T-CHM13v2.0_genomic.gtf.gz` (`NC_060945.1` = `chr21`), as for
+  `DUX4L10` in `sarcoma`. It agrees with the hg38 locus (21q22.3).
+
+No gene was left without coordinates. Note that the **bed-derived** spans of the SV rows
+were *not* produced by this method — re-deriving them reproduces 90 of 121 non-IG/TR
+genes exactly on hg38 and 43 of 121 on t2t, the rest differing by alternative first/last
+exons — so the two groups of rows in one file come from different annotations. Spans from
+the two references can also differ in length for the same gene, because GENCODE `gene`
+features include long or read-through isoforms that the Liftoff RefSeq transcripts lack
+(e.g. `RUNX1` is 1.22 Mb on hg38 and 262 kb on t2t; `ACTG1`, `CDKN1B` similarly).
+
+**Corrections** (matching the pipeline repository's copy, so the two converge):
+
+| Row | Problem | Fix |
+|---|---|---|
+| `EWSR1`, `KDM6B`, `SIK3` | CHM13 coordinates in the hg38 file | GENCODE v46 gene spans |
+| `PRKBC` | transposition of `PRKCB`; matched nothing | renamed `PRKCB` |
+| `RCK` | obsolete alias; the coordinates are `DDX6`'s | renamed `DDX6` |
+| `FAM46C` | former name of `TENT5C`, which is already listed | dropped (235 rows → 234) |
 
 Regenerating the `sarcoma` spans is mechanical — gene spans keyed on `gene_name`, taken from
 `gene` features (GENCODE) or the min/max of `transcript` features (Liftoff, which has no
@@ -144,6 +204,6 @@ that file's comment header:
 On a row that can match an SV (blank or `sv` in `applies_to`), a missing coordinate is a
 **hard error** in `load_gene_panel()`, not a per-row downgrade to symbol matching — so a
 gene that resolves in one annotation and not the other has to be either mapped or dropped
-from that reference's file. Only an `snv`-scoped row may be left blank, and that is a
-declaration that the gene is never matched on position, not a fallback for a lookup that
-failed.
+from that reference's file. Only an `snv`-scoped row may be left blank; it is then never
+matched on position, and also gets no gene-level copy-number call, which is why the
+builtin `lymphoid` `snv` rows now carry spans.

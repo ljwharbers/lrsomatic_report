@@ -8,6 +8,13 @@ BND_SVTYPES = c("BND", "sBND")
 # BND-derived svclass values (two loci, no span/size); BND_CIRCOS_CLASSES is this set minus "single breakend"
 SV_JUNCTION_CLASSES = c("translocation", "intra-chr breakend", "single breakend")
 
+# Column contract of both SV table builders (the section adds `caller`, and Padfoot columns when
+# a Padfoot file exists). Downstream (overview, panel matching, circos) reads these BY NAME:
+# append, never rename.
+SV_TABLE_COLS = c("id", "svclass", "svtype", "chrom_a", "pos_a", "gene_a",
+                  "chrom_b", "pos_b", "gene_b", "sv_len", "vaf",
+                  "consequence", "impact", "support", "svtype_raw")
+
 # Panel-matching windows: single source of truth for sv_panel_hits() and the client-side filter
 SV_PANEL_WINDOW_BND   = 1e6   # distance from either breakend of a BND
 SV_PANEL_WINDOW_OTHER = 1e5   # distance from the span of a DEL/DUP/INV/INS
@@ -67,14 +74,71 @@ SV_YPOS    = c(INS = 1.0,       DEL = 0.66,      INV = 0.33,      DUP = 0.05)
   )
 }
 
-# Parse the somatic Severus VCF into one row per rearrangement: id, id_b, svtype, svclass, chrom_a, pos_a, chrom_b, pos_b, sv_len, vaf
-parse_severus_somatic_records = function(vcf_file) {
+# Per-caller VCF dialect. Both callers write one record per breakend and link mates by an
+# INFO key, but they disagree on its name, on where the allele fraction and read support live,
+# and on whether a deletion is a DEL record at all (SAVANA writes every rearrangement as a BND
+# pair and states the junction orientation in BP_NOTATION instead).
+#   mate_key        INFO key naming the mate record
+#   vaf_format      FORMAT key for the allele fraction, or NA
+#   vaf_info        INFO key for it, or NA (SAVANA's TUMOUR_AF is Number=2: this record's own
+#                   breakpoint first, its mate's second — the first value is taken)
+#   support_format  FORMAT key for supporting reads (Severus DV), or NA
+#   support_info    INFO key for it (SAVANA TUMOUR_READ_SUPPORT), or NA
+#   orientation     INFO key typing same-chromosome BND pairs (see SV_ORIENTATION_TYPES), or NA
+SV_CALLER_DIALECTS = list(
+  severus = list(mate_key = "MATE_ID", vaf_format = "VAF", vaf_info = NA_character_,
+                 support_format = "DV", support_info = NA_character_,
+                 orientation = NA_character_),
+  savana  = list(mate_key = "MATEID", vaf_format = NA_character_, vaf_info = "TUMOUR_AF",
+                 support_format = NA_character_, support_info = "TUMOUR_READ_SUPPORT",
+                 orientation = "BP_NOTATION")
+)
+
+# BP_NOTATION of a same-chromosome BND pair -> the contiguous type it is. Without this every
+# SAVANA deletion is an "intra-chr breakend": a junction with 1 Mb panel windows, an arc on the
+# breakend circos and no size (~1,150 of P15's 1,246 SAVANA pairs are small +- deletions).
+SV_ORIENTATION_TYPES = c("+-" = "DEL", "-+" = "DUP", "++" = "INV", "--" = "INV")
+
+# FORMAT/<key> of the first sample column, format-group by format-group as in parse_caller_vcf()
+.sv_format_val = function(dt, key) {
+  out = rep(NA_real_, nrow(dt))
+  if (is.na(key)) return(out)
+  for (fmt in unique(dt$FORMAT[!is.na(dt$FORMAT)])) {
+    idx_rows = which(dt$FORMAT == fmt)
+    k = match(key, strsplit(fmt, ":", fixed = TRUE)[[1]])
+    if (is.na(k)) next
+    split_s = strsplit(as.character(dt$SAMPLE1[idx_rows]), ":", fixed = TRUE)
+    out[idx_rows] = vapply(split_s, function(x)
+      if (length(x) >= k) suppressWarnings(as.numeric(x[k])) else NA_real_,
+      numeric(1))
+  }
+  out
+}
+
+# First value of a (possibly Number=2) numeric INFO key
+.sv_info_num = function(info, key) {
+  if (is.na(key)) return(rep(NA_real_, length(info)))
+  suppressWarnings(as.numeric(sub(",.*$", "", .info_val(info, key))))
+}
+
+# Severus' parser, kept by name: the section, the tests and the overview all call it
+parse_severus_somatic_records = function(vcf_file) parse_sv_vcf(vcf_file, "severus")
+
+# Parse a somatic SV VCF into one row per rearrangement:
+#   id, id_b, svtype, svtype_raw, svclass, chrom_a, pos_a, chrom_b, pos_b, sv_len, vaf, support
+# `caller` picks the dialect (SV_CALLER_DIALECTS). attr(, "n_records") is the VCF's record count
+# before mate collapsing, for the footnote.
+parse_sv_vcf = function(vcf_file, caller = "severus") {
   if (is.null(vcf_file) || !file.exists(vcf_file)) return(data.table())
+  d = SV_CALLER_DIALECTS[[caller]]
+  if (is.null(d)) stop("parse_sv_vcf(): no VCF dialect for caller '", caller, "'")
 
   dt = .severus_read_vcf(vcf_file, c("CHROM", "POS", "ID", "REF", "ALT", "QUAL",
                                      "FILTER", "INFO", "FORMAT", "SAMPLE1"))
   if (nrow(dt) == 0) return(data.table())
+  n_records = nrow(dt)
 
+  dt[, ID := as.character(ID)]
   dt[, CHROM := ensure_chr_prefix(CHROM)]
   dt[, SVTYPE := .info_val(INFO, "SVTYPE")]
   dt[, is_bnd := SVTYPE %in% BND_SVTYPES]
@@ -90,16 +154,18 @@ parse_severus_somatic_records = function(vcf_file) {
   dt[, `:=`(chrom_b = fifelse(is_bnd, partner$chrom, CHROM),
             pos_b   = fifelse(is_bnd, partner$pos,   as.integer(END)))]
 
-  dt[, mate_id := .info_val(INFO, "MATE_ID")]
+  dt[, mate_id := .info_val(INFO, d$mate_key)]
 
-  # Group mates on the unordered {ID, MATE_ID} pair (fallback: shared `_1`/`_2` stem); non-pairs stay as singletons
+  # Group mates on the unordered {ID, MATE_ID} pair (fallback for a breakend: shared `_1`/`_2`
+  # stem); non-pairs stay as singletons. The stem fallback is BND-only because SAVANA names its
+  # unpaired INS records `ID_n_1` too.
   dt[, pair_key := fifelse(!is.na(mate_id),
                            paste(pmin(ID, mate_id), pmax(ID, mate_id), sep = "|"),
-                           sub("_[12]$", "", ID))]
+                           fifelse(is_bnd, sub("_[12]$", "", ID), ID))]
   dt[, side_rank := fifelse(grepl("_1$", ID), 1L, 2L)]
   dt[, n_in_pair := .N, by = pair_key]
   if (any(dt$n_in_pair > 2L)) {
-    message("Severus VCF: ", sum(dt$n_in_pair > 2L),
+    message(caller, " VCF: ", sum(dt$n_in_pair > 2L),
             " records share a mate group with more than two members; kept unpaired.")
     dt[n_in_pair > 2L, pair_key := ID]
     dt[, n_in_pair := .N, by = pair_key]
@@ -109,6 +175,26 @@ parse_severus_somatic_records = function(vcf_file) {
 
   # The mate's record ID, which is what the per-side VEP annotation is keyed on.
   dt[, id_b := fifelse(n_in_pair == 2L & !is.na(mate_id), mate_id, NA_character_)]
+  dt[, svtype_raw := SVTYPE]
+
+  # Orientation typing (SAVANA): a same-chromosome mate pair becomes the contiguous type its
+  # BP_NOTATION describes and from here on is a span exactly like a Severus DEL/DUP/INV —
+  # svclass, panel windows, size, circos ring. svtype_raw keeps "BND". Interchromosomal pairs
+  # stay translocations; an orphaned record (mate filtered out) is not typed.
+  dt[, typed := FALSE]
+  if (!is.na(d$orientation)) {
+    dt[, orient := .info_val(INFO, d$orientation)]
+    dt[, typed := is_bnd & n_in_pair == 2L & !is.na(id_b) & !is.na(chrom_b) &
+                  chrom_b == CHROM & !is.na(pos_b) & orient %in% names(SV_ORIENTATION_TYPES)]
+    if (any(dt$typed)) {
+      dt[typed == TRUE, SVTYPE := unname(SV_ORIENTATION_TYPES[orient])]
+      # A span runs left to right (sv_display_columns() shows pos_b <= pos_a as a point);
+      # the ids swap with the loci so each side keeps its own VEP record
+      dt[typed == TRUE & pos_b < POS,
+         c("POS", "pos_b", "ID", "id_b") := .(pos_b, POS, id_b, ID)]
+      dt[typed == TRUE, is_bnd := FALSE]
+    }
+  }
 
   dt[, svclass := fcase(
     is_bnd & is.na(chrom_b),      "single breakend",
@@ -117,24 +203,23 @@ parse_severus_somatic_records = function(vcf_file) {
     default = SVTYPE
   )]
 
-  # VAF from FORMAT/SAMPLE1, split format-group by format-group as in parse_caller_vcf()
-  fmt_groups = unique(dt$FORMAT)
-  vaf_list = rep(NA_real_, nrow(dt))
-  for (fmt in fmt_groups) {
-    idx_rows = which(dt$FORMAT == fmt)
-    fields = strsplit(fmt, ":", fixed = TRUE)[[1]]
-    vaf_idx = match("VAF", fields)
-    if (is.na(vaf_idx)) next
-    split_s = strsplit(dt$SAMPLE1[idx_rows], ":", fixed = TRUE)
-    vaf_list[idx_rows] = vapply(split_s, function(x)
-      if (length(x) >= vaf_idx) suppressWarnings(as.numeric(x[vaf_idx])) else NA_real_,
-      numeric(1))
-  }
-  dt[, VAF := vaf_list]
+  # A typed pair's length is SVLEN where the caller wrote a positive one, else its span; a
+  # junction has none (SAVANA writes SVLEN=0 on a translocation)
+  dt[typed == TRUE & (is.na(SVLEN) | SVLEN <= 0L), SVLEN := as.integer(abs(pos_b - POS))]
+  dt[svclass %in% SV_JUNCTION_CLASSES & !is.na(SVLEN) & SVLEN == 0L, SVLEN := NA_integer_]
 
-  dt[, .(id = ID, id_b, svtype = SVTYPE, svclass,
-         chrom_a = CHROM, pos_a = POS, chrom_b, pos_b,
-         sv_len = SVLEN, vaf = VAF)]
+  vaf = .sv_format_val(dt, d$vaf_format)
+  if (!is.na(d$vaf_info)) vaf = fifelse(is.na(vaf), .sv_info_num(dt$INFO, d$vaf_info), vaf)
+  support = .sv_format_val(dt, d$support_format)
+  if (!is.na(d$support_info))
+    support = fifelse(is.na(support), .sv_info_num(dt$INFO, d$support_info), support)
+  dt[, `:=`(VAF = vaf, SUPPORT = as.integer(round(support)))]
+
+  out = dt[, .(id = ID, id_b, svtype = SVTYPE, svtype_raw, svclass,
+               chrom_a = CHROM, pos_a = POS, chrom_b, pos_b,
+               sv_len = SVLEN, vaf = VAF, support = SUPPORT)]
+  setattr(out, "n_records", n_records)
+  out
 }
 
 # Circos tracks from the collapsed records: BND links and a non-BND track with colour/y-position
@@ -167,15 +252,19 @@ build_sv_table_from_vep = function(records, vep_sv_vcf) {
   if (is.null(records) || nrow(records) == 0) return(data.table())
 
   sv = copy(records)
-  out_cols = c("id", "svclass", "svtype", "chrom_a", "pos_a", "gene_a",
-               "chrom_b", "pos_b", "gene_b", "sv_len", "vaf",
-               "consequence", "impact")
+  out_cols = SV_TABLE_COLS
+  # Hand-built records (tests, older callers) may predate the support/svtype_raw columns
+  if (!"support" %in% names(sv))    sv[, support := NA_integer_]
+  if (!"svtype_raw" %in% names(sv)) sv[, svtype_raw := svtype]
+  if (!"id_b" %in% names(sv))       sv[, id_b := NA_character_]
 
   vep = parse_vep_vcf(vep_sv_vcf)
   if (is.null(vep) || nrow(vep) == 0) {
     sv[, `:=`(gene_a = NA_character_, gene_b = NA_character_,
               consequence = NA_character_, impact = NA_character_)]
-    return(sv[, ..out_cols])
+    out = sv[, ..out_cols]
+    setattr(out, "n_annotated", 0L)
+    return(out)
   }
 
   # Highest-impact annotation first, so annot[1] below is the one that survives.
@@ -226,7 +315,13 @@ build_sv_table_from_vep = function(records, vep_sv_vcf) {
   sv[, `:=`(consequence = fifelse(use_b, b$consequence, a$consequence),
             impact      = fifelse(use_b, b$impact,      a$impact))]
 
-  sv[, ..out_cols]
+  # Join coverage for the footnote: rows with an annotation record on either side
+  src_ids = if (use_id) by_id$id else NULL
+  n_annot = if (use_id) sum(sv$id %in% src_ids | (!is.na(sv$id_b) & sv$id_b %in% src_ids))
+            else sum(paste(sv$chrom_a, sv$pos_a) %in% paste(by_locus$chrom, by_locus$pos))
+  out = sv[, ..out_cols]
+  setattr(out, "n_annotated", as.integer(n_annot))
+  out
 }
 
 # Readable locus/size/genes columns: span (DEL/DUP/INV/INS) vs junction (BND) is decided by svclass, not by chromosome; returns locus, locus_sort, size, size_bp, genes
@@ -298,7 +393,7 @@ sv_display_columns = function(sv_table, chrom_levels = NULL) {
              genes      = genes)
 }
 
-# Panel hits per SV row as "GENE (side, how)" labels ("" = none): coordinate panels match within the windows, symbol-only panels on VEP symbols; several panels union and add a " [name]" suffix. Mirrored by svPanelHits() in templates/per_sample.qmd
+# Panel hits per SV row as "GENE (side, how)" labels ("" = none): coordinate panels match within the windows, symbol-only panels on VEP symbols; several panels union and add a " [name]" suffix. Mirrored by svPanelHits() in templates/per_sample.qmd. Built on sv_panel_hit_table(), the long form
 sv_panel_hits = function(sv_table, panels,
                          bnd_window = SV_PANEL_WINDOW_BND,
                          other_window = SV_PANEL_WINDOW_OTHER) {
@@ -307,14 +402,15 @@ sv_panel_hits = function(sv_table, panels,
 
   ps = .as_panel_list(panels)
   if (length(ps) == 0) return(rep("", n))
-  if (length(ps) == 1) return(.sv_panel_hits_one(sv_table, ps[[1]], "", bnd_window, other_window))
 
-  per_panel = lapply(names(ps), function(nm)
-    .sv_panel_hits_one(sv_table, ps[[nm]], paste0(" [", nm, "]"), bnd_window, other_window))
-  vapply(seq_len(n), function(i) {
-    parts = unique(unlist(lapply(per_panel, `[[`, i), use.names = FALSE))
-    paste(parts[nzchar(parts)], collapse = ", ")
-  }, character(1))
+  ht = sv_panel_hit_table(sv_table, ps, bnd_window, other_window)
+  out = rep("", n)
+  if (nrow(ht) == 0) return(out)
+
+  lab = .sv_hit_labels(ht, tagged = length(ps) > 1)
+  per_row = lab[, .(hit = paste(unique(label), collapse = ", ")), by = row]
+  out[per_row$row] = per_row$hit
+  out
 }
 
 # A panel object and a list of panels are both plain lists; tell them apart by load_gene_panel()'s fields
@@ -329,39 +425,90 @@ sv_panel_hits = function(sv_table, panels,
   ps
 }
 
-# One panel's per-row labels. `tag` is appended to every label ("" for a lone panel).
-.sv_panel_hits_one = function(sv_table, panel, tag = "",
+# Long-form SV panel hits: one row per (sv row, gene, side, gap, panel), in label order.
+#   row     index into sv_table
+#   id      sv_table$id[row] (NA when the table has no id column)
+#   gene    panel gene (coordinate mode: the panel's interval_gene as written; symbol mode:
+#           the upper-cased VEP symbol)
+#   side    "A" | "B" (either breakend of a BND, or the annotated side in symbol mode) | "span"
+#   gap     0 when the locus overlaps the gene, else bp distance from the unpadded locus
+#   direct  gap == 0 (always TRUE in symbol mode: a VEP symbol sits on the breakend)
+#   panel   panel name (names(panels); a lone panel object is named by its $name)
+#   match   "coord" | "symbol" — which matching mode produced the row
+# A gene with several loci can appear more than once for one row/side, at different gaps —
+# exactly as the labels show it. `panels` is one load_gene_panel() object or a named list.
+sv_panel_hit_table = function(sv_table, panels,
+                              bnd_window = SV_PANEL_WINDOW_BND,
+                              other_window = SV_PANEL_WINDOW_OTHER) {
+  empty = data.table(row = integer(), id = character(), gene = character(),
+                     side = character(), gap = numeric(), direct = logical(),
+                     panel = character(), match = character())
+  n = if (is.null(sv_table)) 0L else nrow(sv_table)
+  ps = .as_panel_list(panels)
+  if (n == 0 || length(ps) == 0) return(empty)
+
+  parts = lapply(names(ps), function(nm) {
+    h = .sv_panel_hits_one(sv_table, ps[[nm]], bnd_window, other_window)
+    if (nrow(h) > 0) h[, panel := nm]
+    h
+  })
+  ht = rbindlist(c(list(empty[, !"id"]), parts), use.names = TRUE, fill = TRUE)
+  if (nrow(ht) == 0) return(empty)
+  ids = if ("id" %in% names(sv_table)) as.character(sv_table$id) else rep(NA_character_, n)
+  ht[, id := ids[row]]
+  ht[, direct := gap == 0]
+  ht[, names(empty), with = FALSE]
+}
+
+# Labels from the long form, in its order; consecutive symbol-mode genes on one side of one
+# row share a label ("A,B (A, direct)"), as the cell they were read from listed them.
+.sv_hit_labels = function(ht, tagged) {
+  ht = copy(ht)
+  ht[, tag := if (tagged) paste0(" [", panel, "]") else ""]
+  # Symbol-mode rows of one (row, side, panel) run collapse; coordinate rows stay one each
+  ht[, grp := rleid(row, side, panel, fifelse(match == "symbol", 0L, seq_len(.N)))]
+  ht[, .(row = row[1],
+         label = if (match[1] == "symbol")
+                   paste0(paste(gene, collapse = ","), " (", side[1], ", direct)", tag[1])
+                 else
+                   paste0(gene, " (", side, ", ",
+                          fifelse(gap == 0, "direct", fmt_bp(gap)), ")", tag)),
+     by = grp][, .(row, label)]
+}
+
+# One panel's hits, long form (row, gene, side, gap, match), in label order
+.sv_panel_hits_one = function(sv_table, panel,
                               bnd_window = SV_PANEL_WINDOW_BND,
                               other_window = SV_PANEL_WINDOW_OTHER) {
   n = nrow(sv_table)
-  if (is.null(panel)) return(rep("", n))
-
-  label = function(genes, side, how) paste0(genes, " (", side, ", ", how, ")", tag)
+  none = data.table(row = integer(), gene = character(), side = character(),
+                    gap = numeric(), match = character())
+  if (is.null(panel)) return(none)
 
   if (!isTRUE(panel$has_coords)) {
     # The SV-scoped subset, so an `applies_to = snv` gene cannot match a breakend. Falls
     # back to `genes` for a panel object built before the scope column (test fixtures).
-    symbols = toupper(if (!is.null(panel$genes_sv)) panel$genes_sv else panel$genes)
-    hit_side = function(col) {
-      if (!col %in% names(sv_table)) return(rep("", n))
-      vapply(sv_table[[col]], function(cell) {
-        if (is.na(cell) || !nzchar(cell)) return("")
+    symbols = toupper(unlist(if (!is.null(panel$genes_sv)) panel$genes_sv else panel$genes))
+    hit_side = function(col, side) {
+      if (!col %in% names(sv_table)) return(none)
+      g = lapply(sv_table[[col]], function(cell) {
+        if (is.na(cell) || !nzchar(cell)) return(character(0))
         g = trimws(unlist(strsplit(toupper(as.character(cell)), "[;,]+")))
-        g = unique(g[g %in% symbols])
-        if (length(g) == 0) "" else paste(g, collapse = ",")
-      }, character(1), USE.NAMES = FALSE)
+        unique(g[g %in% symbols])
+      })
+      data.table(row = rep.int(seq_len(n), lengths(g)),
+                 gene = as.character(unlist(g, use.names = FALSE)),
+                 side = side, gap = 0, match = "symbol")
     }
-    ha = hit_side("gene_a"); hb = hit_side("gene_b")
     # A VEP symbol sits on the breakend itself, so a symbol hit is always direct
-    return(vapply(seq_len(n), function(i) {
-      parts = c(if (nzchar(ha[i])) label(ha[i], "A", "direct"),
-                if (nzchar(hb[i])) label(hb[i], "B", "direct"))
-      paste(parts, collapse = ", ")
-    }, character(1)))
+    h = rbindlist(list(hit_side("gene_a", "A"), hit_side("gene_b", "B")))
+    if (nrow(h) == 0) return(none)
+    # Row-major, side A before B, genes in cell order (order() is stable)
+    return(h[order(row, side)])
   }
 
   iv = panel_intervals(panel)
-  if (is.null(iv) || nrow(iv) == 0) return(rep("", n))
+  if (is.null(iv) || nrow(iv) == 0) return(none)
 
   is_bnd = sv_table$svtype %in% BND_SVTYPES
   # `start`/`end` are window-padded for foverlaps(); `qlo`/`qhi` carry the unpadded locus for the distance
@@ -388,7 +535,7 @@ sv_panel_hits = function(sv_table, panels,
                qhi   = pmax(sv_table$pos_a[!is_bnd], sv_table$pos_b[!is_bnd]))
   ))
   q = q[!is.na(chrom) & !is.na(start) & !is.na(end)]
-  if (nrow(q) == 0) return(rep("", n))
+  if (nrow(q) == 0) return(none)
   q[, start := pmax(as.numeric(start), 0)]
   q[, end   := as.numeric(end)]
   q[, `:=`(qlo = as.numeric(qlo), qhi = as.numeric(qhi))]
@@ -398,16 +545,14 @@ sv_panel_hits = function(sv_table, panels,
 
   ov = data.table::foverlaps(q, iv, by.x = c("chrom", "start", "end"),
                              type = "any", nomatch = NULL)
-  if (nrow(ov) == 0) return(rep("", n))
+  if (nrow(ov) == 0) return(none)
 
   # `start`/`end` are the gene's interval here (foverlaps() renamed the query to i.start/i.end)
   ov[, gap := pmax(0, pmax(start - qhi, qlo - end))]
-  ov[, how := fifelse(gap == 0, "direct", fmt_bp(gap))]
-
-  per_row = ov[, .(hit = paste(unique(label(gene, side, how)), collapse = ", ")), by = row]
-  out = rep("", n)
-  out[per_row$row] = per_row$hit
-  out
+  # Rows in foverlaps() order, grouped by row (stable): within a row, side A's hits, then B's
+  ov = ov[order(row)]
+  # The same gene/side/gap twice (one symbol, two overlapping loci) is one label
+  unique(ov[, .(row, gene, side, gap = as.numeric(gap), match = "coord")])
 }
 
 # Parse the gene-annotated Severus TSV (filtered_SV2/SV_filtered_with_gene_annotations.tsv)
@@ -456,6 +601,8 @@ build_sv_table = function(sv_tsv) {
     sv_len  = suppressWarnings(as.integer(col("SV_LEN", NA_integer_))),
     vaf     = suppressWarnings(as.numeric(col("VAF", NA_real_))),
     consequence = as.character(col("DETAILED_TYPE", NA_character_)),
-    impact  = NA_character_
+    impact  = NA_character_,
+    support = NA_integer_,
+    svtype_raw = svtype
   )
 }

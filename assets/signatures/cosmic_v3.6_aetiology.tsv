@@ -1,0 +1,151 @@
+# COSMIC v3.6 mutational signatures: proposed aetiology, abbreviated for the report.
+# Conservative by design: where the aetiology was not certain it reads Unknown.
+signature	context	aetiology	artefact	note
+SBS1	SBS	Clock-like (5mC deamination)	FALSE	Accumulates with age in most cell types
+SBS2	SBS	APOBEC activity	FALSE	
+SBS3	SBS	Defective HR (BRCA1/2)	FALSE	
+SBS4	SBS	Tobacco smoking	FALSE	
+SBS5	SBS	Clock-like (mechanism unknown)	FALSE	Accumulates with age in most cell types
+SBS6	SBS	Defective MMR	FALSE	
+SBS7a	SBS	UV light	FALSE	
+SBS7b	SBS	UV light	FALSE	
+SBS7c	SBS	UV light	FALSE	
+SBS7d	SBS	UV light	FALSE	
+SBS8	SBS	Unknown	FALSE	
+SBS9	SBS	Polymerase eta (somatic hypermutation)	FALSE	Seen in lymphoid tumours, linked to polymerase eta activity during somatic hypermutation
+SBS10a	SBS	POLE exonuclease mutation	FALSE	
+SBS10b	SBS	POLE exonuclease mutation	FALSE	
+SBS10c	SBS	Defective POLD1 proofreading	FALSE	
+SBS10d	SBS	Defective POLD1 proofreading	FALSE	
+SBS11	SBS	Temozolomide	FALSE	
+SBS12	SBS	Unknown	FALSE	
+SBS13	SBS	APOBEC activity	FALSE	
+SBS14	SBS	POLE mutation with defective MMR	FALSE	
+SBS15	SBS	Defective MMR	FALSE	
+SBS16	SBS	Unknown	FALSE	Associated with alcohol consumption in liver cancer
+SBS17a	SBS	Unknown	FALSE	
+SBS17b	SBS	Unknown	FALSE	Reported after fluorouracil treatment; also proposed oxidative damage
+SBS18	SBS	Reactive oxygen species	FALSE	
+SBS19	SBS	Unknown	FALSE	
+SBS20	SBS	POLD1 mutation with defective MMR	FALSE	
+SBS21	SBS	Defective MMR	FALSE	
+SBS22a	SBS	Aristolochic acid	FALSE	
+SBS22b	SBS	Aristolochic acid	FALSE	
+SBS22c	SBS	Unknown	FALSE	
+SBS23	SBS	Unknown	FALSE	
+SBS24	SBS	Aflatoxin	FALSE	
+SBS25	SBS	Chemotherapy (agent unknown)	FALSE	
+SBS26	SBS	Defective MMR	FALSE	
+SBS27	SBS	Possible sequencing artefact	TRUE	
+SBS28	SBS	Unknown	FALSE	Often found with POLE exonuclease mutations
+SBS29	SBS	Tobacco chewing	FALSE	
+SBS30	SBS	Defective BER (NTHL1)	FALSE	
+SBS31	SBS	Platinum chemotherapy	FALSE	
+SBS32	SBS	Azathioprine	FALSE	
+SBS33	SBS	Unknown	FALSE	
+SBS34	SBS	Unknown	FALSE	
+SBS35	SBS	Platinum chemotherapy	FALSE	
+SBS36	SBS	Defective BER (MUTYH)	FALSE	
+SBS37	SBS	Unknown	FALSE	
+SBS38	SBS	UV light (indirect)	FALSE	
+SBS39	SBS	Unknown	FALSE	
+SBS40a	SBS	Unknown	FALSE	
+SBS40b	SBS	Unknown	FALSE	
+SBS40c	SBS	Unknown	FALSE	
+SBS41	SBS	Unknown	FALSE	
+SBS42	SBS	Haloalkane exposure	FALSE	
+SBS43	SBS	Possible sequencing artefact	TRUE	
+SBS44	SBS	Defective MMR	FALSE	
+SBS45	SBS	Possible sequencing artefact	TRUE	8-oxoguanine introduced during sequencing
+SBS46	SBS	Possible sequencing artefact	TRUE	
+SBS47	SBS	Possible sequencing artefact	TRUE	
+SBS48	SBS	Possible sequencing artefact	TRUE	
+SBS49	SBS	Possible sequencing artefact	TRUE	
+SBS50	SBS	Possible sequencing artefact	TRUE	
+SBS51	SBS	Possible sequencing artefact	TRUE	
+SBS52	SBS	Possible sequencing artefact	TRUE	
+SBS53	SBS	Possible sequencing artefact	TRUE	
+SBS54	SBS	Possible sequencing artefact	TRUE	
+SBS55	SBS	Possible sequencing artefact	TRUE	
+SBS56	SBS	Possible sequencing artefact	TRUE	
+SBS57	SBS	Possible sequencing artefact	TRUE	
+SBS58	SBS	Possible sequencing artefact	TRUE	
+SBS59	SBS	Possible sequencing artefact	TRUE	
+SBS60	SBS	Possible sequencing artefact	TRUE	
+SBS84	SBS	AID activity	FALSE	Activation-induced cytidine deaminase; lymphoid tumours
+SBS85	SBS	AID activity (indirect)	FALSE	Indirect effects of activation-induced cytidine deaminase; lymphoid tumours
+SBS86	SBS	Chemotherapy (agent unknown)	FALSE	
+SBS87	SBS	Thiopurine chemotherapy	FALSE	
+SBS88	SBS	Colibactin (pks+ E. coli)	FALSE	
+SBS89	SBS	Unknown	FALSE	
+SBS90	SBS	Duocarmycin	FALSE	
+SBS91	SBS	Unknown	FALSE	
+SBS92	SBS	Tobacco smoking	FALSE	
+SBS93	SBS	Unknown	FALSE	
+SBS94	SBS	Unknown	FALSE	
+SBS95	SBS	Possible sequencing artefact	TRUE	
+SBS96	SBS	Unknown	FALSE	
+SBS97	SBS	Unknown	FALSE	
+SBS98	SBS	Unknown	FALSE	
+SBS99	SBS	Melphalan	FALSE	
+SBS100	SBS	Unknown	FALSE	
+SBS101	SBS	Unknown	FALSE	
+SBS102	SBS	Unknown	FALSE	
+SBS103	SBS	Unknown	FALSE	
+SBS104	SBS	Unknown	FALSE	
+SBS105	SBS	Unknown	FALSE	
+SBS106	SBS	Unknown	FALSE	
+SBS107	SBS	Unknown	FALSE	
+SBS108	SBS	Unknown	FALSE	
+SBS109	SBS	Unknown	FALSE	
+SBS110	SBS	Unknown	FALSE	
+SBS111	SBS	Unknown	FALSE	
+SBS112	SBS	Unknown	FALSE	
+SBS113	SBS	Unknown	FALSE	
+DBS1	DBS	UV light	FALSE	
+DBS2	DBS	Tobacco smoking / other mutagens	FALSE	
+DBS3	DBS	POLE exonuclease mutation	FALSE	
+DBS4	DBS	Unknown	FALSE	
+DBS5	DBS	Platinum chemotherapy	FALSE	
+DBS6	DBS	Unknown	FALSE	
+DBS7	DBS	Defective MMR	FALSE	
+DBS8	DBS	Unknown	FALSE	
+DBS9	DBS	Unknown	FALSE	
+DBS10	DBS	Defective MMR	FALSE	
+DBS11	DBS	Unknown	FALSE	
+DBS12	DBS	Unknown	FALSE	
+DBS13	DBS	Unknown	FALSE	
+DBS14	DBS	Unknown	FALSE	
+DBS15	DBS	Unknown	FALSE	
+DBS16	DBS	Unknown	FALSE	
+DBS17	DBS	Unknown	FALSE	
+DBS18	DBS	Unknown	FALSE	
+DBS19	DBS	Unknown	FALSE	
+DBS20	DBS	Unknown	FALSE	
+DBS21	DBS	Unknown	FALSE	
+DBS22	DBS	Unknown	FALSE	
+ID1	ID	Replication slippage	FALSE	Elevated in defective MMR
+ID2	ID	Replication slippage	FALSE	Elevated in defective MMR
+ID3	ID	Tobacco smoking	FALSE	
+ID4	ID	Unknown	FALSE	
+ID5	ID	Unknown	FALSE	
+ID6	ID	Defective HR (BRCA1/2)	FALSE	
+ID7	ID	Defective MMR	FALSE	
+ID8	ID	Double-strand break repair (NHEJ)	FALSE	
+ID9	ID	Unknown	FALSE	
+ID10	ID	Unknown	FALSE	
+ID11	ID	Unknown	FALSE	
+ID12	ID	Unknown	FALSE	
+ID13	ID	UV light	FALSE	
+ID14	ID	Unknown	FALSE	
+ID15	ID	Unknown	FALSE	
+ID16	ID	Unknown	FALSE	
+ID17	ID	TOP2A mutation	FALSE	
+ID18	ID	Colibactin (pks+ E. coli)	FALSE	
+ID19	ID	Unknown	FALSE	
+ID20	ID	Unknown	FALSE	
+ID21	ID	Unknown	FALSE	
+ID22	ID	Unknown	FALSE	
+ID23	ID	Unknown	FALSE	
+ID24	ID	Unknown	FALSE	
+ID25	ID	Unknown	FALSE	
