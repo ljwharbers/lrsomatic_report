@@ -233,7 +233,8 @@ key findings) is computed from the full table in either mode.
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 `wakhan/*_heatmap_ploidy_purity.html`; the report names them.
 
-> **Changed in 2.0.0rc2:**
+> **Changed in 2.0.0** (tested in the pipeline first through the pre-releases `2.0.0rc1` and
+> `2.0.0rc2`; the release itself changes only `VERSION`, `recipe/meta.yaml` and this note):
 > - The genome circos **labels the key findings**: the tier 1–2 genes of the ticked gene
 >   list(s), outside the ideogram, bold for tier 1. They follow the chips, like the overview;
 >   with no list ticked there are none.
@@ -241,9 +242,6 @@ output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 >   chromosomes with a high-impact call (see [Report size](#report-size-and---embed)).
 > - A **light / dark mode toggle** in the header. The choice is remembered by the browser; a
 >   printout is always light.
->
-> **Changed in v2.0** (released first as the pre-release `2.0.0rc1`, so the pipeline can test
-> against a real image; the final `2.0.0` changes only `VERSION` and `recipe/meta.yaml`):
 > - New **clinical overview** at the top: key findings by gene list, genome-wide biomarkers
 >   and a print layout that puts the overview on the first page(s). It replaces the summary
 >   cards. The old **"SNVs" card counted SNVs and indels together**; its successor is the
@@ -509,7 +507,7 @@ Auto-detection reads `##contig` lines from the VEP somatic VCF.
 ### Container (recommended)
 
 Every release is published as a container, so nothing needs installing (`<version>` is the
-content of `VERSION`, e.g. `2.0.0rc1`):
+content of `VERSION`, e.g. `2.0.0`):
 
 ```bash
 # Docker / Podman
