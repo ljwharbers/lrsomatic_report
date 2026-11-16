@@ -39,12 +39,38 @@ if (!is.null(circos_tmp) && file.exists(circos_tmp)) {
     })
   }
 
+  # Driver labels (assets/js/circos_drivers.js) go in an overlay sharing the image's viewBox;
+  # anchors and geometry come from draw_circos(), the label rows from circos_driver_rows()
+  geom = if (!is.null(circos_res)) circos_res$geometry else NULL
+  anchors = if (!is.null(circos_res)) circos_res$anchors else NULL
+  has_labels = !is.null(geom) && !is.null(anchors) && nrow(anchors) > 0
+  # js_quote() escapes only double quotes: keep the free-text column to one safe line
+  lab_rows = circos_labels[label %in% anchors$gene]
+  if (nrow(lab_rows) > 0)
+    lab_rows[, alteration := gsub("</", "<\\/", gsub("[\\\\\r\n\t]+", " ", alteration), fixed = TRUE)]
+  drivers_js = if (has_labels) tags$script(HTML(paste0(
+    "window.CIRCOS_DRIVERS = {geom: {",
+    paste(sprintf("%s: %s", names(geom), vapply(geom, js_num, character(1))), collapse = ", "),
+    "},\n  anchors: ", js_rows(anchors, c("gene", "theta", "x", "y")),
+    ",\n  rows: ", js_rows(lab_rows,
+                          c("label", "group", "genes", "panels", "tier", "type", "alteration")),
+    "};"))) else NULL
+  # No viewBox in the markup: circos_drivers.js sets it from geom (Quarto lowercases
+  # attributes on markup it processes, and an SVG `viewbox` is ignored)
+  plate = tags$div(class = "circos-plate",
+    tags$img(src = paste0("data:image/svg+xml;base64,", img_b64), alt = "Genome circos plot"),
+    if (has_labels) tags$svg(class = "circos-drivers", `aria-hidden` = "true")
+  )
+
   # Plate and legend side by side (.circos-figure grid); the track order is the caption
   tags$div(class = "circos-figure",
-    tags$figure(class = "circos-container",
-      tags$img(src   = paste0("data:image/svg+xml;base64,", img_b64),
-               style = "max-width:680px; display:block; margin:auto;"),
+    drivers_js,
+    tags$figure(class = paste("circos-container", if (has_labels) "has-driver-labels"),
+      plate,
+      if (has_labels) tags$p(class = "circos-drivers-hint report-figure__caption",
+                             "Tick a gene list to label its tier 1–2 findings."),
       tags$figcaption(class = "report-figure__caption",
+        if (has_labels) "Gene labels: the tier 1–2 key findings of the ticked gene list(s), bold for tier 1.",
         "Tracks, outer to inner: ideogram · SNV density · SV · copy number.",
         # One string: adjacent tagList members render with a space, which would orphan the "."
         paste0(sprintf("SNV density is the number of somatic single-nucleotide variants per %s window",

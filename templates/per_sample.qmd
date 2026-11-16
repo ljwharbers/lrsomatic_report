@@ -10,6 +10,11 @@ format:
     theme: [flatly, ../assets/styles/report.scss]
     code-fold: true
     page-layout: full
+    # The reader's light/dark choice (header toggle, templates/sections/_header.qmd), applied
+    # before first paint so a dark pick does not flash light; same storage key in both places
+    include-in-header:
+      text: |
+        <script>try { var t = localStorage.getItem("lrsomatic-report-theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}</script>
 params:
   sample_id:     "SAMPLE"
   sample_dir:    ""
@@ -141,24 +146,6 @@ if (!is.null(vep_data) && nrow(vep_data) > 0) {
   snv_circos = unique(vep_data[, .(chrom, pos, ref, alt)])
 }
 
-# Draw circos to temp file, then embed as base64
-circos_tmp = tempfile(fileext = ".svg")
-tryCatch({
-  draw_circos(
-    snv_data    = snv_circos,
-    sv_nontrans = SECTION_DATA$sv$circos$nontrans,
-    sv_trans    = SECTION_DATA$sv$circos$translocations,
-    cnv_data    = ascat_segments,
-    cytobands   = cytobands,
-    chrom_lengths = chrom_lens,
-    chromosomes = chromosomes,
-    output_path = circos_tmp
-  )
-}, error = function(e) {
-  message("Circos plot failed: ", e$message)
-  circos_tmp <<- NULL
-})
-
 # Summary counts
 sv_table = SECTION_DATA$sv$table
 # All small variants (SNVs + indels), unique chrom/pos/ref/alt; kept under its old name
@@ -185,6 +172,30 @@ report_counts = list(small_variants = sv_counts, n_sv = n_sv,
                      sv_caller = sv_primary_caller)
 OVERVIEW = build_overview(variant_table, SECTION_DATA, all_panels, ascat_pp, tmb_info,
                           report_counts, ctx)
+
+# Genome circos, after the overview: its driver labels are the overview's tier 1-2 findings
+# (circos_driver_rows() in R/key_findings.R). Drawn to a temp SVG that sections/_circos.qmd
+# embeds as base64; the labels are drawn over it in the browser (assets/js/circos_drivers.js)
+circos_labels = circos_driver_rows(OVERVIEW$findings)
+circos_loci = circos_label_loci(circos_labels$label, all_panels, SECTION_DATA, variant_table)
+circos_tmp = tempfile(fileext = ".svg")
+circos_res = NULL
+tryCatch({
+  circos_res = draw_circos(
+    snv_data    = snv_circos,
+    sv_nontrans = SECTION_DATA$sv$circos$nontrans,
+    sv_trans    = SECTION_DATA$sv$circos$translocations,
+    cnv_data    = ascat_segments,
+    cytobands   = cytobands,
+    chrom_lengths = chrom_lens,
+    chromosomes = chromosomes,
+    output_path = circos_tmp,
+    label_loci  = circos_loci
+  )
+}, error = function(e) {
+  message("Circos plot failed: ", e$message)
+  circos_tmp <<- NULL
+})
 ```
 
 ```{r panel-js-data, results='asis'}
@@ -533,5 +544,12 @@ cat("\n</script>\n")
 # Overview interactivity, inlined from key_findings.js the same way; registers through window.registerPanelListener (panel-js-data chunk)
 cat("<script>\n")
 cat(readLines(file.path(params$repo_dir, "assets/js/key_findings.js")), sep = "\n")
+cat("\n</script>\n")
+```
+
+```{r circos-drivers-js, results='asis'}
+# Circos driver labels, inlined after key_findings.js: it reuses window.keyFindings.kfRowMatches
+cat("<script>\n")
+cat(readLines(file.path(params$repo_dir, "assets/js/circos_drivers.js")), sep = "\n")
 cat("\n</script>\n")
 ```
