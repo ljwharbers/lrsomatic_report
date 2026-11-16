@@ -1270,13 +1270,34 @@ main > p:last-child em,
 }
 
 // ============================================================
-// Max-width guard for full-page-layout
+// Page width: let the content column use a large monitor
 // ============================================================
-// Wide enough that tables and the overview use a large monitor (figures do not grow: their
-// embeds only ever shrink), bounded so table rows on an ultrawide stay scannable
-.page-full .quarto-title-block,
-.page-full > .column-body {
-  max-width: 2200px;
+// `page-layout: full` alone does not widen anything here: with a left TOC, Quarto's grid
+// (`body:not(.floating):not(.docked) .page-columns.toc-left`, >= 992px) caps the content
+// column at calc(800px - 3em) plus a 200px margin column, and hands every remaining pixel to
+// two `5fr` gutters — about 1,075px of content on any screen. The report has no margin content
+// (the TOC is on the left), so the margin columns are folded away and the content column grows
+// to CONTENT_MAX; past that the two gutters share what is left, keeping the page centred.
+// Figures do not grow with it: their embeds only ever shrink. The same line names are kept
+// (the TOC sits in page-start/body-start, main in body-content-start/page-end), and the
+// nested-grid selector is overridden alongside, as Quarto defines both.
+$content-max: 2000px;
+@media (min-width: 992px) {
+  body:not(.floating):not(.docked) #quarto-content.page-columns.toc-left,
+  body:not(.floating):not(.docked) #quarto-content.page-columns.toc-left .page-columns {
+    grid-template-columns:
+      [screen-start] 1.5em
+      [screen-start-inset] minmax(0, 1fr)
+      [page-start] 35px
+      [page-start-inset] minmax(0px, 220px)
+      [body-start-outset] 35px
+      [body-start] 1.5em
+      [body-content-start] minmax(450px, $content-max)
+      [body-content-end] 1.5em
+      [body-end body-end-outset page-end-inset page-end] minmax(0, 1fr)
+      [screen-end-inset] 1.5em
+      [screen-end];
+  }
 }
 
 // ============================================================
