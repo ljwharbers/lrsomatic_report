@@ -381,6 +381,20 @@ test_that("signatures use only `dominant`, mark artefacts, and say when nothing 
                "no well-fitted signature")
 })
 
+test_that("the overview reports SBS signatures only, never an indel or doublet fit", {
+  sg = list(dominant = data.table(context = c("SBS", "ID", "ID"),
+                                  signature = c("SBS5", "ID2", "ID7"),
+                                  mutations = c(900, 70, 30), pct = c(100, 70, 30),
+                                  aetiology = c("Clock-like", "Replication slippage", "Defective MMR"),
+                                  artefact = FALSE))
+  b = build_biomarkers(list(signatures = sg), NULL, NULL, list())
+  expect_equal(b$signatures$value, "SBS5")
+  expect_false(any(grepl("ID7|Defective MMR", b$signatures$items)))
+  sg$dominant = sg$dominant[context == "ID"]
+  expect_equal(build_biomarkers(list(signatures = sg), NULL, NULL, list())$signatures$value,
+               "no well-fitted signature")
+})
+
 test_that("tumour-only mode is reported for the caveat", {
   o = build_overview(NULL, list(), list(), NULL, NULL, list(),
                      list(outputs = list(mode = "tumour-only")))
