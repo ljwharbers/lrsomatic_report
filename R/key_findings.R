@@ -819,6 +819,55 @@ build_findings = function(variant_table, section_data, all_panels, reference) {
   list(findings = rows[], per_panel_n = per_panel_n, n_nonpanel = n_nonpanel)
 }
 
+# ---- circos driver labels ------------------------------------------------------------------
+
+# Tiers the genome circos labels (assets/js/circos_drivers.js shows those of the ticked lists)
+CIRCOS_LABEL_TIERS = 1:2
+
+# Tier 1-2 finding lines as label rows: one row per (line, member gene), so the joined
+# "EWSR1–ATF1" row labels EWSR1 and ATF1 at their own loci. `group` is the line's `gene`
+# (its key-findings group), `genes` the group's members, which is what a Custom… list matches.
+circos_driver_rows = function(findings) {
+  empty = data.table(label = character(), group = character(), genes = character(),
+                     panels = character(), tier = integer(), type = character(),
+                     alteration = character())
+  if (is.null(findings) || nrow(findings) == 0) return(empty)
+  # Non-panel rows (panels "") stay: a typed Custom… list labels them, as the overview shows them
+  f = findings[tier %in% CIRCOS_LABEL_TIERS]
+  if (nrow(f) == 0) return(empty)
+  members = strsplit(ifelse(nzchar(f$genes), f$genes, f$gene), ",", fixed = TRUE)
+  idx = rep(seq_len(nrow(f)), lengths(members))
+  out = data.table(label = trimws(unlist(members)), group = f$gene[idx], genes = f$genes[idx],
+                   panels = f$panels[idx], tier = as.integer(f$tier[idx]), type = f$type[idx],
+                   alteration = f$alteration[idx])
+  unique(out[nzchar(label)])
+}
+
+# One locus per label gene, data.table(gene, chrom, pos): the midpoint of its first interval in
+# any embedded list (every row with coordinates, not only SV-scoped ones), else its gene-level
+# CN row, else its first small variant in the table; a gene with none of these has no label.
+circos_label_loci = function(genes, all_panels, section_data = list(), variant_table = NULL) {
+  empty = data.table(gene = character(), chrom = character(), pos = numeric())
+  genes = unique(genes[!is.na(genes) & nzchar(genes)])
+  if (length(genes) == 0) return(empty)
+  key = toupper(genes)
+  panels = if (is.null(all_panels)) list() else all_panels[vapply(all_panels, is.list, logical(1))]
+  src = list(rbindlist(lapply(panels, panel_gene_intervals, scope = "all")))
+  cg = section_data$cna$genes
+  if (!is.null(cg) && nrow(cg) > 0 && all(c("gene", "chrom", "start", "end") %in% names(cg)))
+    src[[2]] = cg[, .(chrom, start, end, gene)]
+  if (!is.null(variant_table) && nrow(variant_table) > 0 && "symbol" %in% names(variant_table))
+    src[[3]] = variant_table[!is.na(symbol), .(chrom, start = pos, end = pos, gene = symbol)]
+  src = rbindlist(src, use.names = TRUE, fill = TRUE)
+  if (nrow(src) == 0) return(empty)
+  src = src[!is.na(chrom) & !is.na(start) & !is.na(end)]
+  src[, gkey := toupper(gene)]
+  src = src[gkey %in% key & !duplicated(gkey)]
+  if (nrow(src) == 0) return(empty)
+  data.table(gene = genes[match(src$gkey, key)], chrom = ensure_chr_prefix(src$chrom),
+             pos = (as.numeric(src$start) + as.numeric(src$end)) / 2)
+}
+
 # ---- biomarkers ----------------------------------------------------------------------------
 
 kf_bm = function(id, label, value, detail = NULL, status = "ok") {
