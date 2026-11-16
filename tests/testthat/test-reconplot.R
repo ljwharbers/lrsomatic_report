@@ -62,12 +62,14 @@ test_that("no ReConPlot output parses to NULL", {
 test_that("ReConPlot chromosomes: ShatterSeek and Padfoot HIGH always, findings per list", {
   ss = data.table(chrom = c("7", "chr3"), confidence = c("high", "none"))
   # Plain HIGH (chr20) is too common to select by; HIGH_ONCO is the cancer-gene rating
-  # Both mates of the translocation, in Padfoot's "GENE (where)" notation
-  sv = data.table(chrom_a = c("chr22", "chr12", "chr1", "chr20"),
-                  chrom_b = c("chr12", "chr22", "chr1", "chr20"),
-                  padfoot_impact = c("HIGH_ONCO", "HIGH_ONCO", "LOW", "HIGH"),
+  # Both mates of the translocation, in Padfoot's "GENE (where)" notation; HIGH_TSG is a
+  # cancer-gene rating too (chr13), plain HIGH is not (chr20)
+  sv = data.table(chrom_a = c("chr22", "chr12", "chr1", "chr20", "chr13"),
+                  chrom_b = c("chr12", "chr22", "chr1", "chr20", "chr13"),
+                  padfoot_impact = c("HIGH_ONCO", "HIGH_ONCO", "LOW", "HIGH", "HIGH_TSG"),
                   padfoot_genes = c("EWSR1 (intron7), ATF1 (intron3)",
-                                    "ATF1 (intron3), EWSR1 (intron7)", NA, "MACROD2"))
+                                    "ATF1 (intron3), EWSR1 (intron7)", NA, "MACROD2",
+                                    "RB1 (exon3)"))
   f = data.table(gene = c("EWSR1–ATF1", "CDKN2A", "CDKN2A", "KMT2D", "MYC"),
                  genes = c("EWSR1,ATF1", "CDKN2A", "CDKN2A", "KMT2D", "MYC"),
                  type = c("SV", "SV", "CNA", "small variant", "SV"),
@@ -81,8 +83,10 @@ test_that("ReConPlot chromosomes: ShatterSeek and Padfoot HIGH always, findings 
   r = reconplot_chromosomes(f, sv, ss)
   setkey(r, chrom)
   # chr3's call has confidence none, chr1's SV is not HIGH; small variants and tier 3 never select
-  expect_setequal(r$chrom, c("chr7", "chr22", "chr12", "chr9"))
+  expect_setequal(r$chrom, c("chr7", "chr22", "chr12", "chr9", "chr13"))
   expect_true(r["chr7"]$always)
+  expect_true(r["chr13"]$always)
+  expect_equal(r["chr13"]$reasons, "Padfoot HIGH_TSG: RB1")
   expect_true(r["chr22"]$always)
   # One Padfoot reason per rating, symbols only, mates collapsed; alterations cut at the locus
   expect_equal(r["chr22"]$reasons,
