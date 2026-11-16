@@ -1,6 +1,11 @@
 .worktrees/
 .claude/worktrees/
 
+# Nextflow run state from staging tests: local-only, and it records cluster paths
+.nextflow/
+.nextflow.log*
+work/
+
 # Rendered reports. These embed real sample data (sample IDs, variant tables),
 # and this repository is public -- never commit them.
 *.html
