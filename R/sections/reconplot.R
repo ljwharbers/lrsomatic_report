@@ -15,8 +15,9 @@
 # Which per-chromosome figures slim mode embeds, and why. One row per chromosome:
 #   data.table(chrom, always, panels, genes, reasons)
 #   always   TRUE for a list-independent reason: a ShatterSeek call (any combination, any
-#            confidence but "none") or an SV Padfoot rated HIGH_ONCO or another HIGH_ subtype
-#            (either breakend's contig). Plain HIGH (score 3) does not count: on CCS15-PB it
+#            confidence but "none") or an SV with a Padfoot cancer-gene rating: any HIGH_ class
+#            (HIGH_ONCO, HIGH_TSG; the set is open-ended, as _sv.qmd also treats it), on either
+#            breakend's contig. Plain HIGH (score 3) does not count: on CCS15-PB it
 #            selected 12 chromosomes for USH2A, PRSS2, MACROD2 and other fragile-site genes;
 #            HIGH_ONCO picked out exactly ALK, CDKN2A, EWSR1–ATF1, NSD3, PRKN and CNTNAP2
 #   panels / genes  comma-joined lists and member genes of the tier 1-2 SV / CNA key findings

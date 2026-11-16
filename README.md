@@ -220,9 +220,9 @@ one of them. Slim mode embeds:
 - the rank-1 Wakhan profile only;
 - no genome-wide ReConPlot figure (at page width it is unreadable), and per-chromosome
   figures only for chromosomes with a high-impact call: a ShatterSeek chromothripsis call or
-  an SV Padfoot rated `HIGH_ONCO` (always shown), or a tier 1–2 SV or copy-number key finding
-  of a gene list (shown while that list is ticked). Padfoot's plain `HIGH` does not count: it
-  is common in large fragile-site genes;
+  an SV with a Padfoot cancer-gene rating, `HIGH_ONCO` or `HIGH_TSG` (always shown), or a
+  tier 1–2 SV or copy-number key finding of a gene list (shown while that list is ticked).
+  Padfoot's plain `HIGH` does not count: it is common in large fragile-site genes;
 - the first six CoRAL amplicon plots;
 - no ASCAT diagnostic plots (GC correction, tumour separation).
 

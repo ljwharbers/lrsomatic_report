@@ -33,7 +33,8 @@ if (!is.null(reconplot)) {
       'coloured by type, from ReConPlot; one figure set per SV caller / copy-number source.',
       if (!full_embed) paste(
         'Shown: the chromosomes with a high-impact call, that is a ShatterSeek chromothripsis',
-        'call or an SV Padfoot rated HIGH_ONCO (always), or a tier 1–2 SV or copy-number key finding',
+        'call or an SV Padfoot gave a cancer-gene rating (HIGH_ONCO, HIGH_TSG; always), or a tier 1–2',
+        'SV or copy-number key finding',
         'of the ticked gene list(s).'),
       '</p>\n\n')
 
@@ -60,7 +61,7 @@ if (!is.null(reconplot)) {
     if (length(show) == 0) {
       raw_html(section_notice(if (length(chroms) == 0)
         "No per-chromosome ReConPlot figure for this combination."
-        else "No chromosome has a chromothripsis call, an SV Padfoot rated HIGH_ONCO or a tier 1–2 SV or copy-number key finding in any gene list."))
+        else "No chromosome has a chromothripsis call, an SV with a Padfoot cancer-gene rating (HIGH_ONCO, HIGH_TSG) or a tier 1–2 SV or copy-number key finding in any gene list."))
     } else {
       s = sel[match(show, chrom)]
       figs = lapply(seq_along(show), function(i) {
