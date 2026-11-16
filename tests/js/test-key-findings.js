@@ -70,6 +70,40 @@ const b = kf.kfSummarise(rows, state, false);
 check("idempotent", a, b);
 check("state untouched", state, st(["lymphoid"], ["ATF1"]));
 
+// ---- gene groups ---------------------------------------------------------------------------
+// R order: group 0 = KRAS (tier 2 only), group 1 = CDKN2A (CN tier 1 in sarcoma, SV tier 3
+// in lymphoid), group 2 = EWSR1–ATF1 joined row (genes from the tbody), group 3 = MYC tier 1
+const grows = [
+  { gene: "KRAS",       genes: ["KRAS"],          group: 0, panels: ["lymphoid"],            tier: 2 },
+  { gene: "CDKN2A",     genes: ["CDKN2A"],        group: 1, panels: ["sarcoma"],             tier: 1 },
+  { gene: "CDKN2A",     genes: ["CDKN2A"],        group: 1, panels: ["lymphoid"],            tier: 3 },
+  { gene: "EWSR1–ATF1", genes: ["EWSR1", "ATF1"], group: 2, panels: ["sarcoma", "lymphoid"], tier: 1 },
+  { gene: "MYC",        genes: ["MYC"],           group: 3, panels: ["lymphoid"],            tier: 1 }
+];
+s = kf.kfSummarise(grows, st(["lymphoid"]), false);
+check("groups: KRAS, joined, MYC shown; CDKN2A's tier-3 line hidden",
+      s.groups.map(function (g) { return g.visible; }), [true, false, true, true]);
+check("groups: shown groups by best tier, then R order", s.order, [2, 3, 0, 1]);
+check("groups: counts", [s.nGroups, s.nGroupsShown], [4, 3]);
+s = kf.kfSummarise(grows, st(["lymphoid", "sarcoma"]), true);
+check("groups: head is the best-tier shown line", s.groups[1].head, 1);
+check("groups: lists are the union of shown lines", s.groups[1].panels, ["sarcoma", "lymphoid"]);
+s = kf.kfSummarise(grows, st(["lymphoid"]), true);
+check("groups: a tier-3-only group sorts last", s.order, [2, 3, 0, 1]);
+check("groups: head of CDKN2A under lymphoid is its tier-3 line", [s.groups[1].head, s.groups[1].tier], [2, 3]);
+check("groups: hidden lines do not add lists", s.groups[1].panels, ["lymphoid"]);
+// Custom… matches any member gene of a joined row
+s = kf.kfSummarise(grows, st([], ["atf1"]), false);
+check("custom: joined row matched by its second gene", s.visible, [false, false, false, true, false]);
+check("custom: kfRowMatches on genes", kf.kfRowMatches(grows[3], st([], ["EWSR1"])), true);
+// A row without genes falls back to gene
+check("custom: no genes, gene used", kf.kfRowMatches({ gene: "TP53", panels: [""], tier: 1 }, st([], ["TP53"])), true);
+// Rows without a group are one group each (old markup)
+check("ungrouped rows: one group per row", kf.kfSummarise(rows, st(["sarcoma"]), false).groups.length, rows.length);
+// Idempotent with groups too
+const gs = st(["sarcoma"], ["MYC"]);
+check("groups idempotent", kf.kfSummarise(grows, gs, true), kf.kfSummarise(grows, gs, true));
+
 // Print label
 check("label all", kf.kfListLabel(st([], [], true), {}), "none (no gene list ticked)");
 check("label panels", kf.kfListLabel(st(["lymphoid", "sarcoma"]), { lymphoid: "Lymphoid" }), "Lymphoid, sarcoma");

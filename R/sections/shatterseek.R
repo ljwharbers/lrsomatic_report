@@ -201,8 +201,20 @@ shatterseek_verdict = function(x) {
   labels = x$labels
   high = x$high
   if (is.null(high) || nrow(high) == 0) {
-    return(sprintf("No chromothripsis called (%s).",
-                   paste(unname(labels), collapse = "; ")))
+    # One line for every combination: identical negatives are not repeated per combination
+    n_tested = vapply(names(labels), function(cb) {
+      d = x$combos[[cb]]
+      if (is.null(d)) NA_integer_ else nrow(d)
+    }, integer(1))
+    tested = if (length(labels) == 1)
+               sprintf("%s; %s chromosomes tested", unname(labels), n_tested)
+             else if (length(unique(n_tested)) == 1)
+               sprintf("%s; %s chromosomes tested each", paste(unname(labels), collapse = ", "),
+                       n_tested[1])
+             else paste(sprintf("%s: %s chromosomes tested", unname(labels), n_tested), collapse = "; ")
+    lead = if (length(labels) == 1) "No chromothripsis called"
+           else sprintf("No chromothripsis called by any of the %d caller combinations", length(labels))
+    return(sprintf("%s (%s).", lead, tested))
   }
   by_chrom = high[, .(combos = list(unique(combo)),
                       conf   = paste(unique(confidence), collapse = "/")),

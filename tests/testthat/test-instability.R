@@ -101,7 +101,30 @@ test_that("no calls gives a 'No chromothripsis' verdict", {
   fwrite(d, f, sep = "\t")
   x = run_section("shatterseek", dirname(dirname(dirname(f))))
   expect_equal(nrow(x$high), 0)
-  expect_match(shatterseek_verdict(x), "^No chromothripsis called")
+  n = nrow(d)
+  expect_identical(shatterseek_verdict(x),
+                   sprintf("No chromothripsis called (Severus + ASCAT; %d chromosomes tested).", n))
+
+  # Several combinations, all negative: one sentence, not one per combination
+  root = tempfile()
+  neg = list()
+  for (cb in c("severus_ascat", "severus_wakhan")) {
+    g = file.path(root, "shatterseek", cb, "S1.shatterseek.tsv")
+    dir.create(dirname(g), recursive = TRUE)
+    neg[[cb]] = fread(file.path(instab_fx, "ss_two_combos/shatterseek", cb, "S1.shatterseek.tsv"))
+    neg[[cb]][, chromothripsis_confidence := "none"]
+    fwrite(neg[[cb]], g, sep = "\t")
+  }
+  x = run_section("shatterseek", root)
+  expect_identical(shatterseek_verdict(x),
+                   sprintf("No chromothripsis called by any of the 2 caller combinations (%s; %d chromosomes tested each).",
+                           paste(unname(x$labels), collapse = ", "), n))
+  # Different numbers tested: one count per combination
+  fwrite(neg$severus_wakhan[-1], file.path(root, "shatterseek", "severus_wakhan", "S1.shatterseek.tsv"),
+         sep = "\t")
+  x = run_section("shatterseek", root)
+  expect_match(shatterseek_verdict(x), sprintf("%s: %d chromosomes tested", x$labels[["severus_wakhan"]], n - 1L),
+               fixed = TRUE)
 })
 
 test_that("ShatterSeek is found through individually symlinked files", {

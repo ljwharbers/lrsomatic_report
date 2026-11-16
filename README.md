@@ -29,7 +29,10 @@ In page order:
   rank-1 solution with the solutions table; and **gene-level copy number** for every gene of the
   embedded gene lists (see [Copy-number calls](#copy-number-calls)).
 - **Genome instability** — chromothripsis (ShatterSeek, per SV/CN caller combination) and
-  ecDNA / focal amplicons (CoRAL, AmpliconClassifier).
+  ecDNA / focal amplicons (CoRAL, AmpliconClassifier). A negative result is one line: no
+  chromothripsis in any combination is a single sentence naming them all, and calls are one
+  table with a column for the combination; amplicons of which none is ecDNA or BFB are listed
+  in a collapsed block under the verdict.
 - **Mutational signatures** — SigProfilerAssignment COSMIC fits for SBS96, DBS78 and ID83, with
   the mutational profile and a proposed aetiology per signature (see
   [Mutational signatures](#mutational-signatures)).
@@ -89,6 +92,12 @@ it is on a list. Findings are computed for every embedded list at render time, a
 shows the rows of the lists ticked in the report. A gene's `role` column in the list
 (oncogene / tumour suppressor, see [Gene roles](#gene-role-role)) adjusts some tiers.
 
+The table has **one row per gene**, listing each of its alterations (for example a homozygous
+deletion from copy number and the structural variant that causes it); the tier shown is the
+gene's strongest, and genes are ordered by it. A rearrangement with breakpoints in two listed
+genes is one row for the pair (`EWSR1–ATF1`; an en dash, because which partner is 5′ is not
+established), matched by either gene's list or a Custom… entry for either gene.
+
 **Tumour-only samples.** Without a matched normal, small-variant findings can include germline
 variants. The report says so above the table and shows VAF for judgement (a heterozygous
 germline variant sits near 0.5, or near 1 under LOH).
@@ -109,8 +118,11 @@ loss of heterozygosity is tier 1 and reads "possible biallelic (LOH)".
 
 ### Structural variants
 
-Both callers are evaluated and their calls listed together per gene and event class (the
-callers are named; calls are not merged by coordinate).
+Both callers are evaluated. Calls of the two callers whose breakpoints both agree within
+**1 kb** (and within half the event's size, so neighbouring small deletions stay apart) are one
+event: it is listed once, naming both callers, and typed by whichever caller typed it — a
+Severus "intra-chr breakend" matching a SAVANA deletion reads as a deletion. Within a gene,
+events are listed per event class.
 
 | Tier | Rule |
 |---|---|
@@ -121,7 +133,7 @@ callers are named; calls are not merged by coordinate).
 | 2 | A deletion/duplication/insertion with a breakpoint in the gene and neither a VEP nor a Padfoot annotation (exon effect unknown) |
 | 3 | A deletion/duplication/insertion with a breakpoint in the gene that VEP annotated without a HIGH (exon) effect and Padfoot did not rate HIGH — mostly small intronic deletions. Translocations and other junctions are exempt: an intronic breakpoint is how a fusion looks |
 | 3 | A non-translocation event of at most 3 Mb at an immunoglobulin / T-cell receptor locus (`IGH`, `IGK`, `IGL`, `TRA/D`, `TRB`, `TRG`, …): physiological V(D)J recombination |
-| 3 | "Near": a breakend within 1 Mb of the gene (100 kb for other event types) without touching it; at most 3 such rows per gene |
+| 3 | "Near": a breakend within 1 Mb of the gene (100 kb for other event types) without touching it; at most 3 such rows per gene, and none for an event already listed with stronger evidence for the gene |
 
 A gene that merely lies inside a larger event (for example a 40 Mb inversion or deletion) is
 not an SV finding; it is left to the copy-number rows.
@@ -136,8 +148,8 @@ From the gene-level calls of the copy-number section:
 | 1 | Homozygous deletion — tier 2 for an oncogene |
 | 3 | Either call in a **pseudoautosomal region** (reads from the chrX and chrY copies map to one of them, so a PAR gene can read CN 0 with nothing deleted) or at an **IG/TR locus** (physiologically rearranged and deleted in lymphocytes) |
 
-Loss of heterozygosity is not a finding on its own; it is noted on the gene's other rows.
-Tier 3 rows are hidden until "Show lower-confidence findings" is clicked.
+Loss of heterozygosity is not a finding on its own; it is noted on the gene ("LOH in gene").
+Tier 3 alterations are hidden until "Show lower-confidence findings" is clicked.
 
 **Custom… lists.** A list typed into the report matches by gene symbol among the findings of the
 embedded lists and among up to 500 small variants outside them that are ClinVar (likely)
