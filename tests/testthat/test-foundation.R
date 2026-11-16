@@ -175,13 +175,15 @@ test_that("every stub section parses to NULL harmlessly", {
   }
 })
 
-test_that("build_overview's stub returns the findings contract", {
+test_that("build_overview returns the findings contract on empty input", {
   o = build_overview(NULL, list(), list(), list(purity = NA, ploidy = NA),
                      list(tmb = NA), list(), list())
-  expect_equal(names(o), c("findings", "biomarkers", "per_panel_n"))
-  expect_equal(names(o$findings), c("gene", "type", "alteration", "evidence", "tier",
-                                    "role", "panels", "vaf", "source_id"))
+  expect_true(all(c("findings", "biomarkers", "per_panel_n") %in% names(o)))
+  # The first nine columns are the contract; extra display columns follow them
+  expect_equal(names(o$findings)[1:9], c("gene", "type", "alteration", "evidence", "tier",
+                                         "role", "panels", "vaf", "source_id"))
   expect_type(o$findings$tier, "integer")
+  expect_equal(nrow(o$findings), 0L)
 })
 
 # ---- small-variant embedding and sidecar --------------------------------------------

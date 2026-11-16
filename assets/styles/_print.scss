@@ -1,3 +1,110 @@
-// Print styles (@media print) (STUB, WP0 scaffolding).
-// Imported LAST by report.scss inside the scss:rules layer, so its rules win over the
-// section partials imported before it.
+// Print styles (@media print) for the v2 sections, the clinical overview first.
+// Imported LAST by report.scss inside the scss:rules layer, after its own @media print block
+// (which already hides #TOC, the sidebar, .panel-controls, #custom-gene-panel, DT controls
+// and facet menus, whitens the page and un-scrolls DataTables), so these rules win over it
+// and over the section partials.
+//
+// Goal: hero + key findings + biomarkers on one or two A4 pages, then a page break.
+
+@page {
+  size: A4;
+  margin: 13mm 12mm 14mm;
+}
+
+@media print {
+  // Keep the tier borders and warning accents: browsers drop "background graphics" by
+  // default, and some treat coloured borders the same way
+  .kf-table, .kf-legend, .bm-list {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  // ── Overview on its own page(s) ──
+  .overview { break-after: page; page-break-after: always; }
+  .report-hero { margin: 0 0 0.6rem; padding: 0 0 0.6rem; }
+  .report-hero__title { font-size: 1.7rem; margin-bottom: 0.4rem; }
+
+  // The chips are hidden in print: the listener writes the active list(s) here instead
+  .kf-print-panels {
+    display: block !important;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin: 0 0 0.4rem;
+  }
+
+  // Interactive bits do not print; rows already hidden by the toggle stay hidden, so the
+  // page shows exactly the tiers that were shown on screen
+  .kf-toggle-low, .kf-hints, .kf-count, .kf-custom-note, .kf-intro { display: none !important; }
+  .kf-need-list { border-style: solid; }
+
+  // Findings full width, biomarkers below as a compact three-column block
+  .overview-grid {
+    display: block;
+    margin: 0;
+  }
+  .overview-grid h3 { margin: 0.5rem 0 0.3rem; font-size: 0.95rem; }
+
+  .kf-table-wrap { overflow: visible; border-color: #bbb; }
+  .kf-table {
+    font-size: 0.7rem;
+    th, td { padding: 3px 6px; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    thead { display: table-header-group; }   // repeat the header on a second page
+  }
+  .kf-alt__text, .kf-alt__locus, .kf-vaf { font-size: 0.68rem; }
+
+  // Greyscale-safe tiers: black, mid-grey, light-grey, with solid / dashed / dotted borders
+  .kf-row {
+    &.kf-tier-1 td.kf-tier { border-left: 4px solid #000 !important; }
+    &.kf-tier-2 td.kf-tier { border-left: 4px dashed #555 !important; }
+    &.kf-tier-3 td.kf-tier { border-left: 3px dotted #888 !important; }
+  }
+  .kf-legend {
+    font-size: 0.64rem;
+    margin-bottom: 0.4rem;
+    .kf-tier-1 { border-left: 4px solid #000 !important; }
+    .kf-tier-2 { border-left: 4px dashed #555 !important; }
+    .kf-tier-3 { border-left: 3px dotted #888 !important; }
+  }
+  .kf-caveat { font-size: 0.72rem; border-left-color: #555; padding: 0.2rem 0.6rem; }
+
+  .bm-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0 14px;
+    padding: 2px 8px;
+    border-color: #bbb;
+    break-inside: avoid;
+  }
+  .bm-row {
+    break-inside: avoid;
+    padding: 4px 0 4px 6px;
+    margin-left: 0;
+    &:last-child { border-bottom: 1px solid var(--color-border); }
+    &.bm-warn { border-left: 3px solid #555 !important; }
+  }
+  .bm-value { font-size: 0.8rem; }
+  .bm-detail, .bm-items { font-size: 0.62rem; }
+
+  .overview-sequencing {
+    margin: 0.5rem 0 0;
+    .metric-grid { grid-template-columns: repeat(4, 1fr) !important; }
+    .metric-card { padding: 4px 8px; }
+    .metric-card__value { font-size: 0.85rem; }
+    .metric-card__subtitle { font-size: 0.58rem; margin-top: 2px; }
+  }
+
+  // The collapsed "How key findings are chosen" / "What the gene lists apply to" notes would
+  // take the rest of the page (report.scss prints every table_details() expanded)
+  .kf-panel .table-details, .gene-filter-note { display: none !important; }
+
+  .overview-print-footer {
+    display: block !important;
+    margin: 0.6rem 0 0;
+    padding-top: 0.3rem;
+    border-top: 1px solid #bbb;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: #444;
+  }
+}

@@ -1,4 +1,7 @@
 ```{r report-hero}
+# Sample identity band. The clinical overview below it (gene-list chips, key findings,
+# genome-wide biomarkers, sequencing cards) is _gene_filter.qmd + _overview.qmd; the
+# "## Overview" heading here is what puts all three in one TOC entry.
 mode_css = if (outputs$mode == "matched") "is-matched" else "is-tumour-only"
 tags$header(
   class = "report-hero",
@@ -12,86 +15,4 @@ tags$header(
 )
 ```
 
-```{r summary-cards}
-fmt_val = function(x, digits = 2) {
-  if (is.na(x)) return("N/A")
-  if (is.numeric(x) && !is.integer(x)) return(round(x, digits))
-  as.character(x)
-}
-
-card = function(label, value, css_class = "", subtitle = NULL) {
-  div(
-    class = paste("metric-card", css_class),
-    div(class = "metric-card__label",    label),
-    div(class = "metric-card__value",    value),
-    if (!is.null(subtitle))
-      div(class = "metric-card__subtitle", subtitle)
-  )
-}
-
-# One HTML string, not nested tags: htmltools' newlines rendered the label as "SNV s"
-lc_plural = function(text) {
-  stopifnot(endsWith(text, "s"))
-  HTML(paste0(htmlEscape(substr(text, 1, nchar(text) - 1L)),
-              '<span class="lc">s</span>'))
-}
-
-# Three labelled groups instead of one grid of eleven numbers
-metric_group = function(title, ...) {
-  div(class = "metric-group",
-    div(class = "metric-group__title", title),
-    div(class = "metric-grid", ...)
-  )
-}
-
-phasing = whatshap_totals(SECTION_DATA$whatshap)
-
-div(class = "metric-groups",
-  metric_group("Tumour",
-    card("Purity",        fmt_val(ascat_pp$purity),            "metric-purity"),
-    card("Ploidy",        fmt_val(ascat_pp$ploidy),            "metric-ploidy"),
-    card("Coding TMB",
-         if (!is.na(tmb_info$tmb)) fmt_val(tmb_info$tmb) else "N/A",
-         "metric-tmb",
-         subtitle = if (!is.na(tmb_info$n_nonsyn))
-           paste0("mut/Mb · ", tmb_info$n_nonsyn, " non-syn / ", tmb_info$denominator_mb, " Mb")
-         else if (!is.na(tmb_info$tmb)) "mut/Mb" else NULL)
-  ),
-  metric_group("Somatic variants",
-    # SNVs + indels over unique chrom/pos/ref/alt (count_small_variants(), R/utils.R)
-    card(lc_plural("Small variants"), fmt_val(sv_counts$total, 0), "metric-snvs",
-         subtitle = if (!is.na(sv_counts$total))
-           paste0(formatC(sv_counts$snv, format = "d", big.mark = ","), " SNVs · ",
-                  formatC(sv_counts$indel, format = "d", big.mark = ","), " indels")
-         else NULL),
-    # One row per rearrangement, not per breakend record — see the note under the SV table.
-    card(lc_plural("SVs"),   fmt_val(n_sv, 0),          "metric-svs",
-         subtitle = if (!is.na(n_trans) && !is.na(n_intra_bnd))
-           paste0(n_trans, " interchrom · ", n_intra_bnd, " intrachrom BND") else NULL)
-  ),
-  metric_group("Sequencing",
-    card("Mean coverage", paste0(fmt_val(qc_mosdepth$mean_depth), "×"), "metric-coverage"),
-    card("Read N50",      if (!is.na(qc_cramino$n50)) fmt_bp(qc_cramino$n50) else "N/A", "metric-n50"),
-    card("Error rate",
-         if (!is.null(samtools_stats) && !is.na(samtools_stats$error_rate))
-           paste0(formatC(samtools_stats$error_rate * 100, format = "f", digits = 3), "%") else "N/A",
-         "metric-error"),
-    # Omitted, not "N/A": a run without phasing has no number here, and QC > Phasing
-    # already carries the "not found" notice. htmltools drops a NULL child.
-    if (!is.null(phasing))
-      card("Phased variants",
-           # Element-wise formatC, never vectorised format() — see js_num()
-           if (!is.na(phasing$phased))
-             formatC(phasing$phased, format = "d", big.mark = ",")
-           else sprintf("%.1f%%", phasing$fraction * 100),
-           "metric-phased",
-           subtitle = paste(c(
-             if (is.na(phasing$phased) || is.na(phasing$fraction)) NULL
-             else if (!is.na(phasing$variants))
-               sprintf("%.1f%% of %s", phasing$fraction * 100,
-                       formatC(phasing$variants, format = "d", big.mark = ","))
-             else sprintf("%.1f%% phased", phasing$fraction * 100),
-             "germline, WhatsHap"), collapse = " · "))
-  )
-)
-```
+## Overview {#overview}

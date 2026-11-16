@@ -1,28 +1,10 @@
-## Gene panel filter
-
-```{r gene-filter-note}
-table_details(
-  summary = "What the panel filter applies to",
-  "Applies to both the small-variant and structural-variant tables below. Tick any number",
-  "of panels: a variant or SV is kept if it hits", tags$strong("any"), "of them, and with none",
-  "ticked the tables are unfiltered. Small variants match on gene symbol; SVs match on",
-  "breakend position when the panel carries coordinates — see the note under the SV table",
-  "for which mode each ticked panel is in.",
-  tags$br(),
-  "With more than one panel ticked, each panel_hit entry names the panel it matched in",
-  "square brackets.",
-  tags$br(),
-  "A panel may also scope individual genes to one table — a rearrangement partner such as",
-  tags$code("IGH"), "is worth filtering SVs on but not small variants, and a coding-mutation",
-  "gene the other way round. The note under the SV table names the split for each ticked panel.",
-  tags$br(),
-  "A custom list is bare symbols, which carry no coordinates, so its SVs are matched on",
-  "the annotated breakend genes only — no positional window."
-)
-```
-
 ```{r gene-filter-ui, results='asis'}
-# One checkbox per registered panel; no box ticked is the unfiltered state; load-time ticks are params$default_panels
+# The gene-list chips. They sit at the top of the Overview (heading in _header.qmd) because
+# they drive the key findings directly below as well as both variant tables further down.
+# One checkbox per registered panel; no box ticked is the unfiltered state for the tables and
+# the "tick a list" state for the key findings; load-time ticks are params$default_panels.
+# Ids/classes (.panel-checkbox, #panel-clear, #custom-gene-input, ...) are read by the filter
+# hook in per_sample.qmd, facet_filter.js and key_findings.js: do not rename.
 all_p = if (!is.null(params$all_panels) && length(params$all_panels) > 0)
           params$all_panels else list()
 selected = setdiff(as.character(unlist(params$default_panels)), "__all__")
@@ -44,7 +26,7 @@ chips = paste0(chips, chip("__custom__", "Custom…"))
 
 cat(paste0('
 <div class="panel-controls">
-  <span class="panel-controls__label">Gene panels:</span>
+  <span class="panel-controls__label">Gene lists:</span>
   <div class="panel-controls__toggles">
 ', chips, '  </div>
   <button type="button" id="panel-clear" class="panel-controls__clear">Clear</button>
@@ -61,4 +43,28 @@ cat(paste0('
   <textarea id="custom-gene-input" rows="4"></textarea>
 </div>
 '))
+```
+
+```{r gene-filter-note}
+# Wrapped so print can drop it: report.scss prints every table_details() expanded, and this
+# one would push the key findings off the first page
+tags$div(class = "gene-filter-note", table_details(
+  summary = "What the gene lists apply to",
+  "The ticked lists choose the key findings below and filter the small-variant and",
+  "structural-variant tables further down. Tick any number: a finding, variant or SV is kept",
+  "if it hits", tags$strong("any"), "of them. With none ticked the tables are unfiltered and",
+  "the key findings ask for a list. Small variants match on gene symbol; SVs match on",
+  "breakend position when the list carries coordinates — see the note under the SV table",
+  "for which mode each ticked list is in.",
+  tags$br(),
+  "With more than one list ticked, each panel_hit entry names the list it matched in",
+  "square brackets.",
+  tags$br(),
+  "A list may also scope individual genes to one table — a rearrangement partner such as",
+  tags$code("IGH"), "is worth filtering SVs on but not small variants, and a coding-mutation",
+  "gene the other way round. The note under the SV table names the split for each ticked list.",
+  tags$br(),
+  "A custom list is bare symbols, which carry no coordinates, so its SVs are matched on",
+  "the annotated breakend genes only — no positional window."
+))
 ```
