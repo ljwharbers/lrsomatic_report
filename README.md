@@ -1,13 +1,47 @@
 # lrsomatic_report
 
-Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomatic) Nextflow pipeline. Generates a self-contained HTML report per sample with:
+Standalone reporting tool for the [LRSomatic](https://github.com/nf-core/lrsomatic) Nextflow
+pipeline. It turns one sample's pipeline output directory into a single self-contained HTML
+report, plus the full small-variant table as a TSV beside it.
 
-- **Summary header**: purity, ploidy, coverage, N50, variant counts
-- **Circos plot**: somatic SNVs (6-class SBS colours), non-BND SVs, ASCAT copy number, translocation links
-- **Breakend circos**: a second circos over just the chromosomes a breakend touches, with panel gene bodies and names; selecting a row in the SV table highlights that rearrangement's arc, and the gene-panel filter dims the arcs it hides
-- **Interactive variant table**: VEP-annotated somatic small variants, optionally filtered to a gene panel, with VAF, depth and phasing
-- **Interactive SV table**: Severus structural variants, one row per rearrangement with both breakend loci, sharing the same gene-panel filter (matched on breakend position)
-- **QC details**: mosdepth coverage, samtools flagstat, cramino read stats, and per-chromosome WhatsHap phasing statistics (germline)
+> **Research use only.** This report is not a validated diagnostic product and must not be
+> used on its own for clinical decisions. Every call it shows comes from the pipeline's tools,
+> filtered and summarised by the rules documented below; confirm anything actionable with a
+> validated method. The printed report carries the same statement in its footer.
+
+## What the report contains
+
+In page order:
+
+- **Overview** — the sample band (run mode, reference, sex), the gene-list chips, and:
+  - **Key findings**: alterations in the genes of the ticked gene list(s) that carry evidence
+    of being drivers — small variants, structural variants and copy-number changes — each with
+    a tier (see [Key findings](#key-findings)). **Key findings need a gene list**: with none
+    ticked, the table is replaced by a prompt listing how many tier 1–2 findings each embedded
+    list has.
+  - **Genome-wide biomarkers**: purity / ploidy, whole-genome duplication, LOH fraction, coding
+    TMB, small-variant counts, SV counts per caller, chromothripsis, ecDNA / focal amplicons
+    and dominant mutational signatures. A biomarker whose tool did not run reads "not run".
+  - **Sequencing** cards: mean coverage, read N50, error rate, phased germline variants.
+- **Circos overview** — ideogram, somatic **SNV density** (per 1 Mb window), non-breakend SVs
+  and ASCAT copy number, with translocation links.
+- **Copy number profile** — ASCAT plots; a static haplotype-resolved **Wakhan** profile of the
+  rank-1 solution with the solutions table; and **gene-level copy number** for every gene of the
+  embedded gene lists (see [Copy-number calls](#copy-number-calls)).
+- **Genome instability** — chromothripsis (ShatterSeek, per SV/CN caller combination) and
+  ecDNA / focal amplicons (CoRAL, AmpliconClassifier).
+- **Mutational signatures** — SigProfilerAssignment COSMIC fits for SBS96, DBS78 and ID83, with
+  the mutational profile and a proposed aetiology per signature (see
+  [Mutational signatures](#mutational-signatures)).
+- **Small variants** — the VEP-annotated somatic table (VAF, depth, phasing, plugin scores,
+  ClinVar), with tickbox column filters and the gene-list filter. By default only the relevant
+  rows are embedded (see [Report size](#report-size-and---embed)); the full table is always
+  written next to the report as `<sample-id>_small_variants.tsv.gz`.
+- **Structural variants** — one row per rearrangement from **Severus** and, where it ran,
+  **SAVANA** (listed side by side, never merged), with VEP breakend genes, **Padfoot**
+  annotations, a breakend circos that follows the table filter, and **ReConPlot** figures.
+- **QC details** — mosdepth coverage, samtools flagstat, cramino read statistics and WhatsHap
+  phasing statistics (germline).
 
 ## Quick start
 
@@ -18,34 +52,206 @@ Rscript bin/render_report.R \
   --sample-dir  $S \
   --sample-id   SAMPLE_ID \
   --sex         male \
-  --reference   auto            # auto-detects t2t vs hg38 from VCF headers
+  --reference   auto \
+  --gene-panel  lymphoid        # key findings need at least one gene list
 ```
 
-The output file `SAMPLE_ID_report.html` will be written to the current directory.
-
-Matched and tumour-only runs take the same command: the run mode and every input file
-are discovered from the sample directory.
-
-Tables render unfiltered. Add `--gene-panel lymphoid` (or a path to your own TSV) to have a
-panel applied when the report opens, and pass the option more than once to apply several at
-the same time — see [Gene panels](#gene-panels).
+This writes `SAMPLE_ID_report.html` and `SAMPLE_ID_small_variants.tsv.gz` to the current
+directory. Matched and tumour-only runs take the same command: the run mode and every input
+file are discovered from the sample directory.
 
 ## All options
 
 ```
---sample-dir   Path to the sample output directory (required)
---sample-id    Sample identifier (default: directory name)
---reference    t2t | hg38 | auto  (default: auto)
---sex          male | female | XY | XX  (required)
---gene-panel   none | builtin panel name (e.g. lymphoid) | path to a custom TSV
-               (default: none — tables render unfiltered). Repeatable: pass it
-               several times to apply several panels at once (union).
+--sample-dir      Path to the sample output directory (required)
+--sample-id       Sample identifier (default: directory name)
+--reference       t2t | hg38 | auto  (default: auto — read from the VEP somatic VCF's
+                  ##contig lines, else the Severus VCF's, else t2t)
+--sex             male | female | XY | XX  (required). Sets the expected chrX/chrY copy number
+--gene-panel      none | builtin panel name (lymphoid, sarcoma) | path to a custom TSV
+                  (default: none — nothing ticked on load). Repeatable: pass it several
+                  times to open with several lists ticked (union). See Gene panels.
 --gene-lists-dir  Directory to take the builtin panels from, replacing the bundled
-               assets/gene_lists (default: the bundled set). See Gene panels.
---output       Output HTML path  (default: <sample-id>_report.html in current dir)
---title        Report title
---version      Print the version and exit
+                  assets/gene_lists (default: the bundled set). See Gene panels.
+--embed           slim | full  (default: slim). Which small-variant rows and which
+                  secondary figures are embedded in the HTML; see Report size.
+--output          Output HTML path  (default: <sample-id>_report.html in current dir).
+                  The small-variant TSV is written to the same directory.
+--title           Report title
+--version, -V     Print the version and exit
 ```
+
+## Key findings
+
+A **finding** is an event in a gene of a ticked gene list that carries evidence of being a
+driver. There is no built-in cancer-gene catalogue, by decision: a gene is only considered when
+it is on a list. Findings are computed for every embedded list at render time, and the table
+shows the rows of the lists ticked in the report. A gene's `role` column in the list
+(oncogene / tumour suppressor, see [Gene roles](#gene-role-role)) adjusts some tiers.
+
+**Tumour-only samples.** Without a matched normal, small-variant findings can include germline
+variants. The report says so above the table and shows VAF for judgement (a heterozygous
+germline variant sits near 0.5, or near 1 under LOH).
+
+### Small variants
+
+Considered when the gene is in the list's small-variant scope:
+
+| Tier | Rule |
+|---|---|
+| 1 | ClinVar pathogenic or likely pathogenic ("Conflicting classifications" never counts) |
+| 1 | VEP impact HIGH (truncating: stop gained, frameshift, splice donor/acceptor, start lost, transcript ablation; or another HIGH consequence) |
+| 2 | VEP impact MODERATE with a damaging prediction: AlphaMissense *likely pathogenic*; where AlphaMissense gives no call, EVE pathogenic; failing both, SIFT *deleterious* together with PolyPhen *probably damaging* |
+
+Role adjustments: a truncating variant in an **oncogene** drops to tier 2 (unless ClinVar
+calls it pathogenic); a qualifying variant in a **tumour suppressor** whose gene also shows
+loss of heterozygosity is tier 1 and reads "possible biallelic (LOH)".
+
+### Structural variants
+
+Both callers are evaluated and their calls listed together per gene and event class (the
+callers are named; calls are not merged by coordinate).
+
+| Tier | Rule |
+|---|---|
+| 1 | A breakpoint lies inside the gene |
+| 1 | A deletion or duplication of **at most 3 Mb** covers the gene |
+| 1 | Padfoot rates the event `HIGH*` and names the gene |
+| 2 | One of the first two, but Padfoot annotated the call and rated it below HIGH |
+| 2 | A deletion/duplication/insertion with a breakpoint in the gene and neither a VEP nor a Padfoot annotation (exon effect unknown) |
+| 3 | A deletion/duplication/insertion with a breakpoint in the gene that VEP annotated without a HIGH (exon) effect and Padfoot did not rate HIGH — mostly small intronic deletions. Translocations and other junctions are exempt: an intronic breakpoint is how a fusion looks |
+| 3 | A non-translocation event of at most 3 Mb at an immunoglobulin / T-cell receptor locus (`IGH`, `IGK`, `IGL`, `TRA/D`, `TRB`, `TRG`, …): physiological V(D)J recombination |
+| 3 | "Near": a breakend within 1 Mb of the gene (100 kb for other event types) without touching it; at most 3 such rows per gene |
+
+A gene that merely lies inside a larger event (for example a 40 Mb inversion or deletion) is
+not an SV finding; it is left to the copy-number rows.
+
+### Copy number
+
+From the gene-level calls of the copy-number section:
+
+| Tier | Rule |
+|---|---|
+| 1 | Amplification — not listed at all for a tumour suppressor |
+| 1 | Homozygous deletion — tier 2 for an oncogene |
+| 3 | Either call in a **pseudoautosomal region** (reads from the chrX and chrY copies map to one of them, so a PAR gene can read CN 0 with nothing deleted) or at an **IG/TR locus** (physiologically rearranged and deleted in lymphocytes) |
+
+Loss of heterozygosity is not a finding on its own; it is noted on the gene's other rows.
+Tier 3 rows are hidden until "Show lower-confidence findings" is clicked.
+
+**Custom… lists.** A list typed into the report matches by gene symbol among the findings of the
+embedded lists and among up to 500 small variants outside them that are ClinVar (likely)
+pathogenic or HIGH impact (the strongest first). SV and copy-number findings exist only for
+genes on an embedded list.
+
+## Copy-number calls
+
+Segments come from Wakhan's rank-1 `integer_profile.bed` (haplotype-resolved), else ASCAT's
+`segments_raw.txt`. The purity and ploidy used are those of the same source, so the thresholds
+and the segments share one ploidy scale; every source found (Wakhan cell purity, ASCAT, SAVANA)
+is listed, because they can disagree — the purity biomarker is flagged when they differ by
+0.15 or more.
+
+Calls follow the COSMIC Cancer Gene Census CNA definition, on the total copy number of the
+segments overlapping each gene:
+
+| Ploidy | Amplification | Homozygous deletion |
+|---|---|---|
+| ≤ 2.7 | total CN ≥ 5 | total CN = 0 |
+| > 2.7 | total CN ≥ 9 | total CN < ploidy − 2.7 |
+
+Otherwise a gene is a **gain** or **loss** against the expected copy number, round(ploidy) —
+and on chrX/chrY in a male, max(1, round(ploidy / 2)). A gene spanning several segments is
+called amplified on its highest segment and homozygously deleted on its lowest, and marked
+*partial* when its segments disagree. **LOH** means no minor allele on a non-zero segment
+where two alleles are expected. A gene that no segment overlaps has no call. If ASCAT
+inferred a different sex from the one passed with `--sex`, the section warns that the chrX/chrY
+calls may be wrong.
+
+Whole-genome duplication is called when the major allele is ≥ 2 over more than half of the
+autosomal length; the LOH fraction is the autosomal fraction with no minor allele. ASCAT's own
+WGD / LOH / GI metrics are shown alongside when present.
+
+Gene positions come from the gene list's coordinates. A gene without coordinates is called
+only where Wakhan's own per-gene file lists it (rows with a haplotype state above 100 are
+dropped as implausible).
+
+## Mutational signatures
+
+COSMIC signatures (v3.6 when the pipeline used it) as fitted by SigProfilerAssignment. Per
+context:
+
+- **Few mutations** is flagged below 200 SBS, 50 DBS or 100 ID mutations; **poor fit** when the
+  cosine similarity of the reconstruction is below 0.90.
+- Signatures contributing **at least 5%** in an *unflagged* context are carried to the
+  overview's "Dominant signatures". A flagged context is still shown in its section, but never
+  reaches the overview.
+- ID83 signatures are fitted against COSMIC's GRCh37 set whatever the alignment reference, and
+  long-read indel calls in homopolymers can inflate replication-slippage and mismatch-repair
+  indel signatures. On the long-read samples checked, the ID fit fell just below the cosine
+  threshold.
+- Aetiologies come from a bundled, deliberately conservative lookup
+  (`assets/signatures/cosmic_v3.6_aetiology.tsv`): where COSMIC's proposed aetiology is not
+  certain it reads *Unknown*, and a signature absent from the lookup reads *not in lookup*.
+  Possible sequencing artefacts are marked.
+
+## Report size and `--embed`
+
+With the default `--embed slim`, reports measured **4.5–6.4 MB** on five real samples (v1.x
+reports that embedded Wakhan's interactive plots ran to 30–90 MB); `--embed full` was 15 MB on
+one of them. Slim mode embeds:
+
+- small-variant rows that are VEP impact HIGH or MODERATE, ClinVar pathogenic / likely
+  pathogenic, or in an embedded gene list's small-variant genes — the table says how many of
+  the total are shown, and the full table is always in `<sample-id>_small_variants.tsv.gz`;
+- the rank-1 Wakhan profile only;
+- ReConPlot per-chromosome figures only for chromosomes ShatterSeek called;
+- the first six CoRAL amplicon plots;
+- no ASCAT diagnostic plots (GC correction, tumour separation).
+
+`--embed full` embeds all of the above. Every count in the report (TMB, small-variant counts,
+key findings) is computed from the full table in either mode.
+
+**Wakhan's interactive Plotly plots are no longer embedded.** They remain in the pipeline's
+output, under `wakhan/solution_rank_<N>/integer_profile.html` and
+`wakhan/*_heatmap_ploidy_purity.html`; the report names them.
+
+> **Changed in v2.0** (released first as the pre-release `2.0.0rc1`, so the pipeline can test
+> against a real image; the final `2.0.0` changes only `VERSION` and `recipe/meta.yaml`):
+> - New **clinical overview** at the top: key findings by gene list, genome-wide biomarkers
+>   and a print layout that puts the overview on the first page(s). It replaces the summary
+>   cards. The old **"SNVs" card counted SNVs and indels together**; its successor is the
+>   "Small variants" biomarker, which splits the two.
+> - **Key findings need a gene list.** With none ticked the overview lists no findings. The
+>   default is still `--gene-panel none`, so pass a list (or tick one in the report).
+> - **SAVANA** is read as a second SV caller, next to Severus. SV counts are given **per
+>   caller and never summed** (two callers report the same rearrangements); the genome-wide
+>   circos draws one caller — Severus when it has calls, else SAVANA. With both, one
+>   rearrangement can appear twice in the SV table; filter on `caller`.
+> - SAVANA's same-chromosome breakend pairs are typed DEL / DUP / INV from `BP_NOTATION` and
+>   treated like Severus' own spans (size, 100 kb panel window, no breakend arc); the hidden
+>   `svtype_raw` column keeps `BND`.
+> - **Padfoot** SV annotations (`padfoot_*` columns) and **ReConPlot** figures are shown.
+> - New sections: **Mutational signatures**, **Genome instability** (ShatterSeek, ecDNA) and
+>   **gene-level copy number**.
+> - **Wakhan's interactive plots are gone from the report**, replaced by a static
+>   haplotype-resolved profile; the originals are in the pipeline's `wakhan/` output. Reports
+>   shrink from tens of MB to about 5 MB.
+> - The genome circos shows **SNV density per 1 Mb** instead of one point per SNV coloured by
+>   substitution class; the substitution classes are in the signatures section.
+> - `--embed slim|full` (default `slim`) and the `<sample-id>_small_variants.tsv.gz` sidecar.
+>   A slim report's small-variant table holds only the relevant rows (see above).
+> - **samtools flagstat "mapped" now counts every mapped record**, secondary and
+>   supplementary included — what samtools means by it. It previously showed the *primary*
+>   mapped count under that name; that figure is now its own row, "Primary mapped reads".
+> - cramino 2.0 is read by exact key: "Read N50" is the full-read-length N50, and the aligned-
+>   portion N50 is shown beside it.
+> - The `lymphoid` list has 234 genes (was 235): `FAM46C` dropped as a duplicate of `TENT5C`,
+>   `PRKBC`/`RCK` renamed `PRKCB`/`DDX6`, and three hg38 rows that carried CHM13 coordinates
+>   fixed. Every row now has coordinates (for gene-level copy number) and the small-variant
+>   rows carry a `role`. See [`assets/gene_lists/README.md`](assets/gene_lists/README.md).
+> - Gene lists may carry a `role` column (oncogene / tumour suppressor), used by the key-finding
+>   tiers.
 
 > **Changed in v1.1.0:**
 > - `--mode` and `--somatic-vcf` were removed. Run mode is derived from whether normal-side
@@ -84,8 +290,7 @@ the same time — see [Gene panels](#gene-panels).
 >   value in that column.
 > - A column with fewer than two distinct values keeps its plain text box rather than
 >   offering an empty dropdown. That is expected for `callers` when VEP produced its default
->   text output (which carries no per-variant caller) and for the SV `caller` column, which
->   has one value today.
+>   text output (which carries no per-variant caller).
 > - Ticks survive changing the gene panel, are reflected in the "N shown" count, and are
 >   honoured by the copy/CSV buttons. **Clear value filters** in the panel bar resets them —
 >   it appears only while something is ticked, since a filter set on a header that has been
@@ -101,6 +306,19 @@ the same time — see [Gene panels](#gene-panels).
 > - The SV table's footnote about how the panel matches now follows the ticked boxes; it
 >   previously described the load-time panel and went stale the moment a reader switched.
 
+> **Changed in v1.3.1:**
+> - A calmer look. The page texture, gradients, card animations and shadows are gone;
+>   every card, table and plot frame shares one flat surface. The circos drops the
+>   per-chromosome Mb axes and the alternating track bands, and its legend sits beside the
+>   plate. ASCAT plots are framed and captioned, and the QC tables match the variant tables.
+>   Nothing about the data, filters or exports changed.
+> - The tickbox dropdown counts are now **live**: each value's count is measured over the
+>   rows passing every *other* filter (gene panel, text boxes, the other dropdowns), so it
+>   says how many rows ticking it would leave. Values with no rows left grey out in place;
+>   the unfiltered count moves into the tooltip.
+> - Fixed: opening a dropdown on a right-hand column of a wide table no longer snaps the
+>   table back to its first column.
+
 > **Changed in v1.4.0:**
 > - The small-variant table now shows the VEP plugin annotations LRSomatic adds:
 >   AlphaMissense (`am_class`, `am_score`), ClinVar (`clinvar`, `clinvar_id`, linked to
@@ -114,28 +332,16 @@ the same time — see [Gene panels](#gene-panels).
 >   cache has no variation data. A new **Annotation sources** footnote under the table
 >   names what was present and what was not.
 
-> **Changed in v1.3.1:**
-> - A calmer look. The page texture, gradients, card animations and shadows are gone;
->   every card, table and plot frame shares one flat surface. The summary numbers are
->   grouped into **Tumour**, **Somatic variants** and **Sequencing** instead of one row of
->   eleven differently-coloured cards. The circos drops the per-chromosome Mb axes and the
->   alternating track bands, and its legend sits beside the plate. ASCAT plots are framed
->   and captioned, and the QC tables match the variant tables. Nothing about the data,
->   filters or exports changed.
-> - The tickbox dropdown counts are now **live**: each value's count is measured over the
->   rows passing every *other* filter (gene panel, text boxes, the other dropdowns), so it
->   says how many rows ticking it would leave. Values with no rows left grey out in place;
->   the unfiltered count moves into the tooltip.
-> - Fixed: opening a dropdown on a right-hand column of a wide table no longer snaps the
->   table back to its first column.
-
 ## Gene panels
 
-Reports are **unfiltered by default**. `--gene-panel` only chooses which panels are ticked when
-the report opens; the rendered HTML always contains every variant and every builtin panel, so a
-reader can tick and untick panels (or paste a custom gene list) in the browser without
-re-rendering. In the report the panels are checkboxes: tick any number and a variant or SV is
-kept if it hits **any** of them, and with none ticked the tables are unfiltered.
+A gene list ("panel") does two jobs: it filters the two variant tables, and it is the set of
+genes the [key findings](#key-findings) and the gene-level copy number are computed for.
+
+`--gene-panel` only chooses which lists are ticked when the report opens; the rendered HTML
+always contains every builtin list, so a reader can tick and untick lists (or paste a custom
+gene list) in the browser without re-rendering. Tick any number and a variant or SV is kept if
+it hits **any** of them; with none ticked the tables are unfiltered and the overview lists no
+key findings.
 
 Built-in panels live in `assets/gene_lists/`. Each is a TSV with a `gene` column (HGNC symbols)
 and, optionally, `chrom`/`start`/`end` — which changes how structural variants are matched:
@@ -148,7 +354,9 @@ and, optionally, `chrom`/`start`/`end` — which changes how structural variants
 Coordinate matching is the reliable mode: whether VEP annotates a breakend with a gene symbol
 at all depends on the sample's VEP invocation (1.6%–90% of breakend rows across the samples
 measured), so a symbol-only panel can hide exactly the translocations it exists to find. The
-note under the SV table says which mode is in force.
+note under the SV table says which mode is in force. Coordinates are also what gene-level copy
+number is called on; a symbol-only list gets copy-number calls only where Wakhan's per-gene
+file has the gene.
 
 Because coordinates are only valid for one genome, a coordinate panel must declare its
 reference (a leading `# reference: hg38` line, or a `reference` column) and a mismatch with the
@@ -157,13 +365,14 @@ single entry, resolved against the detected one.
 
 | Panel | Description |
 |---|---|
-| `lymphoid` | 72 recurrently mutated genes in B-cell lymphomas (DLBCL, FL, CLL, MCL, BL, MALT), as `lymphoid.hg38.tsv` and `lymphoid.t2t.tsv` |
+| `lymphoid` | 234 non-Hodgkin lymphoma genes, merged from an SV list (including the IG/TR rearrangement partners) and a coding-mutation list; each gene scoped to the table it belongs in (`applies_to`), with oncogene / tumour-suppressor roles on the coding-mutation genes. `lymphoid.hg38.tsv`, `lymphoid.t2t.tsv` |
+| `sarcoma` | 140 soft-tissue and bone sarcoma genes — tumour suppressors, amplification targets and recurrent fusion partners. No roles. `sarcoma.hg38.tsv`, `sarcoma.t2t.tsv` |
 
 ```bash
---gene-panel lymphoid                # open with the builtin lymphoid panel applied
+--gene-panel lymphoid                # open with the builtin lymphoid panel ticked
 --gene-panel /path/to/my_genes.tsv   # must have a 'gene' column or be a single-column file
 
-# Repeatable — open with both applied, a row kept if it hits either:
+# Repeatable — open with both ticked, a row kept if it hits either:
 --gene-panel lymphoid --gene-panel /path/to/my_genes.tsv
 ```
 
@@ -173,8 +382,22 @@ a basename both stay selectable — the second is registered as `<name>-custom`.
 
 A `--gene-panel` value that is neither `none`, a builtin name, nor an existing file is an error —
 a typo will not silently produce an unfiltered report. `none` combined with a real panel is an
-error too, rather than a case where one of the two quietly wins. See
-[`assets/gene_lists/README.md`](assets/gene_lists/README.md) for the full file format.
+error too, rather than a case where one of the two quietly wins.
+
+### Optional columns: `applies_to` and `role`
+
+- `applies_to` scopes a row to one table: blank / `both` / `all` (both tables), `snv` / `small`
+  (small variants only), `sv` / `structural` (SVs only). Coordinates are required only on rows
+  that can match an SV.
+- <a id="gene-role-role"></a>`role` says whether a gene is an oncogene (`OG`, `oncogene`), a
+  tumour suppressor (`TSG`, `tumour suppressor`, `tumor suppressor`) or both (`both`,
+  `OG/TSG`, `TSG/OG`); blank means *not declared*. It only adjusts key-finding tiers (see
+  [Key findings](#key-findings)); a gene that two lists give different roles is treated as
+  "both", which adjusts nothing.
+
+Any other value in either column is a hard error. See
+[`assets/gene_lists/README.md`](assets/gene_lists/README.md) for the full file format and how the
+bundled lists were built.
 
 ### Supplying your own set of builtins
 
@@ -194,34 +417,29 @@ user panel, named after the file and only embedded because it was named.
 
 ## Expected input layout
 
-The `--sample-dir` must be the root of a single-sample LRSomatic output. Files are discovered
-**recursively** by their distinctive filename suffix, so they can be nested in any directory
-structure underneath it — for example:
+The `--sample-dir` must be the root of a single-sample LRSomatic output (`<outdir>/<id>/`).
+Files are discovered **recursively**, mostly by their distinctive filename suffix, so the layout
+below is what the pipeline publishes but not a requirement — except where a directory is named
+as part of the pattern. When several files match, one named for the sample is preferred.
 
-```
-<sample-dir>/
-├── *_SOMATIC_VEP.vcf.gz                                 VEP-annotated somatic small variants
-├── variants/phased/somatic_smallvariants.vcf.gz         VAF / depth / phasing source
-├── severus_somatic.vcf.gz                               Severus SV calls
-├── *_SV_VEP.vcf.gz                                      VEP-annotated SVs
-├── *.segments_raw.txt, *.purityploidy.txt               ASCAT
-├── *.mosdepth.summary.txt, *.mosdepth.global.dist.txt   mosdepth (tumour)
-├── *_cramino.txt, *.flagstat, *.stats                   cramino / samtools (tumour)
-├── qc/whatshap_stats/*_whatshap_stats.tsv               phasing statistics (germline)
-├── wakhan/                                              Wakhan copy-number solutions
-└── **/normal/**                                         same QC file set, normal side
-                                                         (matched mode; e.g. qc/normal/)
-```
+| Section | Files read (relative to the sample directory) |
+|---|---|
+| Small variants | `*_SOMATIC_VEP.vcf.gz` (variant set and annotation); VAF / depth / genotype / phase set from `variants/phased/somatic_smallvariants.vcf.gz`, else `variants/clairs{,to}/somatic.vcf.gz`, else any non-germline VCF in those directories |
+| Structural variants | Severus: `severus_somatic.vcf.gz`, `*_SV_VEP.vcf.gz` (fallback `SV_filtered_with_gene_annotations.tsv`). SAVANA: `*.pon_filtered.classified.somatic.vcf[.gz]`, else `*.classified.somatic.vcf[.gz]`; `*_VEP_SAVANA.vcf.gz`. Padfoot: `padfoot/<combination>/annotated_svs.tsv` (`severus_wakhan` for Severus, `savana` for SAVANA) |
+| ReConPlot | `reconplot/<combination>/genome_wide/*_genome_wide.png`, `reconplot/<combination>/per_chromosome/*_chr*.png` |
+| Copy number | ASCAT: `*.segments_raw.txt`, `*.purityploidy.txt`, `*.metrics.txt` (beside them), `*.tumour.{ASCATprofile,ASPCF,sunrise}.png` and diagnostic PNGs. Wakhan: `wakhan/solutions_ranks.tsv`, `wakhan/solution_rank_<N>/integer_profile.bed` and `…/genes/genes_copynumber_states.bed` (also `solution_<N>/` and the `repository_name` directory). SAVANA: `*_fitted_purity_ploidy.tsv` |
+| Genome instability | `shatterseek/<combination>/*.shatterseek.tsv`; `ecdna/coral/*_CNV_SEEDS.bed`, `ecdna/coral/{cycles,reconstruct}/*_amplicon_summary.txt`, `ecdna/coral/plots/*_amplicon<N>_{graph,cycles}.png`, `ecdna/amplicon_classifier/*_amplicon_classification_profiles.tsv`, `*_gene_list.tsv`, `*_result_table.tsv` |
+| Mutational signatures | `signatures/**/COSMIC_v<ver>/{SBS96,DBS78,ID83}/Assignment_Solution/**/Assignment_Solution_Activities.txt` and `Assignment_Solution_Samples_Stats.txt`; matrices `*.SBS96.all`, `*.DBS78.all`, `*.ID83.all` |
+| QC (tumour) | mosdepth `*.mosdepth.summary.txt` (or `*.summary.txt` under `qc/` or `mosdepth/`) and `*.global.dist.txt`; cramino `*_cramino.txt` (the aligned-BAM one); samtools `*.flagstat`, `*.stats`; `qc/whatshap_stats/*_whatshap_stats.tsv` |
+| QC (normal) | the same QC files under any `normal/` directory (e.g. `qc/normal/`) — their presence is what makes the run *matched* |
 
-Normal-side QC is picked up from any `normal/` directory in the tree, wherever the pipeline
-nests it, and is also what determines the run mode.
+Missing inputs are handled gracefully: the corresponding section or biomarker says it was not
+run or not found.
 
 **Small variants come from the VEP annotation only.** `*_SOMATIC_VEP.vcf.gz` defines the
-variant set; VAF, depth, genotype and phase set are joined from the VCF that VEP annotated —
-`variants/phased/somatic_smallvariants.vcf.gz`. Runs predating `variants/phased/` fall back to
-`variants/clairs{,to}/somatic.vcf.gz` (then any non-germline VCF in those directories), which
-yields VAF and depth but no phase set. If none is found the table still renders, without
-those columns.
+variant set; VAF, depth, genotype and phase set are joined from the VCF that VEP annotated.
+Runs predating `variants/phased/` yield VAF and depth but no phase set. If none is found the
+table still renders, without those columns.
 
 A footnote under the variant table names the file those columns actually came from and how
 many variants they cover. **One VCF supplies them for the whole table**, so if the run
@@ -240,8 +458,6 @@ the `.vcf.gz` name. If VEP was run with `--vcf` it is a genuine VCF with a `CSQ`
 may be a *merged* multi-caller VCF carrying germline calls (DeepVariant, Clair3) alongside
 somatic ones, tagged in `INFO/CALLER`; the report then keeps only `PASS` records from a
 somatic caller (ClairS, ClairS-TO, DeepSomatic). Both formats are detected automatically.
-
-Missing files are handled gracefully: the corresponding report section shows a "not available" notice.
 
 ### Not covered: methylation
 
@@ -266,14 +482,15 @@ Auto-detection reads `##contig` lines from the VEP somatic VCF.
 
 ### Container (recommended)
 
-Every release is published as a container, so nothing needs installing:
+Every release is published as a container, so nothing needs installing (`<version>` is the
+content of `VERSION`, e.g. `2.0.0rc1`):
 
 ```bash
 # Docker / Podman
-docker run --rm ghcr.io/ljwharbers/lrsomatic-report:1.5.0 render_report.R --version
+docker run --rm ghcr.io/ljwharbers/lrsomatic-report:<version> render_report.R --version
 
 # Apptainer / Singularity — a native SIF, no docker:// conversion needed
-apptainer pull lrsomatic-report.sif oras://ghcr.io/ljwharbers/lrsomatic-report-sif:1.5.0
+apptainer pull lrsomatic-report.sif oras://ghcr.io/ljwharbers/lrsomatic-report-sif:<version>
 apptainer exec lrsomatic-report.sif render_report.R --version
 ```
 
@@ -291,7 +508,7 @@ packages.
 `recipe/meta.yaml` is the source of truth for runtime dependencies — it is what the
 Bioconda package is built from, and `container/environment.yml` (the image's pinned
 version of the same list) is checked against it at build time. The list below mirrors it;
-if they ever disagree, the recipe is right.
+if they ever disagree, the recipe is right. v2.0 added no dependency.
 
 Install in your R environment if missing:
 
@@ -313,31 +530,38 @@ Tested with R 4.4.1 and Quarto 1.5.57.
 lrsomatic_report/
 ├── bin/render_report.R          CLI entrypoint
 ├── R/
-│   ├── utils.R                  Shared helpers (gene panel, Extra-field parser)
+│   ├── utils.R                  Shared helpers (gene panels, JS serialisation, plot embedding)
 │   ├── references.R             Cytoband + chrom-length loading, reference auto-detection
-│   ├── locate_outputs.R         Discover per-tool output files in a sample directory
-│   ├── parse_smallvariants.R    VEP text + raw caller VCF parsers; build variant table
-│   ├── parse_severus.R          Severus VCF parsing (mate-collapsed), SV table, panel matching
-│   ├── parse_ascat.R            ASCAT segments + purity/ploidy parsers
-│   ├── parse_qc.R               Mosdepth, cramino, flagstat parsers
+│   ├── locate_outputs.R         Discover small-variant, ASCAT and QC files in a sample directory
+│   ├── parse_smallvariants.R    VEP text + VCF parsers; variant table, slim embed, SNV density
+│   ├── parse_severus.R          SV VCF parsing (Severus + SAVANA), SV table, panel matching
+│   ├── parse_padfoot.R          Padfoot annotation parser and join
+│   ├── parse_ascat.R            ASCAT, Wakhan and SAVANA copy-number / purity parsers
+│   ├── parse_qc.R               mosdepth, cramino, flagstat, samtools stats parsers
 │   ├── circos.R                 draw_circos() — the genome-wide circos SVG
-│   └── circos_bnd.R             Breakend circos: selects and serialises it for the browser
-├── templates/per_sample.qmd    Quarto template (HTML report)
+│   ├── circos_bnd.R             Breakend circos: selects and serialises it for the browser
+│   ├── sections.R               Section-module registry
+│   ├── sections/                One module per section: sv, whatshap, cna, shatterseek,
+│   │                            ecdna, reconplot, signatures
+│   └── key_findings.R           Clinical overview: key findings and biomarkers
+├── templates/                   per_sample.qmd + sections/_*.qmd (Quarto)
 ├── assets/
 │   ├── references/{t2t,hg38}/  Cytobands + chrom lengths (bundled, no network needed)
-│   ├── gene_lists/             lymphoid.{hg38,t2t}.tsv + README (override with
+│   ├── gene_lists/             lymphoid / sarcoma per reference + README (override with
 │   │                           --gene-lists-dir)
-│   ├── styles/                 report.scss (the report theme)
-│   └── js/                     bnd_circos.js (breakend circos), facet_filter.js (tickbox
-│                               column filters) — inlined at render time
+│   ├── signatures/             COSMIC aetiology lookup
+│   ├── styles/                 report.scss and its section / print partials
+│   └── js/                     bnd_circos.js, facet_filter.js, key_findings.js — inlined
+│                               at render time
 ├── tests/                      testthat unit tests + tests/js (node, no dependencies)
 ├── recipe/                     Conda recipe (Bioconda); build.sh defines the install layout
-├── container/environment.yml   Pinned deps the image is built from, checked against the recipe
+├── container/                  environment.yml (pinned deps, checked against the recipe),
+│                               smoke test and release checks
 ├── Dockerfile                  Container image, reproducing recipe/build.sh's layout
 └── VERSION                     Single source of truth; --version reads it
 ```
 
 ## Roadmap
 
-- **v2**: Cohort report (oncoprint, recurrence tables across multiple samples)
-- **v2**: Wakhan haplotype-resolved copy-number integration
+- Cohort report (oncoprint, recurrence tables across multiple samples)
+- Methylation, once the pipeline publishes an indexed pileup (see above)

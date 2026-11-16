@@ -16,7 +16,7 @@ grep -qx "$version" v.txt
 
 echo "== help lists the flags the pipeline passes =="
 docker run --rm "$image" render_report.R --help > help.txt 2>&1
-for flag in --sample-dir --sample-id --sex --reference --gene-panel --gene-lists-dir --output; do
+for flag in --sample-dir --sample-id --sex --reference --gene-panel --gene-lists-dir --output --embed; do
     grep -q -- "$flag" help.txt || { echo "missing flag: $flag"; exit 1; }
 done
 
@@ -47,6 +47,12 @@ docker run --rm --user "$(id -u):$(id -g)" \
 test -s render/smoke_report.html
 # The fixture carries a TP53 variant; its absence would mean an empty report rendered cleanly
 grep -q TP53 render/smoke_report.html
+# The full small-variant table is written beside the report (the pipeline emits it as its own
+# output); the setup chunk writes it next to the template and render_report.R moves it here
+test -s render/smoke_small_variants.tsv.gz
+# (decompressed to a file first: grep -q closing a pipe early would trip pipefail)
+gzip -cd render/smoke_small_variants.tsv.gz > render/smoke_small_variants.tsv
+grep -q TP53 render/smoke_small_variants.tsv
 
 # --gene-lists-dir must resolve a panel directory bind-mounted from outside the image, which
 # is exactly how the pipeline supplies its own panels. A panel named here is a *builtin*, so

@@ -19,15 +19,18 @@ reader.
 
 ## Gene role: `role`
 
-An optional `role` column says whether a gene is an oncogene or a tumour suppressor, which
-the overview and gene-level copy number use to judge an amplification or a deletion:
+An optional `role` column says whether a gene is an oncogene or a tumour suppressor. The
+overview's key findings use it to tier an alteration (a truncating variant or homozygous
+deletion of an oncogene drops a tier, an amplification of a tumour suppressor is not listed,
+a second hit in a tumour suppressor is lifted — see the main README), and the gene-level
+copy-number table shows it:
 
 | `role` | Read as |
 |---|---|
-| `OG`, `oncogene` | oncogene |
-| `TSG`, `tumour suppressor`, `tumor suppressor` | tumour suppressor |
-| `both`, `OG/TSG`, `TSG/OG` | both |
-| *blank* | no role declared |
+| `OG`, `oncogene`, `onc` | oncogene |
+| `TSG`, `tumour suppressor`, `tumor suppressor` (optionally `… gene`) | tumour suppressor |
+| `both`, `OG/TSG`, `TSG/OG`, `oncogene/TSG`, `TSG/oncogene` | both |
+| *blank*, `NA`, `none` | no role declared |
 
 Case-insensitive; anything else is a hard error, as for `applies_to`. A gene listed on
 several rows takes its first non-blank role. A file with no `role` column loads as before.
