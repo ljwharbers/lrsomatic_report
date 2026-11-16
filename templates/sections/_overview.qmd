@@ -1,10 +1,220 @@
-## Overview
-
-```{r overview-stub}
-# STUB (WP0 scaffolding — owned by the overview package). Reads OVERVIEW, built in the setup
-# chunk by build_overview() (R/key_findings.R): list(findings, biomarkers, per_panel_n).
-# Panel-chip interactivity lives in assets/js/key_findings.js (window.registerPanelListener).
-if (is.null(OVERVIEW) || nrow(OVERVIEW$findings) == 0) {
-  section_notice("No key findings to summarise for this sample.")
-}
+```{r overview-prep}
+# Clinical overview: OVERVIEW is built in the setup chunk by build_overview()
+# (R/key_findings.R): list(findings, biomarkers, per_panel_n, tumour_only, n_nonpanel).
+# The heading is "## Overview" in _header.qmd and the gene-list chips (_gene_filter.qmd) sit
+# between it and this file. Which rows show is decided client-side by
+# assets/js/key_findings.js from the chips; R emits every row with data-gene / data-panels /
+# data-tier.
+ov = OVERVIEW
+kf = if (!is.null(ov$findings)) ov$findings else empty_findings()
+ov_panels = if (length(all_panels) > 0) names(all_panels) else character(0)
+ov_label = function(p) ifelse(nzchar(p), paste0(toupper(substr(p, 1, 1)), substr(p, 2, nchar(p))), p)
+ov_role = c(oncogene = "oncogene", tsg = "TSG", both = "oncogene/TSG")
+ov_type = c(`small variant` = "Small variant", SV = "SV", CNA = "Copy number")
+ov_num = function(x, digits = 2) ifelse(is.na(x), "", formatC(as.numeric(x), format = "f", digits = digits))
 ```
+
+::: {.overview}
+
+::: {.overview-grid}
+
+::: {.kf-panel}
+
+### Key findings {#key-findings}
+
+```{r key-findings}
+kf_row = function(i) {
+  r = kf[i]
+  role = if (!is.na(r$role) && nzchar(r$role)) ov_role[[r$role]] else NULL
+  lists = strsplit(r$panels, ",", fixed = TRUE)[[1]]
+  lists = lists[nzchar(lists)]
+  vaf = ov_num(r$vaf)
+  dp = if ("dp" %in% names(r) && !is.na(r$dp)) paste0("DP ", formatC(r$dp, format = "d", big.mark = ",")) else ""
+  tags$tr(
+    class = paste0("kf-row kf-tier-", r$tier),
+    `data-gene` = toupper(r$gene), `data-panels` = r$panels,
+    `data-tier` = r$tier, `data-type` = r$type,
+    tags$td(class = "kf-tier", tags$span(class = "kf-tier__label", paste("Tier", r$tier))),
+    tags$td(class = "kf-gene",
+            tags$span(class = "kf-gene__symbol", r$gene),
+            if (!is.null(role)) tags$span(class = "kf-gene__role", role)),
+    tags$td(class = "kf-alt",
+            tags$span(class = "kf-alt__type", ov_type[[r$type]]),
+            tags$span(class = "kf-alt__text", r$alteration),
+            if (!is.na(r$locus) && nzchar(r$locus) && r$type == "small variant")
+              tags$span(class = "kf-alt__locus", r$locus)),
+    tags$td(class = "kf-evidence", r$evidence,
+            if (isTRUE(r$loh) && r$tier < 3 && r$type != "small variant" && !grepl("LOH", r$evidence))
+              tags$span(class = "kf-evidence__flag", "LOH in gene")),
+    tags$td(class = "kf-vaf", vaf, if (nzchar(dp)) tags$span(class = "kf-vaf__dp", dp)),
+    tags$td(class = "kf-lists", if (length(lists)) paste(ov_label(lists), collapse = ", ") else "—")
+  )
+}
+
+per_n = ov$per_panel_n
+hint_buttons = lapply(ov_panels, function(p) {
+  n = if (!is.null(per_n) && p %in% names(per_n)) per_n[[p]] else 0L
+  tags$button(type = "button", class = "kf-hint", `data-panel` = p,
+              paste0(ov_label(p), " · ", n, " tier 1–2 finding", if (n == 1) "" else "s"))
+})
+
+np = ov$n_nonpanel
+n_np = if (!is.null(np$kept)) np$kept else 0L
+
+tags$div(
+  id = "kf-root",   # not "key-findings": Quarto gives that id to the heading's section
+  class = "kf",
+  tags$p(class = "kf-intro",
+    "Alterations in the genes of the ticked gene list(s) that carry evidence of being drivers. ",
+    "A gene is only considered when it is on a list: there is no built-in cancer-gene catalogue."),
+  if (isTRUE(ov$tumour_only))
+    tags$p(class = "kf-caveat",
+      tags$strong("Tumour-only sample: "),
+      "without a matched normal, these calls can include germline variants. VAF is shown for judgement ",
+      "(a germline heterozygous variant sits near 0.5, or near 1 under LOH)."),
+  tags$ul(class = "kf-legend", `aria-label` = "Tier legend",
+    tags$li(class = "kf-legend__item kf-tier-1", tags$strong("Tier 1"),
+            " strong evidence: ClinVar (likely) pathogenic or truncating variant, breakpoint in the gene, amplification or homozygous deletion"),
+    tags$li(class = "kf-legend__item kf-tier-2", tags$strong("Tier 2"),
+            " weaker: predicted-damaging missense, loss of function in an oncogene, SV with no exon annotated"),
+    tags$li(class = "kf-legend__item kf-tier-3", tags$strong("Tier 3"),
+            " low confidence: SV near (not in) the gene, intronic SV, copy number in a pseudoautosomal or IG/TR locus")),
+  if (length(ov_panels) == 0)
+    section_notice("No gene list is embedded in this report, so no key findings can be listed.")
+  else tags$div(class = "kf-need-list",
+    tags$p(class = "kf-need-list__text", "Key findings need a gene list — tick one above."),
+    tags$div(class = "kf-hints", hint_buttons)),
+  tags$p(class = "kf-print-panels", "Gene list(s): none"),
+  tags$div(class = "kf-empty section-notice", hidden = NA,
+           "No findings in the selected gene list(s): no listed gene carries a qualifying small variant, rearrangement or copy-number change."),
+  tags$div(class = "kf-table-wrap", hidden = NA,
+    tags$table(class = "kf-table", `data-quarto-disable-processing` = "true",
+      tags$thead(tags$tr(
+        tags$th(scope = "col", "Tier"), tags$th(scope = "col", "Gene"),
+        tags$th(scope = "col", "Alteration"), tags$th(scope = "col", "Evidence"),
+        tags$th(scope = "col", class = "kf-vaf", "VAF"),
+        tags$th(scope = "col", "Gene list"))),
+      tags$tbody(lapply(seq_len(nrow(kf)), kf_row)))),
+  tags$div(class = "kf-actions",
+    tags$button(type = "button", class = "kf-toggle-low", hidden = NA, `aria-expanded` = "false",
+                "Show lower-confidence findings"),
+    tags$span(class = "kf-count")),
+  tags$p(class = "kf-custom-note table-footnote", hidden = NA,
+    "A Custom… list matches by gene symbol among the findings of the embedded gene lists and ",
+    formatC(n_np, format = "d", big.mark = ","), " small variant", if (n_np == 1) "" else "s",
+    " outside them (ClinVar pathogenic / likely pathogenic or HIGH impact",
+    if (!is.null(np$total) && np$total > n_np)
+      paste0("; the strongest ", formatC(n_np, format = "d", big.mark = ","), " of ",
+             formatC(np$total, format = "d", big.mark = ",")) else "",
+    "). Structural and copy-number changes are only listed for genes on a gene list.")
+)
+```
+
+```{r key-findings-details}
+table_details(
+  summary = "How key findings are chosen",
+  tags$strong("Small variants"), " (per variant and gene; the gene must be in the list's small-variant scope): ",
+  "ClinVar pathogenic / likely pathogenic (“Conflicting classifications” never counts), or VEP impact HIGH, ",
+  "or impact MODERATE with AlphaMissense likely pathogenic — where AlphaMissense gives no call, EVE pathogenic, ",
+  "or SIFT deleterious together with PolyPhen probably damaging. The predicted-missense route is tier 2.",
+  tags$br(),
+  tags$strong("Structural variants"), " (both callers, collapsed per gene and event class; callers listed, never merged by coordinate): ",
+  "tier 1 when a breakpoint lies in the gene, a deletion/duplication of at most ", fmt_bp(KF_FOCAL_SV_MAX),
+  " covers it, or Padfoot rates the event HIGH for that gene. A gene merely inside a larger event is left to copy number. ",
+  "A deletion/duplication/insertion that VEP annotated without an exon effect is tier 3, one with no annotation at all, ",
+  "or that Padfoot rated below HIGH, tier 2. Within ", fmt_bp(SV_PANEL_WINDOW_BND), " of a breakend (",
+  fmt_bp(SV_PANEL_WINDOW_OTHER), " of other events) the gene is listed as “near” at tier 3, at most ",
+  KF_MAX_PROXIMITY_PER_GENE, " rows per gene. Events of locus size inside IG/TR loci are V(D)J recombination: tier 3.",
+  tags$br(),
+  tags$strong("Copy number"), " (gene-level calls of the Copy number section): amplification or homozygous deletion. ",
+  "Calls in a pseudoautosomal region (", if (!is.null(params$reference)) params$reference else "", ") and in IG/TR loci are tier 3. ",
+  "Loss of heterozygosity is not a finding on its own; it is noted on the gene's other rows, and with a listed small variant ",
+  "reads “possible biallelic (LOH)”.",
+  tags$br(),
+  tags$strong("Gene roles"), " (the list's ", tags$code("role"), " column): a truncating variant or homozygous deletion of an ",
+  "oncogene drops to tier 2, amplification of a tumour suppressor is not listed, a biallelic hit in a tumour suppressor is tier 1."
+)
+```
+
+:::
+
+::: {.biomarkers}
+
+### Genome-wide biomarkers {#biomarkers}
+
+```{r biomarkers}
+bm = ov$biomarkers
+tags$div(class = "bm-list",
+  lapply(bm, function(b) {
+    tags$div(class = paste0("bm-row bm-", b$status, " bm-id-", b$id),
+      tags$div(class = "bm-label", b$label),
+      tags$div(class = "bm-value",
+               b$value,
+               if (identical(b$status, "warn")) tags$span(class = "bm-flag", "check")),
+      if (!is.null(b$items) && length(b$items) > 0)
+        tags$ul(class = "bm-items", lapply(b$items, tags$li))
+      else if (nzchar(b$detail)) tags$div(class = "bm-detail", b$detail))
+  }))
+```
+
+:::
+
+:::
+
+```{r sequencing-cards}
+# The old header's "Sequencing" group, kept as a compact secondary row under the overview
+fmt_val = function(x, digits = 2) {
+  if (is.null(x) || length(x) == 0 || is.na(x)) return("N/A")
+  if (is.numeric(x) && !is.integer(x)) return(round(x, digits))
+  as.character(x)
+}
+card = function(label, value, css_class = "", subtitle = NULL) {
+  div(class = paste("metric-card", css_class),
+      div(class = "metric-card__label", label),
+      div(class = "metric-card__value", value),
+      if (!is.null(subtitle)) div(class = "metric-card__subtitle", subtitle))
+}
+phasing = whatshap_totals(SECTION_DATA$whatshap)
+n50_full = !is.null(qc_cramino) && !is.null(qc_cramino$n50_aligned) && !is.na(qc_cramino$n50_aligned)
+
+div(class = "metric-group overview-sequencing",
+  div(class = "metric-group__title", "Sequencing"),
+  div(class = "metric-grid",
+    card("Mean coverage",
+         if (!is.null(qc_mosdepth) && !is.na(qc_mosdepth$mean_depth)) paste0(fmt_val(qc_mosdepth$mean_depth), "×") else "N/A",
+         "metric-coverage"),
+    card("Read N50",
+         if (!is.null(qc_cramino) && !is.na(qc_cramino$n50)) fmt_bp(qc_cramino$n50) else "N/A", "metric-n50",
+         # cramino 2.0 also reports an aligned-length N50; the card shows the full read length one
+         subtitle = if (n50_full) "full read length" else NULL),
+    card("Error rate",
+         if (!is.null(samtools_stats) && !is.na(samtools_stats$error_rate))
+           paste0(formatC(samtools_stats$error_rate * 100, format = "f", digits = 3), "%") else "N/A",
+         "metric-error"),
+    # Omitted, not "N/A", when there is no phasing (QC > Phasing carries the notice)
+    if (!is.null(phasing))
+      card("Phased variants",
+           if (!is.na(phasing$phased)) formatC(phasing$phased, format = "d", big.mark = ",")
+           else sprintf("%.1f%%", phasing$fraction * 100),
+           "metric-phased",
+           subtitle = paste(c(
+             if (is.na(phasing$phased) || is.na(phasing$fraction)) NULL
+             else if (!is.na(phasing$variants))
+               sprintf("%.1f%% of %s", phasing$fraction * 100,
+                       formatC(phasing$variants, format = "d", big.mark = ","))
+             else sprintf("%.1f%% phased", phasing$fraction * 100),
+             "germline, WhatsHap"), collapse = " · "))
+  )
+)
+```
+
+```{r overview-print-footer}
+# Print only (assets/styles/_print.scss): the overview ends the first printed page(s)
+ov_version = tryCatch(readLines(file.path(repo_dir, "VERSION"), warn = FALSE)[1], error = function(e) NA)
+tags$p(class = "overview-print-footer",
+  paste0("Research use only · ", params$sample_id,
+         if (!is.na(ov_version)) paste0(" · LRSomatic report v", ov_version) else "",
+         " · ", format(Sys.Date(), "%Y-%m-%d")))
+```
+
+:::

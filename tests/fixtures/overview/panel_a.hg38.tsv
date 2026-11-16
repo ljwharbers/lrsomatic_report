@@ -1,0 +1,9 @@
+# reference: hg38
+# test panel: roles + applies_to scopes
+gene	chrom	start	end	applies_to	role
+TP53	chr17	7661779	7687538		tsg
+MYC	chr8	127735434	127742951		oncogene
+IGH	chr14	105586437	106879844	sv	
+NOTCH1	chr9	136494433	136546048	snv	oncogene
+CRLF2	chrX	1190490	1212723	snv	oncogene
+EWSR1	chr22	29268009	29300525		
