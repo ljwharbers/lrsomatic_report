@@ -135,14 +135,15 @@
 
   td {
     padding: 7px 10px;
-    border-bottom: 1px solid var(--color-border);
     vertical-align: top;
   }
 
-  tbody tr:last-child td { border-bottom: none; }
+  // One tbody per gene: the rule separates genes, not the alterations within one
+  tbody.kf-group + tbody.kf-group { border-top: 1px solid var(--color-border); }
+  tr.kf-row--cont td { padding-top: 2px; }
 
   // `hidden` must win over any display a theme gives table rows
-  tr[hidden] { display: none !important; }
+  tr[hidden], tbody[hidden] { display: none !important; }
 
   th.kf-vaf, td.kf-vaf { text-align: right; white-space: nowrap; }
 }
@@ -153,6 +154,12 @@
   &.kf-tier-2 td.kf-tier { border-left: 4px dashed var(--kf-tier-2); }
   &.kf-tier-3 td.kf-tier { border-left: 3px dotted var(--kf-tier-3); }
   &.kf-tier-3 { color: var(--color-text-muted); }
+
+  // A gene's further alterations: tier label, gene and lists are printed by the head line only
+  // (the per-line tier stripe stays, so a tier-3 line under a tier-1 gene still reads as such)
+  &.kf-row--cont .kf-tier__label,
+  &.kf-row--cont td.kf-gene > *,
+  &.kf-row--cont td.kf-lists { visibility: hidden; }
 }
 
 .kf-tier__label {
@@ -174,7 +181,7 @@
 .kf-alt__type,
 .kf-alt__locus,
 .kf-vaf__dp,
-.kf-evidence__flag {
+.kf-gene__flag {
   display: block;
   font-size: 0.7rem;
   color: var(--color-text-muted);
@@ -190,7 +197,7 @@
 .kf-alt__text, .kf-alt__locus, .kf-vaf { font-family: var(--font-mono); font-size: 0.78rem; }
 .kf-alt__text { word-break: break-word; }
 .kf-evidence { min-width: 22ch; }
-.kf-evidence__flag { font-weight: 600; }
+.kf-gene__flag { font-weight: 600; }
 .kf-lists { font-size: 0.74rem; color: var(--color-text-muted); }
 
 .kf-actions {

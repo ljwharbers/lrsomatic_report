@@ -186,12 +186,28 @@ test_that("findings are tagged with every panel holding the gene, per_panel_n co
   o = build_overview(NULL, list(sv = list(table = sv)), kf_panels(), NULL, NULL, list(),
                      list(reference = "hg38"))
   f = o$findings
-  expect_setequal(f$gene, c("EWSR1", "ATF1"))
-  expect_equal(f[gene == "EWSR1", panels], "a,b")
-  expect_equal(f[gene == "ATF1", panels], "b")
-  expect_true(all(f$tier == 1L))
-  expect_equal(o$per_panel_n, c(a = 1L, b = 2L))
-  expect_match(f[gene == "EWSR1", alteration], "translocation chr12–chr22")
+  # A translocation joining two listed genes is one row; without Padfoot, ordered by chromosome
+  expect_equal(nrow(f), 1L)
+  expect_equal(f$gene, "ATF1–EWSR1")
+  expect_equal(f$genes, "ATF1,EWSR1")
+  expect_equal(f$panels, "a,b")
+  expect_equal(f$tier, 1L)
+  expect_equal(o$per_panel_n, c(a = 1L, b = 1L))
+  expect_match(f$alteration, "translocation chr12–chr22")
+  expect_false(grepl("partner", f$alteration))
+  expect_match(f$evidence, "breakpoints in ATF1 and EWSR1")
+})
+
+test_that("the joined row follows Padfoot's gene order, and every other row has genes == gene", {
+  sv = kf_sv(svclass = "translocation", chrom_a = "chr22", pos_a = 29280000L,
+             chrom_b = "chr12", pos_b = 50800000L, padfoot_impact = "HIGH_ONCO",
+             padfoot_genes = "EWSR1 (intron7), ATF1 (intron3)")
+  vt = kf_vt(symbol = "TP53", impact = "HIGH", consequence = "stop_gained")
+  f = kf_run(vt, sd = list(sv = list(table = sv)))
+  expect_setequal(f$gene, c("EWSR1–ATF1", "TP53"))
+  expect_equal(f[type == "SV", genes], "EWSR1,ATF1")
+  expect_match(f[type == "SV", evidence], "Padfoot HIGH_ONCO: EWSR1 (intron7), ATF1 (intron3)", fixed = TRUE)
+  expect_equal(f[type == "small variant", genes], "TP53")
 })
 
 test_that("applies_to scopes: an SV-only gene gives no small-variant panel finding and vice versa", {
@@ -227,17 +243,85 @@ test_that("non-panel small variants: only ClinVar/HIGH, capped strongest first",
 
 # ---- structural variants --------------------------------------------------------------------
 
-test_that("two callers' rows collapse per gene and class, listing both callers", {
+test_that("two callers' calls of one event collapse into one row, listing both callers", {
   sv = kf_sv(id = c("sev_1", "sav_1"), caller = c("severus", "savana"),
              svclass = "translocation", chrom_a = c("chr22", "chr12"),
-             pos_a = c(29280000L, 50800000L), chrom_b = c("chr12", "chr22"),
-             pos_b = c(50800000L, 29280000L))
+             pos_a = c(29280000L, 50800003L), chrom_b = c("chr12", "chr22"),
+             pos_b = c(50800000L, 29280005L))
   f = kf_run(sd = list(sv = list(table = sv)))
-  e = f[gene == "EWSR1"]
-  expect_equal(nrow(e), 1L)
-  expect_match(e$alteration, "(SAVANA, Severus)", fixed = TRUE)
-  expect_equal(e$source_id, "sev_1,sav_1")
-  expect_match(e$evidence, "2 calls")
+  expect_equal(nrow(f), 1L)
+  expect_match(f$alteration, "(SAVANA, Severus)", fixed = TRUE)
+  expect_equal(f$source_id, "sev_1,sav_1")
+  expect_false(grepl("events", f$evidence))      # one event, however many callers
+})
+
+test_that("a Severus intra-chr breakend matching a SAVANA DEL is one deletion row", {
+  # CCS15-PB's CDKN2A: the same 2.9 Mb deletion, 1 bp apart, typed only by SAVANA
+  sv = kf_sv(id = c("severus_BND1", "ID_1"), caller = c("severus", "savana"),
+             svclass = c("intra-chr breakend", "DEL"), svtype = c("BND", "DEL"),
+             chrom_a = "chr9", pos_a = c(21969562L, 21969562L),
+             chrom_b = "chr9", pos_b = c(24835347L, 24835348L))
+  f = kf_run(sd = list(sv = list(table = sv)))
+  expect_equal(nrow(f), 1L)
+  expect_equal(f$gene, "CDKN2A")
+  expect_match(f$alteration, "^deletion chr9:21.97–24.84 Mb \\(SAVANA, Severus\\)$")
+  ev = kf_sv_events(sv)
+  expect_equal(ev$event, c(1L, 1L))
+  expect_equal(ev$ev_class, c("DEL", "DEL"))
+})
+
+test_that("calls are separate events when a breakpoint is off, or when one caller made both", {
+  base = list(chrom_a = "chr9", chrom_b = "chr9", svclass = "DEL", svtype = "DEL")
+  far = do.call(kf_sv, c(base, list(caller = c("severus", "savana"),
+                                    pos_a = c(21969562L, 21969562L),
+                                    pos_b = c(24835347L, 24835347L + KF_SV_SAME_EVENT_BP + 1L))))
+  expect_equal(kf_sv_events(far)$event, c(1L, 2L))
+  same_caller = do.call(kf_sv, c(base, list(caller = "severus", pos_a = c(21969562L, 21969570L),
+                                            pos_b = c(24835347L, 24835350L))))
+  expect_equal(kf_sv_events(same_caller)$event, c(1L, 2L))
+  # Two neighbouring 300 bp deletions 400 bp apart are not one event, even across callers
+  small = do.call(kf_sv, c(base, list(caller = c("severus", "savana"),
+                                      pos_a = c(1000000L, 1000400L), pos_b = c(1000300L, 1000700L))))
+  expect_equal(kf_sv_events(small)$event, c(1L, 2L))
+})
+
+test_that("a 'near' row from a call matched to a strong event of that gene is dropped", {
+  # SAVANA's focal DEL covers CDKN2A; Severus' matching untyped breakend has no breakpoint in
+  # it and is only "near" CDKN2A (CCS15-PB's CDKN2B). The two are one event: no tier-3 row
+  sv = kf_sv(id = c("sev", "sav"), caller = c("severus", "savana"),
+             svclass = c("intra-chr breakend", "DEL"), svtype = c("BND", "DEL"),
+             chrom_a = "chr9", pos_a = c(21900000L, 21900001L),
+             chrom_b = "chr9", pos_b = c(22100000L, 22100002L))
+  f = kf_run(sd = list(sv = list(table = sv)))
+  expect_equal(nrow(f), 1L)
+  expect_equal(f$tier, 1L)
+  expect_match(f$evidence, "focal deletion")
+  # ...and the row names both callers of the event, though only SAVANA's call hit it strongly
+  expect_match(f$alteration, "(SAVANA, Severus)", fixed = TRUE)
+  # Without the SAVANA call the Severus breakend is a tier-3 "near" row on its own
+  f = kf_run(sd = list(sv = list(table = sv[1])))
+  expect_equal(f$tier, 3L)
+})
+
+test_that("a translocation with one listed gene keeps a gene row naming its partner", {
+  sv = kf_sv(svclass = "translocation", chrom_a = "chr22", pos_a = 29280000L,
+             chrom_b = "chr2", pos_b = 5e6, padfoot_impact = "HIGH_ONCO",
+             padfoot_genes = "EWSR1 (intron7), FOO (intron1)")
+  f = kf_run(sd = list(sv = list(table = sv)))
+  expect_equal(f$gene, "EWSR1")
+  expect_equal(f$genes, "EWSR1")
+  expect_match(f$alteration, "partner FOO")
+})
+
+test_that("rows of one gene are contiguous, groups ordered by their best tier", {
+  vt = kf_vt(symbol = c("TP53", "MYC"), impact = c("MODERATE", "HIGH"),
+             consequence = c("missense_variant", "stop_gained"),
+             am_class = c("likely_pathogenic", NA))
+  f = kf_run(vt, sd = list(cna = kf_cna("TP53", "chr17", 7661779L, 7687538L,
+                                        "homozygous deletion", role = "tsg")))
+  # TP53: tier-1 deletion + tier-2 missense; MYC: tier-2 LoF in an oncogene
+  expect_equal(f$gene, c("TP53", "TP53", "MYC"))
+  expect_equal(f$tier, c(1L, 2L, 2L))
 })
 
 test_that("Padfoot HIGH naming a panel gene is tier 1 even off the panel coordinates", {

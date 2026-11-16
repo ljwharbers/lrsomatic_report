@@ -1272,9 +1272,11 @@ main > p:last-child em,
 // ============================================================
 // Max-width guard for full-page-layout
 // ============================================================
+// Wide enough that tables and the overview use a large monitor (figures do not grow: their
+// embeds only ever shrink), bounded so table rows on an ultrawide stay scannable
 .page-full .quarto-title-block,
 .page-full > .column-body {
-  max-width: 1400px;
+  max-width: 2200px;
 }
 
 // ============================================================

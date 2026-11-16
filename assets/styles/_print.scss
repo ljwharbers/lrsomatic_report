@@ -48,7 +48,8 @@
   .kf-table {
     font-size: 0.7rem;
     th, td { padding: 3px 6px; }
-    tr { break-inside: avoid; page-break-inside: avoid; }
+    tr, tbody.kf-group { break-inside: avoid; page-break-inside: avoid; }
+    tbody.kf-group + tbody.kf-group { border-top-color: #bbb; }
     thead { display: table-header-group; }   // repeat the header on a second page
   }
   .kf-alt__text, .kf-alt__locus, .kf-vaf { font-size: 0.68rem; }

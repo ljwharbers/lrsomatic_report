@@ -23,7 +23,12 @@ ov_num = function(x, digits = 2) ifelse(is.na(x), "", formatC(as.numeric(x), for
 ### Key findings {#key-findings}
 
 ```{r key-findings}
-kf_row = function(i) {
+# One <tbody class="kf-group"> per gene (or per rearrangement joining two listed genes), one
+# <tr> per alteration. Tier, gene and list cells are emitted on every line; key_findings.js
+# marks the first shown line of a group as its head and hides them on the others.
+if (!"genes" %in% names(kf)) kf[, genes := gene]
+kf_groups = unique(kf$gene)
+kf_row = function(i, group_loh) {
   r = kf[i]
   role = if (!is.na(r$role) && nzchar(r$role)) ov_role[[r$role]] else NULL
   lists = strsplit(r$panels, ",", fixed = TRUE)[[1]]
@@ -37,25 +42,33 @@ kf_row = function(i) {
     tags$td(class = "kf-tier", tags$span(class = "kf-tier__label", paste("Tier", r$tier))),
     tags$td(class = "kf-gene",
             tags$span(class = "kf-gene__symbol", r$gene),
-            if (!is.null(role)) tags$span(class = "kf-gene__role", role)),
+            if (!is.null(role)) tags$span(class = "kf-gene__role", role),
+            if (group_loh) tags$span(class = "kf-gene__flag", "LOH in gene")),
     tags$td(class = "kf-alt",
             tags$span(class = "kf-alt__type", ov_type[[r$type]]),
             tags$span(class = "kf-alt__text", r$alteration),
             if (!is.na(r$locus) && nzchar(r$locus) && r$type == "small variant")
               tags$span(class = "kf-alt__locus", r$locus)),
-    tags$td(class = "kf-evidence", r$evidence,
-            if (isTRUE(r$loh) && r$tier < 3 && r$type != "small variant" && !grepl("LOH", r$evidence))
-              tags$span(class = "kf-evidence__flag", "LOH in gene")),
+    tags$td(class = "kf-evidence", r$evidence),
     tags$td(class = "kf-vaf", vaf, if (nzchar(dp)) tags$span(class = "kf-vaf__dp", dp)),
     tags$td(class = "kf-lists", if (length(lists)) paste(ov_label(lists), collapse = ", ") else "—")
   )
+}
+kf_group = function(g) {
+  idx = which(kf$gene == g)
+  # LOH is a property of the gene: flagged once, unless a line's evidence already says it
+  loh = any(kf$loh[idx] %in% TRUE) && !any(grepl("LOH", kf$evidence[idx], fixed = TRUE))
+  tags$tbody(class = "kf-group", `data-gene` = toupper(g),
+             `data-genes` = toupper(kf$genes[idx[1]]),
+             lapply(idx, kf_row, group_loh = loh))
 }
 
 per_n = ov$per_panel_n
 hint_buttons = lapply(ov_panels, function(p) {
   n = if (!is.null(per_n) && p %in% names(per_n)) per_n[[p]] else 0L
   tags$button(type = "button", class = "kf-hint", `data-panel` = p,
-              paste0(ov_label(p), " · ", n, " tier 1–2 finding", if (n == 1) "" else "s"))
+              paste0(ov_label(p), " · ", n, " gene", if (n == 1) "" else "s",
+                     " with tier 1–2 findings"))
 })
 
 np = ov$n_nonpanel
@@ -94,7 +107,7 @@ tags$div(
         tags$th(scope = "col", "Alteration"), tags$th(scope = "col", "Evidence"),
         tags$th(scope = "col", class = "kf-vaf", "VAF"),
         tags$th(scope = "col", "Gene list"))),
-      tags$tbody(lapply(seq_len(nrow(kf)), kf_row)))),
+      lapply(kf_groups, kf_group))),
   tags$div(class = "kf-actions",
     tags$button(type = "button", class = "kf-toggle-low", hidden = NA, `aria-expanded` = "false",
                 "Show lower-confidence findings"),
@@ -113,12 +126,16 @@ tags$div(
 ```{r key-findings-details}
 table_details(
   summary = "How key findings are chosen",
+  "One row per gene, listing each of its alterations; the tier shown is the gene's strongest. ",
+  tags$br(),
   tags$strong("Small variants"), " (per variant and gene; the gene must be in the list's small-variant scope): ",
   "ClinVar pathogenic / likely pathogenic (“Conflicting classifications” never counts), or VEP impact HIGH, ",
   "or impact MODERATE with AlphaMissense likely pathogenic — where AlphaMissense gives no call, EVE pathogenic, ",
   "or SIFT deleterious together with PolyPhen probably damaging. The predicted-missense route is tier 2.",
   tags$br(),
-  tags$strong("Structural variants"), " (both callers, collapsed per gene and event class; callers listed, never merged by coordinate): ",
+  tags$strong("Structural variants"), " (both callers; calls of the two callers whose breakpoints agree within ",
+  fmt_bp(KF_SV_SAME_EVENT_BP), " are one event, typed by whichever caller typed it, and both callers are named. ",
+  "A rearrangement with breakpoints in two listed genes is one row for both): ",
   "tier 1 when a breakpoint lies in the gene, a deletion/duplication of at most ", fmt_bp(KF_FOCAL_SV_MAX),
   " covers it, or Padfoot rates the event HIGH for that gene. A gene merely inside a larger event is left to copy number. ",
   "A deletion/duplication/insertion that VEP annotated without an exon effect is tier 3, one with no annotation at all, ",
