@@ -813,11 +813,15 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
   if (is.null(sg)) {
     out$signatures = kf_bm("signatures", "Dominant signatures", "not run",
                            "SigProfilerAssignment", "not_run")
-  } else if (is.null(sg$dominant) || nrow(sg$dominant) == 0) {
+  } else if (is.null(sg$dominant) || nrow(sg$dominant) == 0 ||
+             !any(sg$dominant$context == KF_SIGNATURE_CONTEXT)) {
     out$signatures = kf_bm("signatures", "Dominant signatures", "no well-fitted signature",
-                           "no context passed the fit / mutation-count thresholds")
+                           "no SBS fit passed the fit / mutation-count thresholds")
   } else {
-    d = sg$dominant
+    # SBS only: indel (ID) and doublet (DBS) fits stay in the signatures section. On long
+    # reads an ID fit can pass the cosine threshold while resting on homopolymer indel
+    # errors, and "Defective MMR" on the first screen from that is a claim the data cannot carry.
+    d = sg$dominant[sg$dominant$context == KF_SIGNATURE_CONTEXT]
     art = if ("artefact" %in% names(d)) d$artefact %in% TRUE else rep(FALSE, nrow(d))
     aet = if ("aetiology" %in% names(d)) as.character(d$aetiology) else rep(NA_character_, nrow(d))
     items = paste0(d$signature, " ", formatC(as.numeric(d$pct), format = "f", digits = 0), "%",
@@ -831,6 +835,9 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
   }
   out
 }
+
+# Signature context the overview reports; the others are shown in their own section only
+KF_SIGNATURE_CONTEXT = "SBS"
 
 `%||kf%` = function(a, b) if (is.null(a) || length(a) == 0) b else a
 
