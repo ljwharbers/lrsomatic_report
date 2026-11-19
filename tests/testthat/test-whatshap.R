@@ -87,3 +87,23 @@ test_that("whatshap stats are found in the published qc/whatshap_stats/ layout",
   got = SECTIONS$whatshap$locate(root, "S")$stats_tsv
   expect_equal(basename(got), "S_whatshap_stats.tsv")
 })
+
+test_that("the phased fraction is of heterozygous variants, as whatshap reports it (REP-4)", {
+  # A2 CCS15-ONT's ALL row: 92.6 % = phased / heterozygous, not phased / variants (56.6 %)
+  w = list(per_chrom = data.table(chromosome = "chr1"),
+           all = list(chromosome = "ALL", variants = 5063778, phased = 2864966,
+                      heterozygous_variants = 3092264, phased_fraction = 0.926494633058497))
+  got = whatshap_totals(w)
+  expect_equal(got$heterozygous, 3092264)
+  expect_equal(got$denominator, "heterozygous")
+  expect_equal(got$fraction, 0.926494633058497)
+  # Summed rows recompute against the heterozygous count too
+  s = whatshap_totals(list(all = NULL, per_chrom = data.table(
+    chromosome = c("chr1", "chr2"), variants = c(100, 100), phased = c(40, 50),
+    heterozygous_variants = c(50, 50))))
+  expect_equal(s$fraction, 0.9)
+  # Without a heterozygous count the fraction falls back to variants, and says so
+  v = whatshap_totals(list(all = list(chromosome = "ALL", variants = 200, phased = 150), per_chrom = NULL))
+  expect_equal(v$denominator, "variants")
+  expect_equal(v$fraction, 0.75)
+})

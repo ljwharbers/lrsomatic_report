@@ -228,8 +228,11 @@ div(class = "metric-group overview-sequencing",
            "metric-phased",
            subtitle = paste(c(
              if (is.na(phasing$phased) || is.na(phasing$fraction)) NULL
-             else if (!is.na(phasing$variants))
-               sprintf("%.1f%% of %s", phasing$fraction * 100,
+             else if (!is.na(phasing$heterozygous))
+               sprintf("%.1f%% of %s heterozygous", phasing$fraction * 100,
+                       formatC(phasing$heterozygous, format = "d", big.mark = ","))
+             else if (identical(phasing$denominator, "variants") && !is.na(phasing$variants))
+               sprintf("%.1f%% of %s variants", phasing$fraction * 100,
                        formatC(phasing$variants, format = "d", big.mark = ","))
              else sprintf("%.1f%% phased", phasing$fraction * 100),
              "germline, WhatsHap"), collapse = " · "))
