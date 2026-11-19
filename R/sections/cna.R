@@ -18,7 +18,8 @@
 #                             ascat_wgd, ascat_loh, ascat_gi),
 #     genes            = data.table(panel, gene, chrom, start, end, min_cn, max_cn, min_minor,
 #                                   n_segments, call, partial, loh, source, role, expected),
-#                        # call: "amplification" | "homozygous deletion" | "gain" | "loss" |
+#                        # call: "amplification" | "homozygous deletion" | "deep deletion" |
+#                        # "gain" | "loss" |
 #                        # "neutral" | NA (gene span overlaps no segment, n_segments == 0)
 #     wakhan_genes     = data.table(chrom, start, end, gene, hp1_state, hp2_state, total, minor),
 #     wakhan_genes_dropped = integer(1),   # rows dropped as state > CNA_MAX_PLAUSIBLE_CN
@@ -40,7 +41,7 @@
 # Calls (COSMIC Cancer Gene Census CNA definition): ploidy <= CNA_PLOIDY_SPLIT -> amplification
 # when total CN >= CNA_AMP_CN_LOW, homozygous deletion when total CN == 0; ploidy above it ->
 # amplification when CN >= CNA_AMP_CN_HIGH, homozygous deletion when CN < ploidy -
-# CNA_LOSS_OFFSET. Otherwise gain/loss against the expected CN: round(ploidy), and for chrX/chrY
+# CNA_LOSS_OFFSET, named "deep deletion" unless the total CN is 0. Otherwise gain/loss against the expected CN: round(ploidy), and for chrX/chrY
 # in a male max(1, round(ploidy / 2)) — 1 at any diploid-ish ploidy, 2 after a WGD.
 # A gene spanning several segments: amplification on max_cn, homozygous deletion on min_cn,
 # then loss, then gain; partial = TRUE when the per-segment calls disagree.
@@ -53,7 +54,8 @@ CNA_MAX_PLAUSIBLE_CN = 100
 CNA_PROFILE_YCAP     = 6      # profile y axis is capped here; segments above get a marker
 CNA_PROFILE_MIN_FRAC = 0.001  # profile only: segments narrower than this genome fraction are
                               # drawn widened (centred) so focal events stay visible
-CNA_CALL_LEVELS      = c("amplification", "homozygous deletion", "loss", "gain", "neutral")
+CNA_CALL_LEVELS      = c("amplification", "homozygous deletion", "deep deletion", "loss", "gain",
+                         "neutral")
 
 # Expected total CN per segment: round(ploidy); halved (min 1) on chrX/chrY in a male
 cna_expected_cn = function(chrom, ploidy, sex = "female") {
@@ -72,8 +74,9 @@ cna_call = function(total, minor, ploidy, expected) {
   low = ploidy <= CNA_PLOIDY_SPLIT
   amp = total >= ifelse(low, CNA_AMP_CN_LOW, CNA_AMP_CN_HIGH)
   hd  = ifelse(low, total == 0, total < ploidy - CNA_LOSS_OFFSET)
+  # Above the ploidy split the CGC threshold can fire on CN >= 1: that is a deep, not a homozygous, deletion
   call = fifelse(amp, "amplification",
-         fifelse(hd, "homozygous deletion",
+         fifelse(hd, fifelse(total == 0, "homozygous deletion", "deep deletion"),
          fifelse(total < expected, "loss",
          fifelse(total > expected, "gain", "neutral"))))
   call[is.na(total) | is.na(ploidy) | is.na(expected)] = NA_character_
@@ -103,7 +106,7 @@ cna_genome_metrics = function(segments) {
              start = numeric(), end = numeric(), min_cn = numeric(), max_cn = numeric(),
              min_minor = numeric(), n_segments = integer(), call = character(),
              partial = logical(), loh = logical(), source = character(),
-             role = character(), expected = numeric())
+             role = character(), expected = numeric(), span_from = character())
 }
 
 # Collapse per-segment calls to one gene call: most severe present, in CNA_CALL_LEVELS order
@@ -114,9 +117,11 @@ cna_genome_metrics = function(segments) {
 }
 
 # Per-gene calls for every panel. Coordinate rows (panel_gene_intervals(p, "all")) are
-# overlapped with `segments`; panel symbols with no coordinates fall back to Wakhan's own
-# gene file (`wakhan_genes`, symbol match, called at `wakhan_ploidy`).
-# Returns list(genes, panels_without_coords).
+# overlapped with `segments`. A panel symbol without coordinates takes the gene's span from
+# another embedded list that has one (span_from = that list), and only failing that Wakhan's
+# own gene file (`wakhan_genes`, symbol match, called at `wakhan_ploidy`; span_from = "Wakhan
+# segment": its coordinates are the segment's, not the gene's). span_from is NA for a list's
+# own coordinates. Returns list(genes, panels_without_coords).
 cna_gene_calls = function(segments, panels, ploidy, sex, source,
                           wakhan_genes = NULL, wakhan_ploidy = ploidy) {
   out = list()
@@ -126,12 +131,29 @@ cna_gene_calls = function(segments, panels, ploidy, sex, source,
     segs = segments[!is.na(total), .(chrom, start, end, total, minor)]
     setkey(segs, chrom, start, end)
   }
+  # Every embedded list's gene spans, for symbols another list leaves without coordinates
+  spans = rbindlist(lapply(names(panels), function(nm) {
+    v = panel_gene_intervals(panels[[nm]], "all")
+    if (nrow(v)) v[, from := nm]
+  }))
   for (nm in names(panels)) {
     p = panels[[nm]]
     iv = panel_gene_intervals(p, "all")
     if (nrow(iv) == 0) no_coords = c(no_coords, nm)
+    iv[, from := NA_character_]
+    # Symbols without coordinates here: borrow the span another list gives the gene
+    lend = setdiff(unique(as.character(unlist(p$genes))), iv$gene)
+    if (length(lend) > 0 && nrow(spans) > 0) {
+      b = spans[toupper(gene) %in% toupper(lend) & from != nm]
+      if (nrow(b)) {
+        b[, gk := toupper(gene)]
+        b = b[b[, .(from1 = from[1]), by = gk], on = "gk"][from == from1]
+        b[, gene := lend[match(gk, toupper(lend))]]
+        iv = rbind(iv, b[, .(chrom, start, end, gene, from)])
+      }
+    }
     if (nrow(iv) > 0 && have_segs) {
-      g = iv[, .(gstart = min(start), gend = max(end)), by = .(gene, chrom)]
+      g = iv[, .(gstart = min(start), gend = max(end), from = from[1]), by = .(gene, chrom)]
       ov = foverlaps(g, segs, by.x = c("chrom", "gstart", "gend"), type = "any",
                      nomatch = NA)
       ov[, expected := cna_expected_cn(chrom, ploidy, sex)]
@@ -148,7 +170,7 @@ cna_gene_calls = function(segments, panels, ploidy, sex, source,
              partial = length(calls[!is.na(calls)]) > 1,
              loh = any(seg_loh[ok]),
              expected = expected[1])
-      }, by = .(gene, chrom, start = gstart, end = gend)]
+      }, by = .(gene, chrom, start = gstart, end = gend, span_from = from)]
       agg[, `:=`(panel = nm, source = source)]
       out[[length(out) + 1L]] = agg
     }
@@ -165,7 +187,7 @@ cna_gene_calls = function(segments, panels, ploidy, sex, source,
           gene = w$gene, chrom = w$chrom, start = w$start, end = w$end,
           min_cn = w$total, max_cn = w$total, min_minor = w$minor, n_segments = 1L,
           call = cc$call, partial = FALSE, loh = cc$loh, expected = w$expected,
-          panel = nm, source = "wakhan-genes")
+          panel = nm, source = "wakhan-genes", span_from = "Wakhan segment")
       }
     }
   }

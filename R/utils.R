@@ -375,9 +375,18 @@ load_all_gene_panels = function(gene_lists_dir, reference = NULL) {
     p = tryCatch(load_gene_panel(tsv_files[pick], reference),
       error = function(e) {
         message("Skipping gene panel '", nm, "': ", conditionMessage(e)); NULL })
-    if (!is.null(p)) panels[[nm]] = p
+    if (!is.null(p)) { p$builtin = TRUE; panels[[nm]] = p }
   }
   panels
+}
+
+# Display label of a panel key: a builtin's name capitalised ("lymphoid" -> "Lymphoid"), a
+# user list's file stem as given. Vectorised over `keys`; `panels` is the named panel list
+panel_label = function(keys, panels = list()) {
+  keys = as.character(keys)
+  builtin = vapply(keys, function(k) nzchar(k) && isTRUE(as.logical(unlist(panels[[k]]$builtin))),
+                   logical(1), USE.NAMES = FALSE)
+  ifelse(builtin & nzchar(keys), paste0(toupper(substr(keys, 1, 1)), substr(keys, 2, nchar(keys))), keys)
 }
 
 # Non-colliding key for a user panel: the first collision gets "-custom", further ones are numbered
@@ -508,6 +517,19 @@ js_facet_defs = function(dt, cols, seps = character(0), levels = list()) {
   paste0("{", paste(entries, collapse = ","), "}")
 }
 
+# Path relative to --sample-dir, for provenance lines. Lexical on purpose: normalizePath()
+# would resolve the pipeline's staged symlinks out of the sample directory. Vectorised;
+# a path outside it, or without a root, is returned as given
+sample_rel_path = function(p, root) {
+  if (is.null(p)) return(p)
+  p = as.character(p)
+  if (is.null(root) || length(root) == 0 || is.na(root[1]) || !nzchar(root[1])) return(p)
+  root = sub("/+$", "", as.character(root[1]))
+  inside = !is.na(p) & startsWith(p, paste0(root, "/"))
+  p[inside] = sub("^/+", "", substring(p[inside], nchar(root) + 2L))
+  p
+}
+
 # Format a number for human-readable display
 fmt_bp = function(x) {
   x = as.numeric(x)
@@ -593,7 +615,11 @@ count_small_variants = function(vep_data) {
   list(total = nrow(u), snv = sum(is_snv), indel = nrow(u) - sum(is_snv))
 }
 
-# Coding TMB from a variant_table; consequence may be comma-joined; denominator_mb defaults to 30
+# Coding TMB from a variant_table: non-synonymous variants, each counted once however many
+# gene rows it has, over denominator_mb (30). Also split into SNVs and indels (the
+# count_small_variants() rule), because long-read homopolymer indel errors can dominate the
+# total: tmb_snv is the figure to compare across platforms. consequence may be ","/"&"-joined.
+#   returns list(n_nonsyn, n_snv, n_indel, tmb, tmb_snv, denominator_mb)
 compute_tmb = function(variant_table, denominator_mb = 30) {
   nonsyn_terms = c(
     "missense_variant", "frameshift_variant", "stop_gained", "stop_lost",
@@ -601,16 +627,28 @@ compute_tmb = function(variant_table, denominator_mb = 30) {
     "splice_acceptor_variant", "splice_donor_variant", "protein_altering_variant"
   )
   if (is.null(variant_table) || nrow(variant_table) == 0) {
-    return(list(n_nonsyn = NA_integer_, tmb = NA_real_, denominator_mb = denominator_mb))
+    return(list(n_nonsyn = NA_integer_, n_snv = NA_integer_, n_indel = NA_integer_,
+                tmb = NA_real_, tmb_snv = NA_real_, denominator_mb = denominator_mb))
   }
-  is_nonsyn = vapply(variant_table$consequence, function(csq) {
+  vt = as.data.table(variant_table)
+  is_nonsyn = vapply(vt$consequence, function(csq) {
     if (is.na(csq) || csq == "") return(FALSE)
-    any(trimws(unlist(strsplit(csq, ","))) %in% nonsyn_terms)
-  }, logical(1))
-  n_nonsyn = sum(is_nonsyn, na.rm = TRUE)
+    any(trimws(unlist(strsplit(csq, "[,&]"))) %in% nonsyn_terms)
+  }, logical(1), USE.NAMES = FALSE)
+  key_cols = intersect(c("chrom", "pos", "ref", "alt"), names(vt))
+  u = if (length(key_cols) == 4L) unique(vt[is_nonsyn, ..key_cols]) else vt[is_nonsyn]
+  base = c("A", "C", "G", "T")
+  is_snv = if (length(key_cols) == 4L)
+             toupper(as.character(u$ref)) %in% base & toupper(as.character(u$alt)) %in% base
+           else rep(NA, nrow(u))
+  n_nonsyn = nrow(u)
+  n_snv = if (anyNA(is_snv)) NA_integer_ else sum(is_snv)
   list(
     n_nonsyn       = n_nonsyn,
+    n_snv          = n_snv,
+    n_indel        = if (is.na(n_snv)) NA_integer_ else n_nonsyn - n_snv,
     tmb            = round(n_nonsyn / denominator_mb, 2),
+    tmb_snv        = if (is.na(n_snv)) NA_real_ else round(n_snv / denominator_mb, 2),
     denominator_mb = denominator_mb
   )
 }

@@ -8,7 +8,7 @@
 ov = OVERVIEW
 kf = if (!is.null(ov$findings)) ov$findings else empty_findings()
 ov_panels = if (length(all_panels) > 0) names(all_panels) else character(0)
-ov_label = function(p) ifelse(nzchar(p), paste0(toupper(substr(p, 1, 1)), substr(p, 2, nchar(p))), p)
+ov_label = function(p) panel_label(p, all_panels)
 ov_role = c(oncogene = "oncogene", tsg = "TSG", both = "oncogene/TSG")
 ov_type = c(`small variant` = "Small variant", SV = "SV", CNA = "Copy number")
 ov_num = function(x, digits = 2) ifelse(is.na(x), "", formatC(as.numeric(x), format = "f", digits = digits))
@@ -27,7 +27,9 @@ ov_num = function(x, digits = 2) ifelse(is.na(x), "", formatC(as.numeric(x), for
 # <tr> per alteration. Tier, gene and list cells are emitted on every line; key_findings.js
 # marks the first shown line of a group as its head and hides them on the others.
 if (!"genes" %in% names(kf)) kf[, genes := gene]
+if (!"rescued" %in% names(kf)) kf[, rescued := FALSE]
 kf_groups = unique(kf$gene)
+kf_n_rescued = sum(kf$rescued %in% TRUE)
 kf_row = function(i, group_loh) {
   r = kf[i]
   role = if (!is.na(r$role) && nzchar(r$role)) ov_role[[r$role]] else NULL
@@ -35,11 +37,14 @@ kf_row = function(i, group_loh) {
   lists = lists[nzchar(lists)]
   vaf = ov_num(r$vaf)
   dp = if ("dp" %in% names(r) && !is.na(r$dp)) paste0("DP ", formatC(r$dp, format = "d", big.mark = ",")) else ""
+  resc = isTRUE(r$rescued)
   tags$tr(
-    class = paste0("kf-row kf-tier-", r$tier),
+    class = paste0("kf-row kf-tier-", if (resc) "rescued" else r$tier),
     `data-gene` = toupper(r$gene), `data-panels` = r$panels,
     `data-tier` = r$tier, `data-type` = r$type,
-    tags$td(class = "kf-tier", tags$span(class = "kf-tier__label", paste("Tier", r$tier))),
+    `data-rescued` = if (resc) "1" else NULL,
+    tags$td(class = "kf-tier", tags$span(class = "kf-tier__label",
+                                         if (resc) "Rescued" else paste("Tier", r$tier))),
     tags$td(class = "kf-gene",
             tags$span(class = "kf-gene__symbol", r$gene),
             if (!is.null(role)) tags$span(class = "kf-gene__role", role),
@@ -85,13 +90,19 @@ tags$div(
       tags$strong("Tumour-only sample: "),
       "without a matched normal, these calls can include germline variants. VAF is shown for judgement ",
       "(a germline heterozygous variant sits near 0.5, or near 1 under LOH)."),
+  if (isTRUE(ov$tumour_only) && !is.null(verdict_note(ov$verdict)))
+    tags$p(class = paste("kf-caveat", if (identical(ov$verdict$status, "skipped")) "kf-caveat--strong"),
+           verdict_note(ov$verdict)),
   tags$ul(class = "kf-legend", `aria-label` = "Tier legend",
     tags$li(class = "kf-legend__item kf-tier-1", tags$strong("Tier 1"),
-            " strong evidence: ClinVar (likely) pathogenic or truncating variant, breakpoint in the gene, amplification or homozygous deletion"),
+            " strong evidence: ClinVar (likely) pathogenic or truncating variant, breakpoint in the gene, amplification or homozygous / deep deletion"),
     tags$li(class = "kf-legend__item kf-tier-2", tags$strong("Tier 2"),
             " weaker: predicted-damaging missense, loss of function in an oncogene, SV with no exon annotated"),
     tags$li(class = "kf-legend__item kf-tier-3", tags$strong("Tier 3"),
-            " low confidence: SV near (not in) the gene, intronic SV, copy number in a pseudoautosomal or IG/TR locus")),
+            " low confidence: SV near (not in) the gene, intronic SV, copy number in a pseudoautosomal or IG/TR locus"),
+    if (kf_n_rescued > 0)
+      tags$li(class = "kf-legend__item kf-tier-rescued", tags$strong("Rescued"),
+              " SV that failed Severus' own filters and was kept only by the whitelist; hidden unless shown")),
   if (length(ov_panels) == 0)
     section_notice("No gene list is embedded in this report, so no key findings can be listed.")
   else tags$div(class = "kf-need-list",
@@ -111,6 +122,9 @@ tags$div(
   tags$div(class = "kf-actions",
     tags$button(type = "button", class = "kf-toggle-low", hidden = NA, `aria-expanded` = "false",
                 "Show lower-confidence findings"),
+    if (kf_n_rescued > 0)
+      tags$button(type = "button", class = "kf-toggle-rescued", hidden = NA,
+                  `aria-pressed` = "false", "Show whitelist-rescued SVs"),
     tags$span(class = "kf-count")),
   tags$p(class = "kf-custom-note table-footnote", hidden = NA,
     "A Custom… list matches by gene symbol among the findings of the embedded gene lists and ",
@@ -129,7 +143,8 @@ table_details(
   "One row per gene, listing each of its alterations; the tier shown is the gene's strongest. ",
   tags$br(),
   tags$strong("Small variants"), " (per variant and gene; the gene must be in the list's small-variant scope): ",
-  "ClinVar pathogenic / likely pathogenic (“Conflicting classifications” never counts), or VEP impact HIGH, ",
+  "ClinVar pathogenic / likely pathogenic (“Conflicting classifications” never counts; credited only to the genes in which the variant is ",
+  "coding or at a splice site, when it is so in any), or VEP impact HIGH, ",
   "or impact MODERATE with AlphaMissense likely pathogenic — where AlphaMissense gives no call, EVE pathogenic, ",
   "or SIFT deleterious together with PolyPhen probably damaging. The predicted-missense route is tier 2.",
   tags$br(),
@@ -141,9 +156,12 @@ table_details(
   "A deletion/duplication/insertion that VEP annotated without an exon effect is tier 3, one with no annotation at all, ",
   "or that Padfoot rated below HIGH, tier 2. Within ", fmt_bp(SV_PANEL_WINDOW_BND), " of a breakend (",
   fmt_bp(SV_PANEL_WINDOW_OTHER), " of other events) the gene is listed as “near” at tier 3, at most ",
-  KF_MAX_PROXIMITY_PER_GENE, " rows per gene. Events of locus size inside IG/TR loci are V(D)J recombination: tier 3.",
+  KF_MAX_PROXIMITY_PER_GENE, " rows per gene. Events of locus size inside IG/TR loci are V(D)J recombination: tier 3. ",
+  "An SV Severus kept only because of its whitelist (", tags$code("INFO/WL_RESCUE"), ") is tier “Rescued” and hidden ",
+  "until “Show whitelist-rescued SVs” is pressed, with its read support and any filter it failed; one that would be tier 3 ",
+  "is not listed, and one that the other caller also made is not rescued.",
   tags$br(),
-  tags$strong("Copy number"), " (gene-level calls of the Copy number section): amplification or homozygous deletion. ",
+  tags$strong("Copy number"), " (gene-level calls of the Copy number section): amplification or homozygous deletion (deep deletion: below the high-ploidy threshold but not CN 0). ",
   "Calls in a pseudoautosomal region (", if (!is.null(params$reference)) params$reference else "", ") and in IG/TR loci are tier 3. ",
   "Loss of heterozygosity is not a finding on its own; it is noted on the gene's other rows, and with a listed small variant ",
   "reads “possible biallelic (LOH)”.",
@@ -161,16 +179,25 @@ table_details(
 
 ```{r biomarkers}
 bm = ov$biomarkers
+bm_row = function(b, tier = NULL) {
+  tags$div(class = paste0("bm-row bm-", b$status, " bm-id-", b$id),
+    `data-ss-min` = tier,
+    hidden = if (!is.null(tier) && tier != SHATTERSEEK_MIN_TIER_DEFAULT) NA,
+    tags$div(class = "bm-label", b$label,
+             if (!is.null(tier)) shatterseek_tier_select(class = "bm-tier-select")),
+    tags$div(class = "bm-value",
+             b$value,
+             if (identical(b$status, "warn")) tags$span(class = "bm-flag", "check")),
+    if (!is.null(b$items) && length(b$items) > 0)
+      tags$ul(class = "bm-items", lapply(b$items, tags$li))
+    else if (nzchar(b$detail)) tags$div(class = "bm-detail", b$detail))
+}
+# The chromothripsis card has one row per ShatterSeek minimum-tier setting; the selector
+# (shared with the Chromothripsis section, script in _instability.qmd) shows one
 tags$div(class = "bm-list",
   lapply(bm, function(b) {
-    tags$div(class = paste0("bm-row bm-", b$status, " bm-id-", b$id),
-      tags$div(class = "bm-label", b$label),
-      tags$div(class = "bm-value",
-               b$value,
-               if (identical(b$status, "warn")) tags$span(class = "bm-flag", "check")),
-      if (!is.null(b$items) && length(b$items) > 0)
-        tags$ul(class = "bm-items", lapply(b$items, tags$li))
-      else if (nzchar(b$detail)) tags$div(class = "bm-detail", b$detail))
+    if (is.null(b$views)) bm_row(b)
+    else tagList(lapply(names(b$views), function(t) bm_row(b$views[[t]], as.integer(t))))
   }))
 ```
 
@@ -216,8 +243,11 @@ div(class = "metric-group overview-sequencing",
            "metric-phased",
            subtitle = paste(c(
              if (is.na(phasing$phased) || is.na(phasing$fraction)) NULL
-             else if (!is.na(phasing$variants))
-               sprintf("%.1f%% of %s", phasing$fraction * 100,
+             else if (!is.na(phasing$heterozygous))
+               sprintf("%.1f%% of %s heterozygous", phasing$fraction * 100,
+                       formatC(phasing$heterozygous, format = "d", big.mark = ","))
+             else if (identical(phasing$denominator, "variants") && !is.na(phasing$variants))
+               sprintf("%.1f%% of %s variants", phasing$fraction * 100,
                        formatC(phasing$variants, format = "d", big.mark = ","))
              else sprintf("%.1f%% phased", phasing$fraction * 100),
              "germline, WhatsHap"), collapse = " · "))

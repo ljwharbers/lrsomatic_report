@@ -34,7 +34,7 @@
 
   // Interactive bits do not print; rows already hidden by the toggle stay hidden, so the
   // page shows exactly the tiers that were shown on screen
-  .kf-toggle-low, .kf-hints, .kf-count, .kf-custom-note, .kf-intro { display: none !important; }
+  .kf-toggle-low, .kf-toggle-rescued, .kf-hints, .kf-count, .kf-custom-note, .kf-intro { display: none !important; }
   .kf-need-list { border-style: solid; }
 
   // Findings full width, biomarkers below as a compact three-column block

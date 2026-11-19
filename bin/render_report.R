@@ -46,6 +46,9 @@ option_list = list(
                            "(default: slim — HIGH/MODERATE impact, ClinVar pathogenic and",
                            "panel-gene rows). The full table is always written next to the",
                            "report as <sample-id>_small_variants.tsv.gz.")),
+  make_option("--run-mode",    type = "character", default = NULL,
+              help = paste("Run mode: paired | tumour_only. Overrides the mode inferred from",
+                           "normal-side QC files (default: inferred).")),
   make_option("--version",     action = "store_true", default = FALSE,
               help = "Print the tool version and exit"),
   make_option("--output",      type = "character", default = NULL,
@@ -75,6 +78,10 @@ embed       = tolower(trimws(opt[["embed"]]))
 if (!embed %in% c("slim", "full"))
   abort(paste0("--embed must be 'slim' or 'full' (got '", opt[["embed"]], "')"))
 
+run_mode   = opt[["run-mode"]]
+if (!is.null(run_mode) && !tolower(trimws(run_mode)) %in% names(RUN_MODES))
+  abort(paste0("--run-mode must be 'paired' or 'tumour_only' (got '", run_mode, "')"))
+
 output     = if (!is.null(opt[["output"]])) opt[["output"]] else
              file.path(getwd(), paste0(sample_id, "_report.html"))
 title      = if (!is.null(opt[["title"]])) opt[["title"]] else
@@ -82,8 +89,8 @@ title      = if (!is.null(opt[["title"]])) opt[["title"]] else
 
 # ---- Locate per-tool outputs ---------------------------------------------
 message("Locating outputs in: ", sample_dir)
-outputs = locate_outputs(sample_dir, sample_id)
-message("Run mode: ", outputs$mode)
+outputs = apply_run_mode(locate_outputs(sample_dir, sample_id), run_mode)
+message("Run mode: ", outputs$mode, if (identical(outputs$mode_source, "cli")) " (--run-mode)" else " (inferred from QC files)")
 message("VEP somatic: ", ifelse(is.null(outputs$vep_somatic), "NOT FOUND", outputs$vep_somatic))
 message("Somatic VAF VCF: ", ifelse(is.null(outputs$somatic_vaf_vcf), "NOT FOUND",
                                     paste(outputs$somatic_vaf_vcf, collapse = ", ")))
@@ -142,7 +149,8 @@ for (gp in gene_panels) {
 default_panels = unique(default_panels)
 # Sentinel rather than character(0): an empty vector round-trips through execute_params as NULL
 if (length(default_panels) == 0) default_panels = "__all__"
-message("Gene panels selected on load: ", paste(default_panels, collapse = ", "))
+message("Gene panels selected on load: ",
+        if (identical(default_panels, "__all__")) "none" else paste(default_panels, collapse = ", "))
 
 # ---- Render: copy templates/ and assets/ to a writable dir (the repo may be read-only and Quarto writes next to the .qmd) ----
 work = file.path(getwd(), "._render")

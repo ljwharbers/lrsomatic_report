@@ -7,15 +7,20 @@
 # parse() returns
 #   table          one row per rearrangement, both callers rbind-ed. Columns: SV_TABLE_COLS
 #                  (id, svclass, svtype, chrom_a, pos_a, gene_a, chrom_b, pos_b, gene_b, sv_len,
-#                  vaf, consequence, impact, support, svtype_raw) + caller, and PADFOOT_COLS
+#                  vaf, consequence, impact, support, svtype_raw, filter, wl_rescue) + caller,
+#                  and PADFOOT_COLS
 #                  (padfoot_impact, padfoot_score, padfoot_role, padfoot_genes, padfoot_type)
 #                  only when at least one Padfoot file was found. `id` is unique across callers
 #                  (a caller whose ids collide with an earlier one's is prefixed "<caller>:").
-#   circos         genome-wide circos tracks (severus_circos_tracks()) from ONE caller
+#   circos         genome-wide circos tracks (severus_circos_tracks()) from ONE caller, without
+#                  its whitelist-rescued rows (the static plot shows the default view)
 #   circos_caller  which one: Severus when it has records, else SAVANA, else NA
+#   circos_rescued rows of the circos caller left out of the circos as whitelist-rescued
 #   n_by_caller    named integer, rows per caller found (0 for a caller whose VCF was empty)
+#   n_rescued_by_caller  named integer, whitelist-rescued rows among them (sv_is_rescued())
 #   callers        per caller: list(vcf, vep_vcf, gene_tsv, annotation_path, n_records, n_rows,
-#                  n_annotated, n_with_genes, n_typed, pon_filtered)
+#                  n_annotated, n_with_genes, n_typed, pon_filtered, n_rescued,
+#                  n_rescued_fail, n_rescued_1read, n_failed)
 #   padfoot        per caller with a Padfoot file: list(path, combo, key, n_joined, n_rows, n_padfoot)
 #   has_padfoot    TRUE when any Padfoot file was found (then PADFOOT_COLS exist in a non-empty
 #                  `table`, NA on the rows of a caller without one)
@@ -138,7 +143,13 @@ register_section(list(
         n_with_genes = if (nrow(t) > 0) sum(!is.na(t$gene_a) | !is.na(t$gene_b)) else 0L,
         n_typed = if (nrow(t) > 0 && "svtype_raw" %in% names(t))
                     sum(t$svtype_raw %in% BND_SVTYPES & !t$svtype %in% BND_SVTYPES) else 0L,
-        pon_filtered = isTRUE(ci$pon_filtered)
+        pon_filtered = isTRUE(ci$pon_filtered),
+        n_rescued = sum(sv_is_rescued(t)),
+        n_rescued_fail = if (nrow(t) > 0 && "filter" %in% names(t))
+                           sum(sv_is_rescued(t) & !is.na(t$filter) & !t$filter %in% SV_PASS_FILTERS) else 0L,
+        n_rescued_1read = if (nrow(t) > 0 && "support" %in% names(t))
+                            sum(sv_is_rescued(t) & t$support %in% 1L) else 0L,
+        n_failed = { x = attr(records, "n_failed"); if (is.null(x)) 0L else as.integer(x) }
       )
     }
 
@@ -156,10 +167,12 @@ register_section(list(
     with_records = names(records_by)[vapply(records_by, nrow, integer(1)) > 0]
     circos_caller = intersect(c(SV_CALLERS, setdiff(with_records, SV_CALLERS)), with_records)
     circos_caller = if (length(circos_caller)) circos_caller[1] else NA_character_
-    circ = if (is.na(circos_caller)) severus_circos_tracks(NULL)
-           else severus_circos_tracks(records_by[[circos_caller]])
+    circ_rec = if (is.na(circos_caller)) NULL else records_by[[circos_caller]]
+    circ_resc = sv_is_rescued(circ_rec)
+    circ = severus_circos_tracks(if (is.null(circ_rec)) NULL else circ_rec[!circ_resc])
 
     n_by_caller = vapply(prov, function(p) as.integer(p$n_rows), integer(1))
+    n_rescued_by_caller = vapply(prov, function(p) as.integer(p$n_rescued), integer(1))
 
     first_annot = Filter(Negate(is.null), lapply(prov, `[[`, "annotation_path"))
     annotation_path = if (length(first_annot)) first_annot[[1]] else NULL
@@ -168,7 +181,9 @@ register_section(list(
       table            = tbl,
       circos           = circ,
       circos_caller    = circos_caller,
+      circos_rescued   = sum(circ_resc),
       n_by_caller      = n_by_caller,
+      n_rescued_by_caller = n_rescued_by_caller,
       callers          = prov,
       padfoot          = pad,
       has_padfoot      = has_padfoot,

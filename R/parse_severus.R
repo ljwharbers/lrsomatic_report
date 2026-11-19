@@ -13,7 +13,18 @@ SV_JUNCTION_CLASSES = c("translocation", "intra-chr breakend", "single breakend"
 # append, never rename.
 SV_TABLE_COLS = c("id", "svclass", "svtype", "chrom_a", "pos_a", "gene_a",
                   "chrom_b", "pos_b", "gene_b", "sv_len", "vaf",
-                  "consequence", "impact", "support", "svtype_raw")
+                  "consequence", "impact", "support", "svtype_raw",
+                  "filter", "wl_rescue")
+
+# FILTER values that mean the record passed (VCF "." = no filters applied)
+SV_PASS_FILTERS = c("PASS", ".")
+
+# Whitelist-rescued rows (Severus INFO/WL_RESCUE): kept only because they lie in the
+# --severus_whitelist regions. FALSE for every row of a table without the column
+sv_is_rescued = function(t) {
+  if (is.null(t) || nrow(t) == 0 || !"wl_rescue" %in% names(t)) return(rep(FALSE, NROW(t)))
+  !is.na(t$wl_rescue) & nzchar(t$wl_rescue)
+}
 
 # Panel-matching windows: single source of truth for sv_panel_hits() and the client-side filter
 SV_PANEL_WINDOW_BND   = 1e6   # distance from either breakend of a BND
@@ -125,9 +136,12 @@ SV_ORIENTATION_TYPES = c("+-" = "DEL", "-+" = "DUP", "++" = "INV", "--" = "INV")
 parse_severus_somatic_records = function(vcf_file) parse_sv_vcf(vcf_file, "severus")
 
 # Parse a somatic SV VCF into one row per rearrangement:
-#   id, id_b, svtype, svtype_raw, svclass, chrom_a, pos_a, chrom_b, pos_b, sv_len, vaf, support
+#   id, id_b, svtype, svtype_raw, svclass, chrom_a, pos_a, chrom_b, pos_b, sv_len, vaf, support,
+#   filter, wl_rescue
 # `caller` picks the dialect (SV_CALLER_DIALECTS). attr(, "n_records") is the VCF's record count
-# before mate collapsing, for the footnote.
+# before mate collapsing, for the footnote. A pair is rescued when either mate carries WL_RESCUE,
+# and passes only when both do; a non-PASS record that was not rescued is dropped, as small
+# variants are, and counted in attr(, "n_failed").
 parse_sv_vcf = function(vcf_file, caller = "severus") {
   if (is.null(vcf_file) || !file.exists(vcf_file)) return(data.table())
   d = SV_CALLER_DIALECTS[[caller]]
@@ -169,6 +183,22 @@ parse_sv_vcf = function(vcf_file, caller = "severus") {
             " records share a mate group with more than two members; kept unpaired.")
     dt[n_in_pair > 2L, pair_key := ID]
     dt[, n_in_pair := .N, by = pair_key]
+  }
+
+  dt[, FILTER := fifelse(is.na(FILTER) | !nzchar(FILTER), ".", as.character(FILTER))]
+  dt[, wl := .info_val(INFO, "WL_RESCUE")]
+  dt[, `:=`(pair_filter = { f = unique(FILTER[!FILTER %in% SV_PASS_FILTERS])
+                            if (length(f)) paste(f, collapse = ";") else FILTER[1] },
+            pair_wl = { w = wl[!is.na(wl)]; if (length(w)) w[1] else NA_character_ }),
+     by = pair_key]
+  failed = !dt$pair_filter %in% SV_PASS_FILTERS & is.na(dt$pair_wl)
+  n_failed = sum(failed)
+  if (n_failed > 0) dt = dt[!failed]
+  if (nrow(dt) == 0) {
+    out = data.table()
+    setattr(out, "n_records", n_records)
+    setattr(out, "n_failed", n_failed)
+    return(out)
   }
   setorder(dt, pair_key, side_rank, ID)
   dt = dt[dt[, .I[1L], by = pair_key]$V1]
@@ -217,8 +247,10 @@ parse_sv_vcf = function(vcf_file, caller = "severus") {
 
   out = dt[, .(id = ID, id_b, svtype = SVTYPE, svtype_raw, svclass,
                chrom_a = CHROM, pos_a = POS, chrom_b, pos_b,
-               sv_len = SVLEN, vaf = VAF, support = SUPPORT)]
+               sv_len = SVLEN, vaf = VAF, support = SUPPORT,
+               filter = pair_filter, wl_rescue = pair_wl)]
   setattr(out, "n_records", n_records)
+  setattr(out, "n_failed", n_failed)
   out
 }
 
@@ -257,6 +289,8 @@ build_sv_table_from_vep = function(records, vep_sv_vcf) {
   if (!"support" %in% names(sv))    sv[, support := NA_integer_]
   if (!"svtype_raw" %in% names(sv)) sv[, svtype_raw := svtype]
   if (!"id_b" %in% names(sv))       sv[, id_b := NA_character_]
+  if (!"filter" %in% names(sv))     sv[, filter := NA_character_]
+  if (!"wl_rescue" %in% names(sv))  sv[, wl_rescue := NA_character_]
 
   vep = parse_vep_vcf(vep_sv_vcf)
   if (is.null(vep) || nrow(vep) == 0) {
@@ -603,6 +637,8 @@ build_sv_table = function(sv_tsv) {
     consequence = as.character(col("DETAILED_TYPE", NA_character_)),
     impact  = NA_character_,
     support = NA_integer_,
-    svtype_raw = svtype
+    svtype_raw = svtype,
+    filter  = NA_character_,
+    wl_rescue = NA_character_
   )
 }

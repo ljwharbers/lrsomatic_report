@@ -51,6 +51,30 @@ test_that("ClinVar pathogenic alone makes a tier-1 finding; Conflicting never do
   expect_equal(f$tier, 1L)
 })
 
+test_that("ClinVar is credited to the gene carrying the coding/splice consequence only", {
+  # B DLBCL7: ATM p.Arg23Ter is ClinVar pathogenic; VEP also lists the Y_RNA downstream of it
+  vt = kf_vt(symbol = c("ATM", "Y_RNA"), chrom = "chr11", pos = 108227000L,
+             impact = c("HIGH", "MODIFIER"),
+             consequence = c("stop_gained", "downstream_gene_variant"),
+             clinvar = "Pathogenic")
+  f = kf_run(vt)
+  expect_equal(f$gene, "ATM")
+  expect_match(f$evidence, "ClinVar: Pathogenic")
+  # A variant no gene row of which is coding keeps ClinVar on every row (cannot single one out)
+  vt = kf_vt(symbol = c("TP53", "WRAP53"), impact = "MODIFIER",
+             consequence = c("intron_variant", "upstream_gene_variant"), clinvar = "Pathogenic")
+  expect_setequal(kf_run(vt)$gene, c("TP53", "WRAP53"))
+  # Different variants do not lend each other a coding row
+  vt = kf_vt(symbol = c("TP53", "WRAP53"), pos = c(7675000L, 7675100L), impact = c("MODERATE", "MODIFIER"),
+             consequence = c("missense_variant", "intron_variant"), clinvar = "Pathogenic")
+  expect_setequal(kf_run(vt)$gene, c("TP53", "WRAP53"))
+  # A splice-region row counts as in the gene
+  vt = kf_vt(symbol = c("TP53", "WRAP53"), impact = c("LOW", "MODIFIER"),
+             consequence = c("splice_region_variant&intron_variant", "upstream_gene_variant"),
+             clinvar = "Likely_pathogenic")
+  expect_equal(kf_run(vt)$gene, "TP53")
+})
+
 test_that("HIGH impact alone is tier 1, and shortens the HGVSp", {
   f = kf_run(kf_vt(symbol = "TP53", impact = "HIGH", consequence = "frameshift_variant",
                    hgvsp = "ENSP00000269305.4:p.Pro72fs"))
@@ -354,6 +378,53 @@ test_that("a gene inside a large event is not a finding; a focal deletion coveri
   expect_equal(kf_run(sd = list(sv = list(table = intr)))$tier, 2L)
 })
 
+test_that("a symbol hit on a breakend is position-tested where a list gives coordinates", {
+  # A1 CCS15-PB: VEP names CDKN2B on Severus' CDKN2A-CDKN2B-spanning breakend, but the
+  # breakpoints are in CDKN2A; with SAVANA's DEL it is a focal deletion covering CDKN2B
+  sym = list(name = "custom", path = "custom.tsv", reference = "", has_coords = FALSE,
+             has_scopes = FALSE, genes = c("CDKN2A", "CDKN2B"))
+  panels = c(kf_panels(), list(custom = sym))
+  sv = kf_sv(id = c("severus_BND1", "ID_1"), caller = c("severus", "savana"),
+             svclass = c("intra-chr breakend", "DEL"), svtype = c("BND", "DEL"),
+             chrom_a = "chr9", pos_a = c(21969562L, 21969562L),
+             chrom_b = "chr9", pos_b = c(24835347L, 24835348L),
+             gene_a = c("CDKN2A,CDKN2B,MTAP", NA))
+  b_iv = data.table(gene = "CDKN2B", chrom = "chr9", start = 22002903L, end = 22009305L)
+  panels$b$chrom = c(unlist(panels$b$chrom), "chr9")
+  panels$b$start = c(unlist(panels$b$start), b_iv$start)
+  panels$b$end = c(unlist(panels$b$end), b_iv$end)
+  panels$b$interval_gene = c(unlist(panels$b$interval_gene), "CDKN2B")
+  panels$b$genes = c(unlist(panels$b$genes), "CDKN2B")
+  panels$b$genes_sv = c(unlist(panels$b$genes_sv), "CDKN2B")
+  f = kf_run(sd = list(sv = list(table = sv)), panels = panels)
+  expect_match(f[gene == "CDKN2A"]$evidence, "breakpoint in CDKN2A")
+  expect_match(f[gene == "CDKN2B"]$evidence, "^focal deletion \\(2.9 Mb\\) covers CDKN2B")
+  # A gene no list places stays a symbol hit, as before (nothing to test it against)
+  expect_match(kf_run(sd = list(sv = list(table = sv[1])),
+                      panels = list(custom = modifyList(sym, list(genes = "MTAP"))))$evidence,
+               "breakpoint in MTAP")
+  # Without the SAVANA call the breakend is not typed: CDKN2B inside its span is not a finding
+  f = kf_run(sd = list(sv = list(table = sv[1])), panels = panels)
+  expect_false("CDKN2B" %in% f[tier <= 2]$gene)
+})
+
+test_that("a symbol hit on a focal DEL/DUP counts only when its span overlaps the gene", {
+  # VEP names MYC on a 2 kb deletion ending 1 kb upstream of it (upstream_gene_variant)
+  sym = list(name = "custom", path = "custom.tsv", reference = "", has_coords = FALSE,
+             has_scopes = FALSE, genes = "MYC")
+  panels = c(kf_panels(), list(custom = sym))
+  up = kf_sv(caller = "savana", svclass = "DEL", svtype = "DEL",
+             chrom_a = "chr8", pos_a = 127732434L, chrom_b = "chr8", pos_b = 127734434L,
+             gene_a = "MYC")
+  f = kf_run(sd = list(sv = list(table = up)), panels = panels)
+  expect_false("MYC" %in% f[tier <= 2]$gene)
+  expect_false(any(grepl("covers MYC", f$evidence)))
+  # Extended past MYC's far end, the same deletion covers it
+  into = copy(up)[, pos_b := 127744000L]
+  f = kf_run(sd = list(sv = list(table = into)), panels = panels)
+  expect_match(f[gene == "MYC" & tier <= 2]$evidence, "^focal deletion .* covers MYC")
+})
+
 test_that("proximity rows are tier 3, labelled with the distance, and capped per gene", {
   near = 127742951 + 50000   # 50 kb past MYC
   sv = kf_sv(svclass = c("translocation", "DEL", "DUP", "INS", "INV"),
@@ -412,6 +483,81 @@ test_that("purity names its source, shows the others and flags disagreement", {
   expect_equal(b$purity$detail, "ASCAT")
 })
 
+test_that("a whitelist-rescued SV is its own tier, with its read support, below tier 3", {
+  sv = kf_sv(id = c("pass", "resc"), svclass = c("DEL", "translocation"),
+             svtype = c("DEL", "BND"), chrom_a = c("chr8", "chr22"),
+             pos_a = c(127600000L, 29280000L), chrom_b = c("chr8", "chr2"),
+             pos_b = c(127900000L, 5e6), impact = c("HIGH", NA),
+             consequence = c("transcript_ablation", NA), support = c(12L, 1L),
+             filter = c("PASS", "FAIL_MAP_CONS"), wl_rescue = c(NA, "WHITELIST"))
+  o = build_overview(NULL, list(sv = list(table = sv)), kf_panels(), NULL, NULL, list(),
+                     list(reference = "hg38"))
+  f = o$findings
+  expect_equal(f$gene, c("MYC", "EWSR1"))
+  expect_equal(f$tier, c(1L, KF_TIER_RESCUED))
+  expect_equal(f$ev_tier, c(1L, 1L))
+  expect_equal(f$rescued, c(FALSE, TRUE))
+  expect_match(f$evidence[2], "^whitelist-rescued \\(WHITELIST\\), failed FAIL_MAP_CONS · 1 supporting read · breakpoint in EWSR1")
+  # Not counted for the empty-state hints, which describe the default (non-rescued) view
+  expect_equal(o$per_panel_n, c(a = 1L, b = 0L))
+  # Labelled on the circos only as a rescued row, at its evidence tier
+  lab = circos_driver_rows(f)
+  expect_equal(lab$label, c("MYC", "EWSR1"))
+  expect_equal(lab$tier, c(1L, 1L))
+  expect_equal(lab$rescued, c(0L, 1L))
+})
+
+test_that("a rescued call that another caller also made is not rescued; tier-3 rescued rows go", {
+  # Severus' rescued call and SAVANA's PASS call are one event: it stands with SAVANA's
+  sv = kf_sv(id = c("sev", "sav"), caller = c("severus", "savana"),
+             svclass = "translocation", chrom_a = c("chr22", "chr22"),
+             pos_a = c(29280000L, 29280003L), chrom_b = "chr2", pos_b = c(5e6, 5e6 + 5),
+             wl_rescue = c("WHITELIST", NA))
+  f = kf_run(sd = list(sv = list(table = sv)))
+  expect_equal(nrow(f), 1L)
+  expect_false(f$rescued)
+  expect_equal(f$tier, 1L)
+  # A rescued call only near a gene (tier 3 on its evidence) is not listed at all
+  near = kf_sv(svclass = "translocation", chrom_a = "chr8", pos_a = 127742951 + 50000,
+               chrom_b = "chr3", pos_b = 1e6, wl_rescue = "WHITELIST")
+  expect_equal(nrow(kf_run(sd = list(sv = list(table = near)))), 0L)
+  expect_equal(kf_tier("SV", c("direct+rescued", "proximity+rescued", "rescued"), ""),
+               c(KF_TIER_RESCUED, KF_TIER_RESCUED, NA_integer_))
+})
+
+test_that("the SV biomarker counts whitelist-rescued rows apart", {
+  sv = list(n_by_caller = c(severus = 9711L, savana = 57L),
+            n_rescued_by_caller = c(severus = 9388L, savana = 0L),
+            table = kf_sv(caller = c("severus", "severus", "savana"),
+                          svclass = "translocation", chrom_a = "chr1", pos_a = 1L,
+                          chrom_b = "chr2", pos_b = 1L, wl_rescue = c("WHITELIST", NA, NA)))
+  b = build_biomarkers(list(sv = sv), NULL, NULL, list())
+  expect_equal(b$sv$value, "Severus 323 (+9,388 whitelist-rescued) · SAVANA 57")
+  expect_match(b$sv$detail, "translocations: Severus 1, SAVANA 1", fixed = TRUE)
+})
+
+test_that("coding TMB counts unique variants, SNVs apart from indels", {
+  # One missense SNV listed under two genes, one frameshift, one synonymous
+  vt = kf_vt(symbol = c("TP53", "WRAP53", "MYC", "KRAS"),
+             pos = c(100L, 100L, 200L, 300L), ref = c("C", "C", "AT", "G"),
+             alt = c("T", "T", "A", "A"),
+             consequence = c("missense_variant", "missense_variant&splice_region_variant",
+                             "frameshift_variant", "synonymous_variant"))
+  t = compute_tmb(vt)
+  expect_equal(t[c("n_nonsyn", "n_snv", "n_indel")], list(n_nonsyn = 2L, n_snv = 1L, n_indel = 1L))
+  expect_equal(t$tmb, round(2 / 30, 2))
+  expect_equal(t$tmb_snv, round(1 / 30, 2))
+  b = build_biomarkers(list(), NULL, t, list())
+  expect_equal(b$tmb$value, "0.03 mut/Mb (SNVs)")
+  expect_equal(b$tmb$detail, "1 SNV + 1 indel non-syn / 30 Mb · all 0.07 mut/Mb")
+  # A table without alleles still gives the total
+  t2 = compute_tmb(vt[, .(consequence)])
+  expect_equal(t2$n_nonsyn, 3L)
+  expect_true(is.na(t2$tmb_snv))
+  expect_equal(build_biomarkers(list(), NULL, t2, list())$tmb$value, "0.10 mut/Mb")
+  expect_true(is.na(compute_tmb(NULL)$tmb))
+})
+
 test_that("SVs are counted per caller, never summed", {
   sv = list(n_by_caller = c(severus = 120L, savana = 64L),
             table = kf_sv(caller = c("severus", "savana", "savana"),
@@ -434,12 +580,18 @@ test_that("chromothripsis names chromosome + combination and shows disagreement"
                               confidence = "high", criteria = "HC3"))
   b = build_biomarkers(list(shatterseek = ss), NULL, NULL, list())
   expect_equal(b$chromothripsis$value, "chr16")
-  expect_match(b$chromothripsis$detail, "chr16 high (SAVANA)", fixed = TRUE)
+  expect_match(b$chromothripsis$detail, "chr16 HC3 (SAVANA)", fixed = TRUE)
   expect_match(b$chromothripsis$detail, "disagree")
   expect_equal(b$chromothripsis$status, "warn")
+  # One card per minimum-tier setting: an HC3-only call is gone at HC1 and HC1-HC2
+  expect_setequal(names(b$chromothripsis$views), c("1", "2", "3"))
+  expect_equal(b$chromothripsis$views[["3"]]$value, "chr16")
+  expect_equal(b$chromothripsis$views[["1"]]$value, "none at this tier")
+  expect_match(b$chromothripsis$views[["2"]]$detail, "1 call below this tier")
   ss$high = ss$high[0]
-  expect_equal(build_biomarkers(list(shatterseek = ss), NULL, NULL, list())$chromothripsis$value,
-               "none called")
+  b0 = build_biomarkers(list(shatterseek = ss), NULL, NULL, list())
+  expect_equal(b0$chromothripsis$value, "none called")
+  expect_null(b0$chromothripsis$views)
 })
 
 test_that("ecDNA wording follows the classifier, and unclassified is never 'ecDNA'", {
@@ -483,4 +635,17 @@ test_that("tumour-only mode is reported for the caveat", {
   o = build_overview(NULL, list(), list(), NULL, NULL, list(),
                      list(outputs = list(mode = "tumour-only")))
   expect_true(o$tumour_only)
+})
+
+test_that("a deep deletion is a copy-number finding of the homozygous-deletion tier (REP-7)", {
+  cna = list(genes = data.table(panel = "p", gene = c("CDKN2A", "IGH"), chrom = c("chr9", "chr14"),
+                                start = c(21967752, 105586437), end = c(21995301, 106879844),
+                                min_cn = c(1, 1), max_cn = c(1, 1), min_minor = 0, n_segments = 1L,
+                                call = "deep deletion", partial = FALSE, loh = FALSE,
+                                source = "wakhan", role = NA_character_, expected = 4))
+  r = kf_cna_rows(cna, data.table(gene = character(), role = character()), "hg38")
+  setkey(r, gene)
+  expect_equal(r["CDKN2A"]$alteration, "deep deletion (CN 1)")
+  expect_equal(r["CDKN2A"]$tier, 1L)
+  expect_equal(r["IGH"]$tier, 3L)
 })

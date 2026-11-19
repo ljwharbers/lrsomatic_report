@@ -20,11 +20,14 @@ In page order:
     ticked, the table is replaced by a prompt listing how many tier 1–2 findings each embedded
     list has.
   - **Genome-wide biomarkers**: purity / ploidy, whole-genome duplication, LOH fraction, coding
-    TMB, small-variant counts, SV counts per caller, chromothripsis, ecDNA / focal amplicons
-    and dominant mutational signatures. A biomarker whose tool did not run reads "not run".
+    TMB (non-synonymous SNVs per Mb, with the total including indels; each variant counted once),
+    small-variant counts, SV counts per caller (whitelist-rescued calls apart), chromothripsis,
+    ecDNA / focal amplicons and dominant mutational signatures. A biomarker whose tool did not
+    run reads "not run".
   - **Sequencing** cards: mean coverage, read N50, error rate, phased germline variants.
 - **Circos overview** — ideogram, somatic **SNV density** (per 1 Mb window), non-breakend SVs
-  and ASCAT copy number, with translocation links, and the tier 1–2 key-finding genes of the
+  and copy number (the overview's source: Wakhan, else ASCAT, named in the caption), with
+  translocation links, and the tier 1–2 key-finding genes of the
   ticked gene list(s) labelled around the outside.
 - **Copy number profile** — ASCAT plots; a static haplotype-resolved **Wakhan** profile of the
   rank-1 solution with the solutions table; and **gene-level copy number** for every gene of the
@@ -33,7 +36,9 @@ In page order:
   ecDNA / focal amplicons (CoRAL, AmpliconClassifier). A negative result is one line: no
   chromothripsis in any combination is a single sentence naming them all, and calls are one
   table with a column for the combination; amplicons of which none is ecDNA or BFB are listed
-  in a collapsed block under the verdict.
+  in a collapsed block under the verdict. Each call names the PCAWG tier(s) it meets (HC1,
+  HC2, HC3), and a minimum-tier selector (all tiers, HC1–HC2, HC1 only), shared with the
+  overview's chromothripsis card, narrows the calls shown; it opens on all tiers.
 - **Mutational signatures** — SigProfilerAssignment COSMIC fits for SBS96, DBS78 and ID83, with
   the mutational profile and a proposed aetiology per signature (see
   [Mutational signatures](#mutational-signatures)).
@@ -61,8 +66,8 @@ Rscript bin/render_report.R \
 ```
 
 This writes `SAMPLE_ID_report.html` and `SAMPLE_ID_small_variants.tsv.gz` to the current
-directory. Matched and tumour-only runs take the same command: the run mode and every input
-file are discovered from the sample directory.
+directory. Matched and tumour-only runs take the same command: every input file is discovered
+from the sample directory, and so is the run mode unless `--run-mode` states it.
 
 ## All options
 
@@ -79,6 +84,9 @@ file are discovered from the sample directory.
                   assets/gene_lists (default: the bundled set). See Gene panels.
 --embed           slim | full  (default: slim). Which small-variant rows and which
                   secondary figures are embedded in the HTML; see Report size.
+--run-mode        paired | tumour_only  (default: inferred — matched when any normal-side QC
+                  file is found). Sets the header badge and the tumour-only caveat; the
+                  pipeline passes it, since a pair whose QC was skipped has no normal-side file
 --output          Output HTML path  (default: <sample-id>_report.html in current dir).
                   The small-variant TSV is written to the same directory.
 --title           Report title
@@ -101,7 +109,10 @@ established), matched by either gene's list or a Custom… entry for either gene
 
 **Tumour-only samples.** Without a matched normal, small-variant findings can include germline
 variants. The report says so above the table and shows VAF for judgement (a heterozygous
-germline variant sits near 0.5, or near 1 under LOH).
+germline variant sits near 0.5, or near 1 under LOH). When the pipeline reports that ClairS-TO's
+germline tagging (Verdict) was skipped — it skips above purity 0.6 — a second warning names the
+reason and the purity used, here and in the small-variant section: the calls then likely contain
+many germline variants.
 
 ### Small variants
 
@@ -109,7 +120,7 @@ Considered when the gene is in the list's small-variant scope:
 
 | Tier | Rule |
 |---|---|
-| 1 | ClinVar pathogenic or likely pathogenic ("Conflicting classifications" never counts) |
+| 1 | ClinVar pathogenic or likely pathogenic ("Conflicting classifications" never counts). ClinVar classifies the variant, so when VEP lists several genes for it, only the genes where it is coding or at a splice site get the credit (not a gene merely downstream or upstream of it); a variant coding in none of its genes keeps it on all |
 | 1 | VEP impact HIGH (truncating: stop gained, frameshift, splice donor/acceptor, start lost, transcript ablation; or another HIGH consequence) |
 | 2 | VEP impact MODERATE with a damaging prediction: AlphaMissense *likely pathogenic*; where AlphaMissense gives no call, EVE pathogenic; failing both, SIFT *deleterious* together with PolyPhen *probably damaging* |
 
@@ -137,7 +148,25 @@ events are listed per event class.
 | 3 | "Near": a breakend within 1 Mb of the gene (100 kb for other event types) without touching it; at most 3 such rows per gene, and none for an event already listed with stronger evidence for the gene |
 
 A gene that merely lies inside a larger event (for example a 40 Mb inversion or deletion) is
-not an SV finding; it is left to the copy-number rows.
+not an SV finding; it is left to the copy-number rows. That includes a gene VEP names on a
+breakend record (VEP lists every gene a same-chromosome breakend spans): wherever a list gives
+the gene coordinates, "breakpoint in" needs the breakpoint inside it, and "focal deletion /
+duplication covers" needs the event's span to overlap it (VEP also names genes up to 5 kb
+up- or downstream).
+
+**Whitelist-rescued SVs.** With `--severus_whitelist`, Severus keeps calls that failed its own
+filters when they lie in the whitelist regions, and tags them `INFO/WL_RESCUE` (most have one or
+two supporting reads; on a 30x sample with `--whitelist-single-read any` they were 9,388 of
+9,711 records). Such a finding gets its own tier, **Rescued**, below tier 3: it is hidden until
+"Show whitelist-rescued SVs" is pressed, and its evidence names the rescue reason, any filter
+the call failed and its read support. A rescued call whose evidence would only be tier 3 is not
+listed; one that SAVANA also made is not rescued (the event stands with SAVANA's call). The
+same choice shows or hides rescued rows in the SV table and their circos labels; the SV card
+counts them apart ("Severus 323 (+9,388 whitelist-rescued)"), and the genome circos does not
+draw them. ShatterSeek and ReConPlot were given every call. A non-PASS record that was not
+rescued is not shown at all, as for small variants; this applies to both callers, but SAVANA's
+somatic VCF holds PASS records only (its noise calls stay in `classified.vcf`), so in practice
+it drops Severus records.
 
 ### Copy number
 
@@ -146,11 +175,12 @@ From the gene-level calls of the copy-number section:
 | Tier | Rule |
 |---|---|
 | 1 | Amplification — not listed at all for a tumour suppressor |
-| 1 | Homozygous deletion — tier 2 for an oncogene |
+| 1 | Homozygous or deep deletion — tier 2 for an oncogene |
 | 3 | Either call in a **pseudoautosomal region** (reads from the chrX and chrY copies map to one of them, so a PAR gene can read CN 0 with nothing deleted) or at an **IG/TR locus** (physiologically rearranged and deleted in lymphocytes) |
 
 Loss of heterozygosity is not a finding on its own; it is noted on the gene ("LOH in gene").
-Tier 3 alterations are hidden until "Show lower-confidence findings" is clicked.
+Tier 3 alterations are hidden until "Show lower-confidence findings" is clicked, and
+whitelist-rescued SVs until "Show whitelist-rescued SVs" is.
 
 **Custom… lists.** A list typed into the report matches by gene symbol among the findings of the
 embedded lists and among up to 500 small variants outside them that are ClinVar (likely)
@@ -168,10 +198,14 @@ is listed, because they can disagree — the purity biomarker is flagged when th
 Calls follow the COSMIC Cancer Gene Census CNA definition, on the total copy number of the
 segments overlapping each gene:
 
-| Ploidy | Amplification | Homozygous deletion |
+| Ploidy | Amplification | Homozygous / deep deletion |
 |---|---|---|
 | ≤ 2.7 | total CN ≥ 5 | total CN = 0 |
 | > 2.7 | total CN ≥ 9 | total CN < ploidy − 2.7 |
+
+Above ploidy 2.7 the deletion threshold can be met with copies left (CN 1 at ploidy ≥ 3.71):
+such a call reads **deep deletion**, and only a total CN of 0 reads homozygous deletion. Both
+are tier 1 key findings.
 
 Otherwise a gene is a **gain** or **loss** against the expected copy number, round(ploidy) —
 and on chrX/chrY in a male, max(1, round(ploidy / 2)). A gene spanning several segments is
@@ -222,7 +256,14 @@ one of them. Slim mode embeds:
   figures only for chromosomes with a high-impact call: a ShatterSeek chromothripsis call or
   an SV with a Padfoot cancer-gene rating, `HIGH_ONCO` or `HIGH_TSG` (always shown), or a
   tier 1–2 SV or copy-number key finding of a gene list (shown while that list is ticked).
-  Padfoot's plain `HIGH` does not count: it is common in large fragile-site genes;
+  Padfoot's plain `HIGH` does not count: it is common in large fragile-site genes, and neither
+  does a whitelist-rescued SV (hidden by default everywhere else). Tickboxes above the
+  figures switch each kind of reason off, and a chromothripsis reason follows the ShatterSeek
+  tier selector. At most 12 chromosomes are embedded per combination, best reason first
+  (chromothripsis, Padfoot, tier-1 then tier-2 findings); the footnote names the rest;
+- every ReConPlot **focus** figure (`reconplot/<combination>/focus/`, the regions and genes the
+  pipeline was asked to draw), as a "Your regions" block that opens the ReConPlot section; the
+  automatic per-chromosome figures then follow in a collapsed block;
 - the first six CoRAL amplicon plots;
 - no ASCAT diagnostic plots (GC correction, tumour separation).
 
@@ -232,6 +273,30 @@ key findings) is computed from the full table in either mode.
 **Wakhan's interactive Plotly plots are no longer embedded.** They remain in the pipeline's
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 `wakhan/*_heatmap_ploidy_purity.html`; the report names them.
+
+> **Changed in 2.1.0:**
+> - New `--run-mode paired|tumour_only` states the run mode instead of inferring it from
+>   normal-side QC files (the pipeline passes it; without it the report infers as before).
+> - A **Verdict status** warning: when the pipeline's `verdict_status.tsv` says ClairS-TO's
+>   germline tagging was skipped (or did not run), the tumour-only caveat and the small-variant
+>   section say so, with the reason and the purity used.
+> - **Whitelist-rescued Severus SVs** get their own tier, **Rescued**, hidden until "Show
+>   whitelist-rescued SVs" is pressed; the SV table, circos labels and SV card follow the same
+>   choice. Non-PASS SV records that were not rescued are no longer shown (in practice
+>   Severus': SAVANA's somatic VCF is PASS-only).
+> - **ShatterSeek** calls name their PCAWG tier(s) and a minimum-tier selector, shared with the
+>   overview's chromothripsis card, narrows them.
+> - **ReConPlot**: the pipeline's focus figures open the section as "Your regions"; the
+>   automatic per-chromosome figures follow, collapsed, with tickboxes by reason and at most
+>   12 chromosomes embedded per combination in slim mode.
+> - Copy number: CN >= 1 below the high-ploidy threshold reads **deep deletion** (tier 1);
+>   symbol-only list genes take their span from another list; the circos draws the copy number
+>   the overview uses and names it; no ASCAT output reads "skipped".
+> - Key findings: ClinVar is credited only to the gene the variant is coding in; "breakpoint in"
+>   needs the breakpoint inside the gene on breakend records too.
+> - TMB counts each variant once and gives non-synonymous SNVs apart from indels; the phased-
+>   variants card's percentage is of heterozygous variants; DeepSomatic's conventional `1/1`
+>   genotype is blanked; provenance lines give paths relative to `--sample-dir`; wording fixes.
 
 > **Changed in 2.0.0** (tested in the pipeline first through the pre-releases `2.0.0rc1` and
 > `2.0.0rc2`; the release itself changes only `VERSION`, `recipe/meta.yaml` and this note):
@@ -379,8 +444,9 @@ Coordinate matching is the reliable mode: whether VEP annotates a breakend with 
 at all depends on the sample's VEP invocation (1.6%–90% of breakend rows across the samples
 measured), so a symbol-only panel can hide exactly the translocations it exists to find. The
 note under the SV table says which mode is in force. Coordinates are also what gene-level copy
-number is called on; a symbol-only list gets copy-number calls only where Wakhan's per-gene
-file has the gene.
+number is called on; a symbol-only list takes each gene's span from another embedded list that
+has it (the builtins, for a reference they ship for), and only failing that from Wakhan's
+per-gene file, whose coordinates are the Wakhan segment's (labelled so in the table).
 
 Because coordinates are only valid for one genome, a coordinate panel must declare its
 reference (a leading `# reference: hg38` line, or a `reference` column) and a mismatch with the
@@ -448,21 +514,23 @@ as part of the pattern. When several files match, one named for the sample is pr
 
 | Section | Files read (relative to the sample directory) |
 |---|---|
-| Small variants | `*_SOMATIC_VEP.vcf.gz` (variant set and annotation); VAF / depth / genotype / phase set from `variants/phased/somatic_smallvariants.vcf.gz`, else `variants/clairs{,to}/somatic.vcf.gz`, else any non-germline VCF in those directories |
+| Small variants | `*_SOMATIC_VEP.vcf.gz` (variant set and annotation); VAF / depth / genotype / phase set from `variants/phased/somatic_smallvariants.vcf.gz`, else `variants/clairs{,to}/somatic.vcf.gz`, else any non-germline VCF in those directories; ClairS-TO germline tagging status from `variants/clairsto/<id>.verdict_status.tsv` (`status`, `purity`, `ploidy`, `purity_source`, `message`; status `applied`, `skipped` or `not_run`) |
 | Structural variants | Severus: `severus_somatic.vcf.gz`, `*_SV_VEP.vcf.gz` (fallback `SV_filtered_with_gene_annotations.tsv`). SAVANA: `*.pon_filtered.classified.somatic.vcf[.gz]`, else `*.classified.somatic.vcf[.gz]`; `*_VEP_SAVANA.vcf.gz`. Padfoot: `padfoot/<combination>/annotated_svs.tsv` (`severus_wakhan` for Severus, `savana` for SAVANA) |
-| ReConPlot | `reconplot/<combination>/genome_wide/*_genome_wide.png`, `reconplot/<combination>/per_chromosome/*_chr*.png` |
+| ReConPlot | `reconplot/<combination>/genome_wide/*_genome_wide.png`, `reconplot/<combination>/per_chromosome/*_chr*.png`, `reconplot/<combination>/focus/*.png` |
 | Copy number | ASCAT: `*.segments_raw.txt`, `*.purityploidy.txt`, `*.metrics.txt` (beside them), `*.tumour.{ASCATprofile,ASPCF,sunrise}.png` and diagnostic PNGs. Wakhan: `wakhan/solutions_ranks.tsv`, `wakhan/solution_rank_<N>/integer_profile.bed` and `…/genes/genes_copynumber_states.bed` (also `solution_<N>/` and the `repository_name` directory). SAVANA: `*_fitted_purity_ploidy.tsv` |
 | Genome instability | `shatterseek/<combination>/*.shatterseek.tsv`; `ecdna/coral/*_CNV_SEEDS.bed`, `ecdna/coral/{cycles,reconstruct}/*_amplicon_summary.txt`, `ecdna/coral/plots/*_amplicon<N>_{graph,cycles}.png`, `ecdna/amplicon_classifier/*_amplicon_classification_profiles.tsv`, `*_gene_list.tsv`, `*_result_table.tsv` |
 | Mutational signatures | `signatures/**/COSMIC_v<ver>/{SBS96,DBS78,ID83}/Assignment_Solution/**/Assignment_Solution_Activities.txt` and `Assignment_Solution_Samples_Stats.txt`; matrices `*.SBS96.all`, `*.DBS78.all`, `*.ID83.all` |
 | QC (tumour) | mosdepth `*.mosdepth.summary.txt` (or `*.summary.txt` under `qc/` or `mosdepth/`) and `*.global.dist.txt`; cramino `*_cramino.txt` (the aligned-BAM one); samtools `*.flagstat`, `*.stats`; `qc/whatshap_stats/*_whatshap_stats.tsv` |
-| QC (normal) | the same QC files under any `normal/` directory (e.g. `qc/normal/`) — their presence is what makes the run *matched* |
+| QC (normal) | the same QC files under any `normal/` directory (e.g. `qc/normal/`) — their presence is what makes the run *matched*, unless `--run-mode` says otherwise |
 
 Missing inputs are handled gracefully: the corresponding section or biomarker says it was not
 run or not found.
 
 **Small variants come from the VEP annotation only.** `*_SOMATIC_VEP.vcf.gz` defines the
 variant set; VAF, depth, genotype and phase set are joined from the VCF that VEP annotated.
-Runs predating `variants/phased/` yield VAF and depth but no phase set. If none is found the
+DeepSomatic writes the genotype `1/1` on every somatic call by convention, so the genotype of a
+DeepSomatic call (by `INFO/CALLER`, or a VCF with a DeepVariant header and no other caller's
+`##source`) is left blank, and the footnote says those calls carry no phase set. Runs predating `variants/phased/` yield VAF and depth but no phase set. If none is found the
 table still renders, without those columns.
 
 A footnote under the variant table names the file those columns actually came from and how
@@ -507,7 +575,7 @@ Auto-detection reads `##contig` lines from the VEP somatic VCF.
 ### Container (recommended)
 
 Every release is published as a container, so nothing needs installing (`<version>` is the
-content of `VERSION`, e.g. `2.0.0`):
+content of `VERSION`, e.g. `2.1.0`):
 
 ```bash
 # Docker / Podman

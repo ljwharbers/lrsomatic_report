@@ -73,9 +73,9 @@ test_that("cna_call applies the COSMIC thresholds on both sides of ploidy 2.7", 
                            "amplification", "amplification"))
   # exactly at the split still counts as the low side
   expect_equal(cna_call(5, 1, 2.7, 3)$call, "amplification")
-  # ploidy 4: amp >= 9, homdel < 4 - 2.7 = 1.3
+  # ploidy 4: amp >= 9, deletion < 4 - 2.7 = 1.3: CN 0 is homozygous, CN 1 deep (REP-7)
   high = cna_call(total = c(0, 1, 2, 3, 4, 5, 8, 9), minor = 1, ploidy = 4, expected = 4)
-  expect_equal(high$call, c("homozygous deletion", "homozygous deletion", "loss", "loss",
+  expect_equal(high$call, c("homozygous deletion", "deep deletion", "loss", "loss",
                             "neutral", "gain", "gain", "amplification"))
   expect_true(is.na(cna_call(NA, 1, 2, 2)$call))
   expect_true(is.na(cna_call(2, 1, NA, 2)$call))
@@ -265,4 +265,53 @@ test_that("the profile plot builds from segments and is NULL when there are none
   expect_s3_class(p, "ggplot")
   expect_null(cna_profile_plot(.empty_cn_segments(), "chr1", c(chr1 = 1e6)))
   expect_null(cna_profile_plot(NULL, "chr1", c(chr1 = 1e6)))
+})
+
+test_that("the circos copy-number ring follows the CN section's source (REP-8)", {
+  wk = list(source = "wakhan", segments = data.table(
+    chrom = c("chr1", "chr2", "chr3"), start = c(1, 1, 1), end = c(100, 200, 300),
+    cn_a = c(1, 5, NA), cn_b = c(3, 2, NA), total = c(4, 7, NA), minor = c(1, 2, NA)))
+  r = circos_cn_segments(wk, ascat_segments = data.table(chr = "chr9"))
+  expect_equal(r$source, "wakhan")
+  expect_equal(r$segments$chr, c("chr1", "chr2"))           # a segment without a total is not drawn
+  expect_equal(r$segments$major_cn, c(3, 4))                 # higher haplotype, capped at 4
+  expect_equal(r$segments$minor_cn, c(1, 2))
+  expect_equal(r$segments$total_cn, c(4, 4))
+  # skip_ascat: Wakhan still draws a ring; no CN section at all: ASCAT's own segments, else nothing
+  expect_equal(circos_cn_segments(NULL, data.table(chr = "chr9"))$source, "ascat")
+  expect_null(circos_cn_segments(NULL, NULL))
+  expect_null(circos_cn_segments(list(source = NA_character_, segments = data.table()), NULL))
+})
+
+test_that("a symbol-only list takes gene spans from another list before Wakhan's file (REP-9)", {
+  segs = seg_dt(c("chr9", "chr3"), c(21e6, 160e6), c(23e6, 190e6), c(0, 2), c(0, 1))
+  builtin = fake_panel(c("CDKN2A", "PIK3CA"), c("chr9", "chr3"), c(21967752, 179148114),
+                       c(21995301, 179240093), c("CDKN2A", "PIK3CA"))
+  custom = fake_panel(c("cdkn2a", "PIK3CA", "ONLYWAKHAN", "NOWHERE"))
+  wg = data.table(chrom = "chr5", start = 1e6, end = 2e7, gene = "ONLYWAKHAN",
+                  hp1_state = 2, hp2_state = 2, total = 4, minor = 2)
+  g = cna_gene_calls(segs, list(sarcoma = builtin, mine = custom), ploidy = 2, sex = "female",
+                     source = "wakhan", wakhan_genes = wg)$genes[panel == "mine"]
+  setkey(g, gene)
+  # The list's own spelling, the builtin's span, called on the segments like any coordinate row
+  expect_equal(g["cdkn2a"]$call, "homozygous deletion")
+  expect_equal(g["cdkn2a"]$start, 21967752)
+  expect_equal(g["cdkn2a"]$span_from, "sarcoma")
+  expect_equal(g["PIK3CA"]$source, "wakhan")
+  # Only what no list places falls back to Wakhan's file, labelled as a segment
+  expect_equal(g["ONLYWAKHAN"]$source, "wakhan-genes")
+  expect_equal(g["ONLYWAKHAN"]$span_from, "Wakhan segment")
+  expect_false("NOWHERE" %in% g$gene)
+  # A list's own coordinate rows carry no span_from
+  b = cna_gene_calls(segs, list(sarcoma = builtin, mine = custom), 2, "female", "wakhan")$genes[panel == "sarcoma"]
+  expect_true(all(is.na(b$span_from)))
+})
+
+test_that("the ASCAT tab says 'skipped' without claiming a failure", {
+  none = ascat_missing_note(list(), "wakhan")
+  expect_match(none, "ASCAT was skipped \\(--skip_ascat\\) or produced nothing")
+  expect_match(none, "comes from Wakhan")
+  expect_false(grepl("failed", none))
+  expect_match(ascat_missing_note(list(ascat_segments = "x.segments_raw.txt"), "ascat"),
+               "^ASCAT ran .* plots were not found\\.$")
 })

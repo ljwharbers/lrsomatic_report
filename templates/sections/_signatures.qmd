@@ -146,6 +146,6 @@ table_details(
   if (length(no_stats) > 0)
     tags$p(sprintf("No solution statistics file for %s: cosine similarity is unavailable and the mutation total is the matrix sum.",
                    paste(no_stats, collapse = ", "))),
-  tags$p("Files:", lapply(sig_paths, function(p) tags$code(class = "sig-path", p)))
+  tags$p("Files:", lapply(sample_rel_path(sig_paths, sample_dir), function(p) tags$code(class = "sig-path", p)))
 )
 ```

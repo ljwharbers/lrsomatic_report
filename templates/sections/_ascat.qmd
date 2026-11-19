@@ -19,7 +19,7 @@ cat("### ASCAT\n\n")
 
 ```{r ascat-unavailable}
 if (!has_any_ascat_plot) {
-  section_notice("No ASCAT plots found for this sample — ASCAT may have failed or was not run.")
+  section_notice(ascat_missing_note(outputs, if (!is.null(cna)) cna$source else NA_character_))
 }
 ```
 

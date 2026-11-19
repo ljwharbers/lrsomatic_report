@@ -104,6 +104,24 @@ check("ungrouped rows: one group per row", kf.kfSummarise(rows, st(["sarcoma"]),
 const gs = st(["sarcoma"], ["MYC"]);
 check("groups idempotent", kf.kfSummarise(grows, gs, true), kf.kfSummarise(grows, gs, true));
 
+// ---- whitelist-rescued SVs -----------------------------------------------------------------
+// Hidden until showRescued, whatever showLow says; counted apart from tier 3
+const rrows = [
+  { gene: "EWSR1", genes: ["EWSR1"], group: 0, panels: ["sarcoma"], tier: 1 },
+  { gene: "EWSR1", genes: ["EWSR1"], group: 0, panels: ["sarcoma"], tier: 4, rescued: true },
+  { gene: "NF1",   genes: ["NF1"],   group: 1, panels: ["sarcoma"], tier: 4, rescued: true },
+  { gene: "KIT",   genes: ["KIT"],   group: 2, panels: ["sarcoma"], tier: 3 }
+];
+s = kf.kfSummarise(rrows, st(["sarcoma"]), true, false);
+check("rescued: hidden by default, tier 3 follows showLow", s.visible, [true, false, false, true]);
+check("rescued: counted apart", [s.nRescued, s.nLow], [2, 1]);
+check("rescued: a rescued-only gene is not shown", s.groups[1].visible, false);
+s = kf.kfSummarise(rrows, st(["sarcoma"]), false, true);
+check("rescued: shown on request, tier 3 still collapsed", s.visible, [true, true, true, false]);
+check("rescued: the gene head stays the PASS line", s.groups[0].head, 0);
+check("rescued: rescued-only group sorts after tier 1", s.order, [0, 1, 2]);
+check("rescued: unmatched lists count nothing", kf.kfSummarise(rrows, st(["lymphoid"]), true, true).nRescued, 0);
+
 // Print label
 check("label all", kf.kfListLabel(st([], [], true), {}), "none (no gene list ticked)");
 check("label panels", kf.kfListLabel(st(["lymphoid", "sarcoma"]), { lymphoid: "Lymphoid" }), "Lymphoid, sarcoma");

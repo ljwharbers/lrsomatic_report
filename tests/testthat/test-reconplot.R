@@ -26,7 +26,7 @@ make_reconplot_tree = function(sample_id = "S1", symlink = FALSE) {
 
 rp_ctx = list(chromosomes = paste0("chr", c(1:22, "X", "Y")), embed = "slim")
 
-test_that("ReConPlot figures are found per combination, PDFs and focus plots ignored", {
+test_that("ReConPlot figures are found per combination, PDFs ignored, focus plots apart", {
   t = make_reconplot_tree()
   on.exit(unlink(c(t$dir, t$src), recursive = TRUE))
   s = SECTIONS$reconplot
@@ -38,6 +38,22 @@ test_that("ReConPlot figures are found per combination, PDFs and focus plots ign
   # Display order from ctx$chromosomes
   expect_equal(names(x$chroms), c("chr1", "chr2", "chr10", "chrX"))
   expect_false(any(grepl("focus|\\.pdf$", c(x$genome, x$chroms))))
+  # focus/ figures (the user's regions) are their own list, labelled without the sample prefix
+  expect_equal(names(x$focus), "MYC")
+  expect_match(x$focus[["MYC"]], "severus_ascat/focus/S1_MYC\\.png$")
+})
+
+test_that("a combination with only focus figures is kept; region labels read as text", {
+  d = tempfile("rp_")
+  on.exit(unlink(d, recursive = TRUE))
+  dir.create(file.path(d, "reconplot", "savana", "focus"), recursive = TRUE)
+  file.create(file.path(d, "reconplot", "savana", "focus",
+                        c("S1_chr8_chr18_60.0Mb-66.0Mb.png", "S1_chr8_chr18_60.0Mb-66.0Mb.pdf")))
+  s = SECTIONS$reconplot
+  res = s$parse(s$locate(d, "S1"), list(), rp_ctx)
+  expect_equal(names(res$combos), "savana")
+  expect_length(res$combos$savana$chroms, 0)
+  expect_equal(names(res$combos$savana$focus), "chr8 chr18 60.0Mb-66.0Mb")
 })
 
 test_that("staged symlinked files are discovered", {
@@ -48,6 +64,7 @@ test_that("staged symlinked files are discovered", {
   res = s$parse(s$locate(t$dir, "S1"), list(), rp_ctx)
   expect_equal(length(res$combos), 2L)
   expect_equal(length(res$combos$savana$chroms), 4L)
+  expect_equal(length(res$combos$savana$focus), 1L)
 })
 
 test_that("no ReConPlot output parses to NULL", {
@@ -60,7 +77,7 @@ test_that("no ReConPlot output parses to NULL", {
 # ---- which per-chromosome figures slim mode embeds -----------------------------------------
 
 test_that("ReConPlot chromosomes: ShatterSeek and Padfoot HIGH always, findings per list", {
-  ss = data.table(chrom = c("7", "chr3"), confidence = c("high", "none"))
+  ss = data.table(chrom = c("7", "chr3"), confidence = c("high", "none"), criteria = c("HC2,HC3", ""))
   # Plain HIGH (chr20) is too common to select by; HIGH_ONCO is the cancer-gene rating
   # Both mates of the translocation, in Padfoot's "GENE (where)" notation; HIGH_TSG is a
   # cancer-gene rating too (chr13), plain HIGH is not (chr20)
@@ -85,6 +102,13 @@ test_that("ReConPlot chromosomes: ShatterSeek and Padfoot HIGH always, findings 
   # chr3's call has confidence none, chr1's SV is not HIGH; small variants and tier 3 never select
   expect_setequal(r$chrom, c("chr7", "chr22", "chr12", "chr9", "chr13"))
   expect_true(r["chr7"]$always)
+  # The reason kinds and the best chromothripsis tier drive the figure selector
+  expect_equal(r["chr7"]$reasons, "chromothripsis call (HC2,HC3)")
+  expect_equal(r["chr7"]$kinds, "chromothripsis")
+  expect_equal(r["chr7"]$ss_tier, 2L)
+  expect_equal(r["chr7"]$priority, 1L)
+  expect_equal(r["chr22"]$kinds, "padfoot,finding")
+  expect_equal(r["chr9"]$priority, 3L)
   expect_true(r["chr13"]$always)
   expect_equal(r["chr13"]$reasons, "Padfoot HIGH_TSG: RB1")
   expect_true(r["chr22"]$always)
@@ -97,8 +121,9 @@ test_that("ReConPlot chromosomes: ShatterSeek and Padfoot HIGH always, findings 
   expect_false(r["chr9"]$always)
   expect_setequal(strsplit(r["chr9"]$panels, ",")[[1]], c("sarcoma", "lymphoid"))
   expect_equal(r["chr9"]$genes, "CDKN2A")
-  # An always-shown chromosome carries no list (nothing to hide it by)
-  expect_equal(r["chr22"]$panels, "")
+  # An always-shown chromosome keeps its finding's lists: the selector can untick Padfoot
+  expect_equal(r["chr22"]$panels, "sarcoma")
+  expect_true(is.na(r["chr22"]$ss_tier))
   expect_equal(nrow(reconplot_chromosomes()), 0)
 })
 
@@ -107,4 +132,40 @@ test_that("ReConPlot reasons are capped", {
                  panels = "a", alteration = "amplification", locus = "chr2:1–2")
   r = reconplot_chromosomes(f)
   expect_match(r$reasons, "2 more$")
+})
+
+test_that("the slim-mode cap keeps the best-ranked chromosomes", {
+  sel = data.table(chrom = c("chr1", "chr2", "chr3", "chr4", "chr5"),
+                   priority = c(4L, 3L, 1L, 2L, 1L), ss_tier = c(NA, NA, 3L, NA, 1L))
+  r = reconplot_cap(sel, 3L, paste0("chr", 1:22))
+  # chromothripsis HC1 before HC3, then Padfoot; findings dropped
+  expect_equal(r$kept$chrom, c("chr5", "chr3", "chr4"))
+  expect_equal(r$dropped$chrom, c("chr2", "chr1"))
+  expect_equal(nrow(reconplot_cap(sel, 10L)$dropped), 0)
+  expect_equal(nrow(reconplot_cap(reconplot_chromosomes())$kept), 0)
+})
+
+test_that("a whitelist-rescued Padfoot HIGH_ONCO call neither selects nor outranks a finding", {
+  sv = data.table(chrom_a = c("chr2", "chr4"), chrom_b = c("chr2", "chr5"),
+                  padfoot_impact = c("HIGH_ONCO", "HIGH_ONCO"), padfoot_genes = c("ALK", "TERT"),
+                  wl_rescue = c("WL", NA))
+  f = data.table(gene = "MYC", genes = "MYC", type = "SV", tier = 1L, panels = "lymphoid",
+                 alteration = "MYC translocation", locus = "chr8–chr14")
+  r = reconplot_chromosomes(f, sv)
+  expect_false("chr2" %in% r$chrom)
+  expect_setequal(r$chrom, c("chr4", "chr5", "chr8", "chr14"))
+  # Under a cap of 3 the tier-1 finding keeps a slot; only Padfoot of the PASS call outranks it
+  kept = reconplot_cap(r, 3L, paste0("chr", 1:22))$kept$chrom
+  expect_equal(kept, c("chr4", "chr5", "chr8"))
+})
+
+test_that("ReConPlot chromosomes: an HC-tiered and an untiered chromothripsis call together", {
+  ss = data.table(chrom = c("X", "7", "7"), confidence = c("high", "low", "low"),
+                  criteria = c("HC1", "", NA))
+  r = reconplot_chromosomes(shatterseek_high = ss)
+  setkey(r, chrom)
+  expect_equal(r["chrX"]$ss_tier, 1L)
+  expect_true(is.na(r["chr7"]$ss_tier))
+  expect_equal(r["chr7"]$reasons, "chromothripsis call")
+  expect_type(r$ss_tier, "integer")
 })

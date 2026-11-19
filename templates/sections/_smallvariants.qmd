@@ -30,6 +30,11 @@ if (!is.null(variant_embed) && nrow(variant_embed) > 0) {
 }
 ```
 
+```{r small-variant-verdict, eval=!is.null(verdict_note(OVERVIEW$verdict))}
+# ClairS-TO Verdict status (variants/clairsto/<id>.verdict_status.tsv); nothing when tagging was applied
+section_notice(verdict_note(OVERVIEW$verdict), warn = identical(OVERVIEW$verdict$status, "skipped"))
+```
+
 ```{r small-variant-table}
 # Rows left out under --embed slim: say so above the table, and where the rest are
 n_full_sv     = if (!is.null(variant_table)) nrow(variant_table) else 0L
@@ -167,6 +172,12 @@ if (is.null(variant_table) || n_full_sv == 0) {
       } else {
         "No VAF source VCF was found, so the VAF, depth, genotype and phase set columns are empty."
       },
+      if (isTRUE(attr(variant_table, "n_gt_deepsomatic") > 0)) tagList(
+        tags$br(),
+        sprintf(paste("%s variants were called by DeepSomatic, which writes the genotype 1/1 on every",
+                      "somatic call by convention: their GT is left blank, and DeepSomatic calls carry",
+                      "no phase set (PS), so they are not phased."),
+                format(attr(variant_table, "n_gt_deepsomatic"), big.mark = ","))),
       # n_multi counts the FULL table, so the caveat stands even when slimming dropped every
       # multi-caller row (mc_vals, the highlight, only sees the embedded ones)
       if (n_multi > 0) tagList(

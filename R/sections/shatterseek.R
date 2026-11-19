@@ -194,12 +194,58 @@ shatterseek_calls = function(combos, labels = NULL) {
   rows[]
 }
 
+# Best (lowest-numbered) PCAWG tier a call meets: "HC1,HC2" -> 1L, "HC3" -> 3L, none named -> NA
+shatterseek_best_tier = function(criteria) {
+  vapply(strsplit(toupper(as.character(criteria)), "[^A-Z0-9]+"), function(t) {
+    n = suppressWarnings(as.integer(sub("^HC", "", t[!is.na(t) & grepl("^HC[0-9]+$", t)])))
+    if (length(n)) min(n) else NA_integer_
+  }, integer(1))
+}
+
+# Minimum-tier settings of the report's selector: 1 = HC1 only, 2 = HC1-HC2, 3 = every call
+SHATTERSEEK_MIN_TIERS = c(`1` = "HC1 only", `2` = "HC1–HC2", `3` = "all tiers (HC1–HC3)")
+SHATTERSEEK_MIN_TIER_DEFAULT = 3L
+
+# The minimum-tier <select>; every copy in the page is kept in step by _instability.qmd's script
+shatterseek_tier_select = function(class = NULL) {
+  htmltools::tags$select(
+    class = paste(c("ss-tier-select", class), collapse = " "),
+    `aria-label` = "ShatterSeek: minimum PCAWG tier shown",
+    lapply(names(SHATTERSEEK_MIN_TIERS), function(t)
+      htmltools::tags$option(value = t, selected = if (as.integer(t) == SHATTERSEEK_MIN_TIER_DEFAULT) NA,
+                             SHATTERSEEK_MIN_TIERS[[t]])))
+}
+
+# `x` with $high reduced to the calls meeting a tier <= min_tier; a call naming no tier is kept
+# only at the loosest setting
+shatterseek_at_tier = function(x, min_tier) {
+  if (is.null(x) || !identical(x$status, "ok") || is.null(x$high) || nrow(x$high) == 0) return(x)
+  if (min_tier >= max(as.integer(names(SHATTERSEEK_MIN_TIERS)))) return(x)
+  bt = shatterseek_best_tier(x$high$criteria)
+  keep = !is.na(bt) & bt <= min_tier
+  x$n_below_tier = sum(!keep)
+  x$min_tier = as.integer(min_tier)
+  x$high = x$high[keep]
+  x
+}
+
+# Union of the PCAWG tiers named in `criteria` ("HC1,HC2" + "HC3" -> "HC1,HC2,HC3"); "" if none
+shatterseek_tiers = function(criteria) {
+  t = unique(trimws(unlist(strsplit(toupper(as.character(criteria[!is.na(criteria)])), ",", fixed = TRUE))))
+  t = t[grepl("^HC[0-9]+$", t)]
+  paste(t[order(as.integer(sub("^HC", "", t)))], collapse = ",")
+}
+
 # One-line verdict over every combo. Mentions disagreement explicitly when more than one
 # combo ran and they do not call the same chromosomes.
 shatterseek_verdict = function(x) {
   if (is.null(x) || !identical(x$status, "ok")) return("ShatterSeek was not run for this sample.")
   labels = x$labels
   high = x$high
+  if ((is.null(high) || nrow(high) == 0) && isTRUE(x$n_below_tier > 0))
+    return(sprintf("No chromothripsis call meets %s; %d call%s only a lower tier (select all tiers to show %s).",
+                   if (x$min_tier == 1L) "HC1" else paste0("HC1–HC", x$min_tier), x$n_below_tier,
+                   if (x$n_below_tier == 1) " meets" else "s meet", if (x$n_below_tier == 1) "it" else "them"))
   if (is.null(high) || nrow(high) == 0) {
     # One line for every combination: identical negatives are not repeated per combination
     n_tested = vapply(names(labels), function(cb) {
@@ -217,7 +263,8 @@ shatterseek_verdict = function(x) {
     return(sprintf("%s (%s).", lead, tested))
   }
   by_chrom = high[, .(combos = list(unique(combo)),
-                      conf   = paste(unique(confidence), collapse = "/")),
+                      conf   = paste(unique(confidence), collapse = "/"),
+                      tiers  = shatterseek_tiers(criteria)),
                   by = chrom]
   all_high = all(high$confidence == "high")
   multi = length(labels) > 1
@@ -225,7 +272,8 @@ shatterseek_verdict = function(x) {
     cbs = by_chrom$combos[[i]]
     tag = if (!multi) "" else if (length(cbs) == length(labels)) " (all combinations)"
           else sprintf(" (%s only)", paste(unname(labels[cbs]), collapse = ", "))
-    conf = if (all_high) "" else sprintf(" [%s]", by_chrom$conf[i])
+    conf = if (nzchar(by_chrom$tiers[i])) sprintf(" [%s]", by_chrom$tiers[i])
+           else if (all_high) "" else sprintf(" [%s]", by_chrom$conf[i])
     paste0(by_chrom$chrom[i], conf, tag)
   }, character(1))
   lead = if (all_high) "High-confidence chromothripsis on " else "Chromothripsis called on "
