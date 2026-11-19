@@ -482,12 +482,7 @@ vaf_provenance = function(vcf_files, sample_dir = NULL, sample_id = NULL) {
   if (length(vcf_files) == 0) return(NULL)
 
   # Paths read better relative to the sample directory the caller passed in.
-  rel = function(p) {
-    if (is.null(sample_dir) || !nzchar(sample_dir)) return(p)
-    root = sub("/+$", "", normalizePath(sample_dir, mustWork = FALSE))
-    full = normalizePath(p, mustWork = FALSE)
-    if (startsWith(full, paste0(root, "/"))) substring(full, nchar(root) + 2L) else p
-  }
+  rel = function(p) sample_rel_path(p, sample_dir)
 
   # "##source=..." is optional colour; many VCFs carry none
   read_sources = function(p) {

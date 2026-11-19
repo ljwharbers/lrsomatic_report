@@ -517,6 +517,19 @@ js_facet_defs = function(dt, cols, seps = character(0), levels = list()) {
   paste0("{", paste(entries, collapse = ","), "}")
 }
 
+# Path relative to --sample-dir, for provenance lines. Lexical on purpose: normalizePath()
+# would resolve the pipeline's staged symlinks out of the sample directory. Vectorised;
+# a path outside it, or without a root, is returned as given
+sample_rel_path = function(p, root) {
+  if (is.null(p)) return(p)
+  p = as.character(p)
+  if (is.null(root) || length(root) == 0 || is.na(root[1]) || !nzchar(root[1])) return(p)
+  root = sub("/+$", "", as.character(root[1]))
+  inside = !is.na(p) & startsWith(p, paste0(root, "/"))
+  p[inside] = sub("^/+", "", substring(p[inside], nchar(root) + 2L))
+  p
+}
+
 # Format a number for human-readable display
 fmt_bp = function(x) {
   x = as.numeric(x)

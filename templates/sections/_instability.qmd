@@ -21,10 +21,7 @@ inst_span = function(chrom, start, end) {
 inst_verdict = function(text, kind) tags$p(class = paste0("instability-verdict instability-verdict--", kind), text)
 inst_html = function(tag) cat("\n```{=html}\n", as.character(tag), "\n```\n\n", sep = "")
 # Path relative to the sample directory, for provenance lines
-inst_rel = function(p) {
-  root = sub("/+$", "", as.character(sample_dir))
-  ifelse(startsWith(p, paste0(root, "/")), substring(p, nchar(root) + 2L), p)
-}
+inst_rel = function(p) sample_rel_path(p, sample_dir)
 ```
 
 ### Chromothripsis

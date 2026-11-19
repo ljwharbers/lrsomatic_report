@@ -13,11 +13,7 @@ if (is.null(reconplot)) {
 if (!is.null(reconplot)) {
   raw_html = function(tag) cat("\n```{=html}\n", as.character(tag), "\n```\n\n", sep = "")
 
-  rp_rel = function(p) {
-    root = sub("/+$", "", normalizePath(sample_dir, mustWork = FALSE))
-    full = normalizePath(p, mustWork = FALSE)
-    if (startsWith(full, paste0(root, "/"))) substring(full, nchar(root) + 2L) else p
-  }
+  rp_rel = function(p) sample_rel_path(p, sample_dir)
   plural = function(n, one, many = paste0(one, "s")) paste(n, if (n == 1) one else many)
 
   full_embed = identical(as.character(embed)[1], "full")
