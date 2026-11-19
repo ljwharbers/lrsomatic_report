@@ -20,7 +20,7 @@
 #   n_rescued_by_caller  named integer, whitelist-rescued rows among them (sv_is_rescued())
 #   callers        per caller: list(vcf, vep_vcf, gene_tsv, annotation_path, n_records, n_rows,
 #                  n_annotated, n_with_genes, n_typed, pon_filtered, n_rescued,
-#                  n_rescued_fail, n_rescued_1read)
+#                  n_rescued_fail, n_rescued_1read, n_failed)
 #   padfoot        per caller with a Padfoot file: list(path, combo, key, n_joined, n_rows, n_padfoot)
 #   has_padfoot    TRUE when any Padfoot file was found (then PADFOOT_COLS exist in a non-empty
 #                  `table`, NA on the rows of a caller without one)
@@ -148,7 +148,8 @@ register_section(list(
         n_rescued_fail = if (nrow(t) > 0 && "filter" %in% names(t))
                            sum(sv_is_rescued(t) & !is.na(t$filter) & !t$filter %in% SV_PASS_FILTERS) else 0L,
         n_rescued_1read = if (nrow(t) > 0 && "support" %in% names(t))
-                            sum(sv_is_rescued(t) & t$support %in% 1L) else 0L
+                            sum(sv_is_rescued(t) & t$support %in% 1L) else 0L,
+        n_failed = { x = attr(records, "n_failed"); if (is.null(x)) 0L else as.integer(x) }
       )
     }
 

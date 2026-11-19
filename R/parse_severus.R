@@ -140,7 +140,8 @@ parse_severus_somatic_records = function(vcf_file) parse_sv_vcf(vcf_file, "sever
 #   filter, wl_rescue
 # `caller` picks the dialect (SV_CALLER_DIALECTS). attr(, "n_records") is the VCF's record count
 # before mate collapsing, for the footnote. A pair is rescued when either mate carries WL_RESCUE,
-# and passes only when both do.
+# and passes only when both do; a non-PASS record that was not rescued is dropped, as small
+# variants are, and counted in attr(, "n_failed").
 parse_sv_vcf = function(vcf_file, caller = "severus") {
   if (is.null(vcf_file) || !file.exists(vcf_file)) return(data.table())
   d = SV_CALLER_DIALECTS[[caller]]
@@ -190,6 +191,15 @@ parse_sv_vcf = function(vcf_file, caller = "severus") {
                             if (length(f)) paste(f, collapse = ";") else FILTER[1] },
             pair_wl = { w = wl[!is.na(wl)]; if (length(w)) w[1] else NA_character_ }),
      by = pair_key]
+  failed = !dt$pair_filter %in% SV_PASS_FILTERS & is.na(dt$pair_wl)
+  n_failed = sum(failed)
+  if (n_failed > 0) dt = dt[!failed]
+  if (nrow(dt) == 0) {
+    out = data.table()
+    setattr(out, "n_records", n_records)
+    setattr(out, "n_failed", n_failed)
+    return(out)
+  }
   setorder(dt, pair_key, side_rank, ID)
   dt = dt[dt[, .I[1L], by = pair_key]$V1]
 
@@ -240,6 +250,7 @@ parse_sv_vcf = function(vcf_file, caller = "severus") {
                sv_len = SVLEN, vaf = VAF, support = SUPPORT,
                filter = pair_filter, wl_rescue = pair_wl)]
   setattr(out, "n_records", n_records)
+  setattr(out, "n_failed", n_failed)
   out
 }
 

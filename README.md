@@ -148,7 +148,8 @@ the call failed and its read support. A rescued call whose evidence would only b
 listed; one that SAVANA also made is not rescued (the event stands with SAVANA's call). The
 same choice shows or hides rescued rows in the SV table and their circos labels; the SV card
 counts them apart ("Severus 323 (+9,388 whitelist-rescued)"), and the genome circos does not
-draw them. ShatterSeek and ReConPlot were given every call.
+draw them. ShatterSeek and ReConPlot were given every call. A non-PASS Severus record that was
+not rescued is not shown at all, as for small variants.
 
 ### Copy number
 

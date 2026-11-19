@@ -470,6 +470,11 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
               fmt_n(p$n_rescued), code("INFO/WL_RESCUE"), code("--severus_whitelist"),
               fmt_n(p$n_rescued_1read), fmt_n(p$n_rescued_fail), code("FILTER"))
     else ""
+    failed = if (isTRUE(p$n_failed > 0))
+      sprintf("%s record%s with a non-PASS %s and no whitelist rescue %s left out, as small variants are.",
+              fmt_n(p$n_failed), if (p$n_failed == 1) "" else "s", code("FILTER"),
+              if (p$n_failed == 1) "is" else "are")
+    else ""
     typed = if (isTRUE(p$n_typed > 0))
       sprintf(paste("SAVANA writes every rearrangement as a %s mate pair; %s same-chromosome pairs",
                     "are typed here from %s (%s DEL, %s DUP, %s/%s INV) and treated as spans like",
@@ -479,7 +484,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
               code("++"), code("--"), code("svtype_raw"), code("BND"), code("TUMOUR_AF"))
     else if (nm == "savana") sprintf("Its VAF is %s at the first breakend.", code("TUMOUR_AF"))
     else ""
-    paste0("<strong>", lab(nm), "</strong>: ", paste(c(src, genes, rescued, typed), collapse = " "))
+    paste0("<strong>", lab(nm), "</strong>: ", paste(c(src, genes, rescued, failed, typed), collapse = " "))
   }
   callers_note = paste(vapply(names(sv_prov), caller_note, character(1)), collapse = "<br>")
   multi_note = if (length(unique(sv_table$caller)) > 1)

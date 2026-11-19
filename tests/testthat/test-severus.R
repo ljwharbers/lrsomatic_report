@@ -384,6 +384,30 @@ test_that("WL_RESCUE and FILTER reach the table; a rescued mate pair stays one r
   expect_equal(sv_is_rescued(NULL), logical(0))
 })
 
+test_that("a non-PASS record is dropped unless rescued, mate pairs as one", {
+  v = write_severus_vcf(c(
+    frec("ok", "PASS", "SVTYPE=DEL;END=900;SVLEN=800"),
+    frec("dot", ".", "SVTYPE=DEL;END=1900;SVLEN=800", pos = 1100),
+    frec("bad", "FAIL_LOWSUPP", "SVTYPE=DEL;END=2900;SVLEN=800", pos = 2100),
+    frec("kept", "FAIL_VNTR", "SVTYPE=DEL;END=3900;SVLEN=800;WL_RESCUE=WHITELIST", pos = 3100),
+    # One failed mate fails the pair
+    frec("severus_BND1_1", "PASS", "SVTYPE=BND;MATE_ID=severus_BND1_2", alt = "N[chr2:5000["),
+    frec("severus_BND1_2", "FAIL_MAP_CONS", "SVTYPE=BND;MATE_ID=severus_BND1_1",
+         chrom = "chr2", pos = 5000, alt = "]chr1:100]N")))
+  on.exit(unlink(v))
+  r = parse_severus_somatic_records(v)
+  expect_setequal(r$id, c("ok", "dot", "kept"))
+  expect_equal(attr(r, "n_failed"), 3L)
+  expect_equal(attr(r, "n_records"), 6L)
+  expect_equal(r[id == "kept"]$filter, "FAIL_VNTR")
+  # Nothing left: an empty table that still says how many records were dropped
+  v2 = write_severus_vcf(frec("bad", "FAIL_LOWSUPP", "SVTYPE=DEL;END=2900;SVLEN=800"))
+  on.exit(unlink(v2), add = TRUE)
+  r2 = parse_severus_somatic_records(v2)
+  expect_equal(nrow(r2), 0L)
+  expect_equal(attr(r2, "n_failed"), 1L)
+})
+
 test_that("both SV table builders return exactly the shared column contract", {
   sv = write_severus_vcf(mate_pair())
   on.exit(unlink(sv))
