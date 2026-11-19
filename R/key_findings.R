@@ -25,6 +25,7 @@
 #        per_panel_n = named integer (genes / groups with a tier 1-2 finding per panel;
 #                      every panel named),
 #        tumour_only = logical(1),
+#        verdict     = parse_verdict_status() result or NULL (ClairS-TO germline tagging),
 #        n_nonpanel  = list(kept, total))  # non-panel small-variant rows embedded / eligible
 #
 # What is a finding: an event in a gene of a user-chosen gene list ("panel") that carries
@@ -1068,5 +1069,6 @@ build_overview = function(variant_table, section_data, all_panels, ascat_pp, tmb
        biomarkers  = build_biomarkers(section_data, ascat_pp, tmb_info, counts),
        per_panel_n = f$per_panel_n,
        tumour_only = identical(as.character(mode), "tumour-only"),
+       verdict     = if (!is.null(ctx$outputs)) parse_verdict_status(ctx$outputs$verdict_status) else NULL,
        n_nonpanel  = f$n_nonpanel)
 }

@@ -63,6 +63,13 @@ locate_outputs = function(sample_dir, sample_id) {
     }
   }
 
+  # ClairS-TO Verdict germline tagging status (pipeline contract: variants/clairsto/<id>.verdict_status.tsv)
+  verdict_status = {
+    hits = list.files(d, pattern = "\\.verdict_status\\.tsv$", recursive = TRUE, full.names = TRUE)
+    own = hits[basename(hits) == paste0(sample_id, ".verdict_status.tsv")]
+    if (length(own) > 0) own[1] else if (length(hits) > 0) hits[1] else NULL
+  }
+
   # --- structural variants: located by R/sections/sv.R ---
 
   # --- ASCAT ----------------------------------------------------------------
@@ -117,6 +124,7 @@ locate_outputs = function(sample_dir, sample_id) {
     mode_source      = "inferred",
     vep_somatic      = vep_somatic,
     somatic_vaf_vcf  = somatic_vaf_vcf,
+    verdict_status   = verdict_status,
     ascat_segments   = ascat_segments_raw,
     ascat_purityploidy = ascat_purityploidy,
     mosdepth_summary = mosdepth_summary,

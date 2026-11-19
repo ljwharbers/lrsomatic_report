@@ -222,3 +222,12 @@ test_that("--run-mode tumour_only overrides, and an absent flag keeps the infere
   expect_identical(apply_run_mode(o, ""), o)
   expect_error(apply_run_mode(o, "matched"), "paired' or 'tumour_only")
 })
+
+test_that("the Verdict status file is found where the pipeline stages it", {
+  root = make_tree(c("variants/clairsto/S.verdict_status.tsv", "variants/clairsto/other.verdict_status.tsv"))
+  on.exit(unlink(root, recursive = TRUE))
+  expect_equal(rel(locate_outputs(root, "S")$verdict_status, root), "variants/clairsto/S.verdict_status.tsv")
+  empty = make_tree("variants/clairsto/somatic.vcf.gz")
+  on.exit(unlink(empty, recursive = TRUE), add = TRUE)
+  expect_null(locate_outputs(empty, "S")$verdict_status)
+})

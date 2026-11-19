@@ -104,7 +104,10 @@ established), matched by either gene's list or a Custom… entry for either gene
 
 **Tumour-only samples.** Without a matched normal, small-variant findings can include germline
 variants. The report says so above the table and shows VAF for judgement (a heterozygous
-germline variant sits near 0.5, or near 1 under LOH).
+germline variant sits near 0.5, or near 1 under LOH). When the pipeline reports that ClairS-TO's
+germline tagging (Verdict) was skipped — it skips above purity 0.6 — a second warning names the
+reason and the purity used, here and in the small-variant section: the calls then likely contain
+many germline variants.
 
 ### Small variants
 
@@ -451,14 +454,14 @@ as part of the pattern. When several files match, one named for the sample is pr
 
 | Section | Files read (relative to the sample directory) |
 |---|---|
-| Small variants | `*_SOMATIC_VEP.vcf.gz` (variant set and annotation); VAF / depth / genotype / phase set from `variants/phased/somatic_smallvariants.vcf.gz`, else `variants/clairs{,to}/somatic.vcf.gz`, else any non-germline VCF in those directories |
+| Small variants | `*_SOMATIC_VEP.vcf.gz` (variant set and annotation); VAF / depth / genotype / phase set from `variants/phased/somatic_smallvariants.vcf.gz`, else `variants/clairs{,to}/somatic.vcf.gz`, else any non-germline VCF in those directories; ClairS-TO germline tagging status from `variants/clairsto/<id>.verdict_status.tsv` (`status`, `purity`, `ploidy`, `purity_source`, `message`; status `applied`, `skipped` or `not_run`) |
 | Structural variants | Severus: `severus_somatic.vcf.gz`, `*_SV_VEP.vcf.gz` (fallback `SV_filtered_with_gene_annotations.tsv`). SAVANA: `*.pon_filtered.classified.somatic.vcf[.gz]`, else `*.classified.somatic.vcf[.gz]`; `*_VEP_SAVANA.vcf.gz`. Padfoot: `padfoot/<combination>/annotated_svs.tsv` (`severus_wakhan` for Severus, `savana` for SAVANA) |
 | ReConPlot | `reconplot/<combination>/genome_wide/*_genome_wide.png`, `reconplot/<combination>/per_chromosome/*_chr*.png` |
 | Copy number | ASCAT: `*.segments_raw.txt`, `*.purityploidy.txt`, `*.metrics.txt` (beside them), `*.tumour.{ASCATprofile,ASPCF,sunrise}.png` and diagnostic PNGs. Wakhan: `wakhan/solutions_ranks.tsv`, `wakhan/solution_rank_<N>/integer_profile.bed` and `…/genes/genes_copynumber_states.bed` (also `solution_<N>/` and the `repository_name` directory). SAVANA: `*_fitted_purity_ploidy.tsv` |
 | Genome instability | `shatterseek/<combination>/*.shatterseek.tsv`; `ecdna/coral/*_CNV_SEEDS.bed`, `ecdna/coral/{cycles,reconstruct}/*_amplicon_summary.txt`, `ecdna/coral/plots/*_amplicon<N>_{graph,cycles}.png`, `ecdna/amplicon_classifier/*_amplicon_classification_profiles.tsv`, `*_gene_list.tsv`, `*_result_table.tsv` |
 | Mutational signatures | `signatures/**/COSMIC_v<ver>/{SBS96,DBS78,ID83}/Assignment_Solution/**/Assignment_Solution_Activities.txt` and `Assignment_Solution_Samples_Stats.txt`; matrices `*.SBS96.all`, `*.DBS78.all`, `*.ID83.all` |
 | QC (tumour) | mosdepth `*.mosdepth.summary.txt` (or `*.summary.txt` under `qc/` or `mosdepth/`) and `*.global.dist.txt`; cramino `*_cramino.txt` (the aligned-BAM one); samtools `*.flagstat`, `*.stats`; `qc/whatshap_stats/*_whatshap_stats.tsv` |
-| QC (normal) | the same QC files under any `normal/` directory (e.g. `qc/normal/`) — their presence is what makes the run *matched* |
+| QC (normal) | the same QC files under any `normal/` directory (e.g. `qc/normal/`) — their presence is what makes the run *matched*, unless `--run-mode` says otherwise |
 
 Missing inputs are handled gracefully: the corresponding section or biomarker says it was not
 run or not found.

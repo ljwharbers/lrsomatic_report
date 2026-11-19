@@ -518,6 +518,45 @@ vaf_provenance = function(vcf_files, sample_dir = NULL, sample_id = NULL) {
   )
 }
 
+# ClairS-TO Verdict status file (<id>.verdict_status.tsv: status, purity, ploidy, purity_source,
+# message; one data row). NULL when absent or unreadable; columns are read by name
+parse_verdict_status = function(path) {
+  if (is.null(path) || length(path) == 0 || !file.exists(path) || isTRUE(file.size(path) == 0)) return(NULL)
+  dt = tryCatch(fread(path, sep = "\t", header = TRUE, colClasses = "character", na.strings = c("NA", ""),
+                      quote = ""),
+                error = function(e) { message("Verdict status: cannot read ", path, ": ", conditionMessage(e)); NULL })
+  if (is.null(dt) || nrow(dt) == 0) return(NULL)
+  setnames(dt, tolower(trimws(names(dt))))
+  get1 = function(k) if (k %in% names(dt)) as.character(dt[[k]][1]) else NA_character_
+  status = tolower(trimws(get1("status")))
+  if (is.na(status) || !nzchar(status)) return(NULL)
+  list(status = status,
+       purity = suppressWarnings(as.numeric(get1("purity"))),
+       ploidy = suppressWarnings(as.numeric(get1("ploidy"))),
+       purity_source = tolower(trimws(get1("purity_source"))),
+       message = trimws(get1("message")))
+}
+
+VERDICT_SOURCE_LABELS = c(ascat = "ASCAT", wakhan = "Wakhan", savana = "SAVANA",
+                          clairsto_internal = "ClairS-TO's own estimate", none = "no estimate")
+
+# Reader-facing sentence for a Verdict status; NULL when tagging was applied (or the status is unknown)
+verdict_note = function(v) {
+  if (is.null(v) || is.null(v$status)) return(NULL)
+  if (identical(v$status, "skipped")) {
+    msg = if (!is.na(v$message) && nzchar(v$message))
+            sub("[.!]+$", "", sub("^\\[[A-Z]+\\]\\s*", "", v$message)) else "no reason recorded"
+    src = if (!is.na(v$purity_source) && v$purity_source %in% names(VERDICT_SOURCE_LABELS))
+            VERDICT_SOURCE_LABELS[[v$purity_source]] else if (!is.na(v$purity_source)) v$purity_source else "unknown source"
+    pur = if (!is.na(v$purity)) formatC(v$purity, format = "f", digits = 2) else "unknown"
+    return(paste0("ClairS-TO germline tagging (Verdict) was skipped: ", msg, "; purity ", pur, " from ", src,
+                  ". Tumour-only calls likely contain many germline variants."))
+  }
+  if (identical(v$status, "not_run"))
+    return("ClairS-TO germline tagging (Verdict) did not run for this sample, so tumour-only calls were not screened for germline variants.")
+  NULL
+}
+
 # Canonical variant key joining VEP rows to VCF records: VEP reports indels at anchor + 1 with raw or dash-trimmed alleles; all forms reconcile as trimmed alleles at anchor + 1, SNVs/MNVs verbatim. `space` is "vcf" or "vep"
 variant_key = function(chrom, pos, ref, alt, space = c("vcf", "vep")) {
   space = match.arg(space)

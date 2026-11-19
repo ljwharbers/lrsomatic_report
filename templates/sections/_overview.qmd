@@ -85,6 +85,9 @@ tags$div(
       tags$strong("Tumour-only sample: "),
       "without a matched normal, these calls can include germline variants. VAF is shown for judgement ",
       "(a germline heterozygous variant sits near 0.5, or near 1 under LOH)."),
+  if (isTRUE(ov$tumour_only) && !is.null(verdict_note(ov$verdict)))
+    tags$p(class = paste("kf-caveat", if (identical(ov$verdict$status, "skipped")) "kf-caveat--strong"),
+           verdict_note(ov$verdict)),
   tags$ul(class = "kf-legend", `aria-label` = "Tier legend",
     tags$li(class = "kf-legend__item kf-tier-1", tags$strong("Tier 1"),
             " strong evidence: ClinVar (likely) pathogenic or truncating variant, breakpoint in the gene, amplification or homozygous deletion"),

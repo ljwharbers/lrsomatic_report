@@ -363,3 +363,45 @@ test_that("vaf_provenance does not fail on a path that does not exist", {
   expect_equal(prov$paths, "/nonexistent/somatic.vcf.gz")
   expect_length(prov$sources, 0L)
 })
+
+# --- ClairS-TO Verdict status ---------------------------------------------------
+
+write_verdict = function(row) {
+  f = tempfile(fileext = ".verdict_status.tsv")
+  writeLines(c("status\tpurity\tploidy\tpurity_source\tmessage", row), f)
+  f
+}
+
+test_that("a skipped Verdict reads as a specific germline warning", {
+  f = write_verdict(paste("skipped\t0.66\t1.99\tascat",
+    "[WARNING] Tumor purity estimation 0.66 is higher than 0.6, not applying verdict tagging!", sep = "\t"))
+  v = parse_verdict_status(f)
+  expect_equal(v$status, "skipped")
+  expect_equal(v$purity, 0.66)
+  expect_equal(v$purity_source, "ascat")
+  expect_equal(verdict_note(v), paste0(
+    "ClairS-TO germline tagging (Verdict) was skipped: Tumor purity estimation 0.66 is higher than 0.6, ",
+    "not applying verdict tagging; purity 0.66 from ASCAT. Tumour-only calls likely contain many germline variants."))
+})
+
+test_that("Verdict not_run gives a short note, applied and absent give none", {
+  expect_match(verdict_note(parse_verdict_status(write_verdict("not_run\tNA\tNA\tnone\t"))),
+               "did not run")
+  expect_null(verdict_note(parse_verdict_status(write_verdict("applied\t0.45\t2.01\tascat\t"))))
+  expect_null(parse_verdict_status(NULL))
+  expect_null(parse_verdict_status("/no/such/file.tsv"))
+  expect_null(verdict_note(NULL))
+  # NA purity and an empty message still make a readable sentence
+  expect_match(verdict_note(parse_verdict_status(write_verdict("skipped\tNA\tNA\tnone\t"))),
+               "skipped: no reason recorded; purity unknown from no estimate")
+})
+
+test_that("build_overview carries the Verdict status from outputs$verdict_status", {
+  f = write_verdict("skipped\t0.82\t1.99\tascat\tpurity too high")
+  ov = build_overview(NULL, list(), list(), NULL, NULL, list(),
+                      list(outputs = list(mode = "tumour-only", verdict_status = f)))
+  expect_true(ov$tumour_only)
+  expect_equal(ov$verdict$status, "skipped")
+  expect_null(build_overview(NULL, list(), list(), NULL, NULL, list(),
+                             list(outputs = list(mode = "tumour-only")))$verdict)
+})

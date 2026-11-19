@@ -30,6 +30,11 @@ if (!is.null(variant_embed) && nrow(variant_embed) > 0) {
 }
 ```
 
+```{r small-variant-verdict, eval=!is.null(verdict_note(OVERVIEW$verdict))}
+# ClairS-TO Verdict status (variants/clairsto/<id>.verdict_status.tsv); nothing when tagging was applied
+section_notice(verdict_note(OVERVIEW$verdict), warn = identical(OVERVIEW$verdict$status, "skipped"))
+```
+
 ```{r small-variant-table}
 # Rows left out under --embed slim: say so above the table, and where the rest are
 n_full_sv     = if (!is.null(variant_table)) nrow(variant_table) else 0L
