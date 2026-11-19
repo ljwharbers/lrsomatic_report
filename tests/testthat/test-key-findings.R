@@ -408,6 +408,23 @@ test_that("a symbol hit on a breakend is position-tested where a list gives coor
   expect_false("CDKN2B" %in% f[tier <= 2]$gene)
 })
 
+test_that("a symbol hit on a focal DEL/DUP counts only when its span overlaps the gene", {
+  # VEP names MYC on a 2 kb deletion ending 1 kb upstream of it (upstream_gene_variant)
+  sym = list(name = "custom", path = "custom.tsv", reference = "", has_coords = FALSE,
+             has_scopes = FALSE, genes = "MYC")
+  panels = c(kf_panels(), list(custom = sym))
+  up = kf_sv(caller = "savana", svclass = "DEL", svtype = "DEL",
+             chrom_a = "chr8", pos_a = 127732434L, chrom_b = "chr8", pos_b = 127734434L,
+             gene_a = "MYC")
+  f = kf_run(sd = list(sv = list(table = up)), panels = panels)
+  expect_false("MYC" %in% f[tier <= 2]$gene)
+  expect_false(any(grepl("covers MYC", f$evidence)))
+  # Extended past MYC's far end, the same deletion covers it
+  into = copy(up)[, pos_b := 127744000L]
+  f = kf_run(sd = list(sv = list(table = into)), panels = panels)
+  expect_match(f[gene == "MYC" & tier <= 2]$evidence, "^focal deletion .* covers MYC")
+})
+
 test_that("proximity rows are tier 3, labelled with the distance, and capped per gene", {
   near = 127742951 + 50000   # 50 kb past MYC
   sv = kf_sv(svclass = c("translocation", "DEL", "DUP", "INS", "INV"),

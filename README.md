@@ -150,7 +150,9 @@ events are listed per event class.
 A gene that merely lies inside a larger event (for example a 40 Mb inversion or deletion) is
 not an SV finding; it is left to the copy-number rows. That includes a gene VEP names on a
 breakend record (VEP lists every gene a same-chromosome breakend spans): wherever a list gives
-the gene coordinates, "breakpoint in" needs the breakpoint inside it.
+the gene coordinates, "breakpoint in" needs the breakpoint inside it, and "focal deletion /
+duplication covers" needs the event's span to overlap it (VEP also names genes up to 5 kb
+up- or downstream).
 
 **Whitelist-rescued SVs.** With `--severus_whitelist`, Severus keeps calls that failed its own
 filters when they lie in the whitelist regions, and tags them `INFO/WL_RESCUE` (most have one or

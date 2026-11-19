@@ -425,6 +425,21 @@ kf_bp_in_gene = function(chrom_a, pos_a, chrom_b, pos_b, gene, iv) {
   }, logical(1))
 }
 
+# Does the span [min(pos_a, pos_b), max(pos_a, pos_b)] of a same-contig SV overlap `gene`'s
+# interval in `iv`? Vectorised over rows like kf_bp_in_gene()
+kf_span_covers_gene = function(chrom_a, pos_a, chrom_b, pos_b, gene, iv) {
+  n = length(gene)
+  if (n == 0 || is.null(iv) || nrow(iv) == 0) return(rep(FALSE, n))
+  vapply(seq_len(n), function(i) {
+    want = gene[i]
+    ch = chrom_a[i]
+    if (is.na(ch) || is.na(chrom_b[i]) || ch != chrom_b[i] || is.na(pos_a[i]) || is.na(pos_b[i]))
+      return(FALSE)
+    g = iv[iv$gene == want]
+    any(g$chrom == ch & g$start <= max(pos_a[i], pos_b[i]) & g$end >= min(pos_a[i], pos_b[i]))
+  }, logical(1))
+}
+
 # SV classes that say only "a junction here", not what kind of event it is
 KF_SV_UNTYPED = c("intra-chr breakend", "single breakend", "BND", "sBND")
 
@@ -525,8 +540,11 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
     # (no local named like a column: data.table's i/j would read the column instead)
     is_bp = kf_bp_in_gene(st$chrom_a[r], st$pos_a[r], st$chrom_b[r], st$pos_b[r], hits$gene[sp], iv)
     sz = abs(st$pos_b[r] - st$pos_a[r])
+    # A span hit overlaps the gene by construction; a VEP symbol may name a gene up to 5 kb away
+    covers = hits$side[sp] == "span" |
+             kf_span_covers_gene(st$chrom_a[r], st$pos_a[r], st$chrom_b[r], st$pos_b[r], hits$gene[sp], iv)
     # The event's class: a Severus breakend matched to SAVANA's DEL is a deletion
-    is_focal = !is_bp & st$kf_class[r] %in% c("DEL", "DUP") &
+    is_focal = !is_bp & covers & st$kf_class[r] %in% c("DEL", "DUP") &
                !is.na(sz) & sz <= KF_FOCAL_SV_MAX
     set(hits, i = sp, j = "focal", value = is_focal)
     drop_i = sp[!is_bp & !is_focal]
