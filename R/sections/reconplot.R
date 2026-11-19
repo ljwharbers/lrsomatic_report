@@ -20,7 +20,8 @@
 #   always   TRUE for a list-independent reason: a ShatterSeek call (any combination, any
 #            confidence but "none") or an SV with a Padfoot cancer-gene rating: any HIGH_ class
 #            (HIGH_ONCO, HIGH_TSG; the set is open-ended, as _sv.qmd also treats it), on either
-#            breakend's contig. Plain HIGH (score 3) does not count: on CCS15-PB it
+#            breakend's contig, unless the SV was whitelist-rescued (sv_is_rescued()).
+#            Plain HIGH (score 3) does not count: on CCS15-PB it
 #            selected 12 chromosomes for USH2A, PRSS2, MACROD2 and other fragile-site genes;
 #            HIGH_ONCO picked out exactly ALK, CDKN2A, EWSR1–ATF1, NSD3, PRKN and CNTNAP2
 #   panels / genes  comma-joined lists and member genes of the tier 1-2 SV / CNA key findings
@@ -56,7 +57,9 @@ reconplot_chromosomes = function(findings = NULL, sv_table = NULL, shatterseek_h
     }
   }
   if (!is.null(sv_table) && nrow(sv_table) > 0 && "padfoot_impact" %in% names(sv_table)) {
-    hi = sv_table[!is.na(padfoot_impact) & grepl(RECONPLOT_PADFOOT_IMPACT, padfoot_impact)]
+    # A whitelist-rescued call is hidden by default everywhere else, so it selects nothing here
+    hi = sv_table[!sv_is_rescued(sv_table) & !is.na(padfoot_impact) &
+                  grepl(RECONPLOT_PADFOOT_IMPACT, padfoot_impact)]
     if (nrow(hi) > 0) {
       # Padfoot genes read "ATF1 (intron3), EWSR1 (intron7)": symbols only, one reason per
       # rating, so mates and repeated calls in one gene collapse

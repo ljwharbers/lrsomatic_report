@@ -144,3 +144,17 @@ test_that("the slim-mode cap keeps the best-ranked chromosomes", {
   expect_equal(nrow(reconplot_cap(sel, 10L)$dropped), 0)
   expect_equal(nrow(reconplot_cap(reconplot_chromosomes())$kept), 0)
 })
+
+test_that("a whitelist-rescued Padfoot HIGH_ONCO call neither selects nor outranks a finding", {
+  sv = data.table(chrom_a = c("chr2", "chr4"), chrom_b = c("chr2", "chr5"),
+                  padfoot_impact = c("HIGH_ONCO", "HIGH_ONCO"), padfoot_genes = c("ALK", "TERT"),
+                  wl_rescue = c("WL", NA))
+  f = data.table(gene = "MYC", genes = "MYC", type = "SV", tier = 1L, panels = "lymphoid",
+                 alteration = "MYC translocation", locus = "chr8–chr14")
+  r = reconplot_chromosomes(f, sv)
+  expect_false("chr2" %in% r$chrom)
+  expect_setequal(r$chrom, c("chr4", "chr5", "chr8", "chr14"))
+  # Under a cap of 3 the tier-1 finding keeps a slot; only Padfoot of the PASS call outranks it
+  kept = reconplot_cap(r, 3L, paste0("chr", 1:22))$kept$chrom
+  expect_equal(kept, c("chr4", "chr5", "chr8"))
+})

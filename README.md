@@ -252,7 +252,8 @@ one of them. Slim mode embeds:
   figures only for chromosomes with a high-impact call: a ShatterSeek chromothripsis call or
   an SV with a Padfoot cancer-gene rating, `HIGH_ONCO` or `HIGH_TSG` (always shown), or a
   tier 1–2 SV or copy-number key finding of a gene list (shown while that list is ticked).
-  Padfoot's plain `HIGH` does not count: it is common in large fragile-site genes. Tickboxes above the
+  Padfoot's plain `HIGH` does not count: it is common in large fragile-site genes, and neither
+  does a whitelist-rescued SV (hidden by default everywhere else). Tickboxes above the
   figures switch each kind of reason off, and a chromothripsis reason follows the ShatterSeek
   tier selector. At most 12 chromosomes are embedded per combination, best reason first
   (chromothripsis, Padfoot, tier-1 then tier-2 findings); the footnote names the rest;
