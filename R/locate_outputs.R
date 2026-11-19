@@ -97,7 +97,7 @@ locate_outputs = function(sample_dir, sample_id) {
   has_normal = !is.null(normal_mosdepth_summary) || !is.null(normal_cramino) ||
     !is.null(normal_flagstat) || !is.null(normal_samtools_stats)
 
-  # Run mode derived from the same evidence; its only consumer is the header badge
+  # Run mode derived from the same evidence; --run-mode overrides it (apply_run_mode())
   mode = if (has_normal) "matched" else "tumour-only"
 
   # --- Wakhan (optional) -----------------------------------------------------
@@ -114,6 +114,7 @@ locate_outputs = function(sample_dir, sample_id) {
 
   list(
     mode             = mode,
+    mode_source      = "inferred",
     vep_somatic      = vep_somatic,
     somatic_vaf_vcf  = somatic_vaf_vcf,
     ascat_segments   = ascat_segments_raw,
@@ -135,4 +136,20 @@ locate_outputs = function(sample_dir, sample_id) {
     wakhan_solutions = wakhan_solutions,
     wakhan_heatmap   = wakhan_heatmap
   )
+}
+
+# --run-mode values (the pipeline's contract) -> the report's internal mode names
+RUN_MODES = c(paired = "matched", tumour_only = "tumour-only")
+
+# Override the inferred run mode with --run-mode; NULL/"" keeps the inference. has_normal is
+# left alone: it says whether normal-side QC files exist, which is what the QC section needs
+apply_run_mode = function(outputs, run_mode = NULL) {
+  if (is.null(run_mode) || length(run_mode) == 0 || is.na(run_mode) || !nzchar(trimws(run_mode)))
+    return(outputs)
+  rm = tolower(trimws(run_mode))
+  if (!rm %in% names(RUN_MODES))
+    stop("--run-mode must be 'paired' or 'tumour_only' (got '", run_mode, "')")
+  outputs$mode = unname(RUN_MODES[[rm]])
+  outputs$mode_source = "cli"
+  outputs
 }

@@ -26,7 +26,7 @@ test_that("--help lists the flags the pipeline passes", {
                                  stdout = TRUE, stderr = TRUE))
   help = paste(out, collapse = "\n")
   for (flag in c("--sample-dir", "--sample-id", "--sex", "--reference",
-                 "--gene-panel", "--gene-lists-dir", "--output", "--embed")) {
+                 "--gene-panel", "--gene-lists-dir", "--output", "--embed", "--run-mode")) {
     expect_true(grepl(flag, help, fixed = TRUE), info = flag)
   }
   # The help names both accepted --embed values
@@ -41,6 +41,17 @@ test_that("--embed rejects anything but slim or full, before any rendering", {
     stdout = TRUE, stderr = TRUE))
   expect_equal(attr(out, "status"), 1L)
   expect_true(any(grepl("--embed must be 'slim' or 'full'", out, fixed = TRUE)))
+  expect_false(dir.exists(file.path(getwd(), "._render")))
+})
+
+test_that("--run-mode rejects anything but paired or tumour_only, before any rendering", {
+  d = tempfile("sample")
+  dir.create(d)
+  out = suppressWarnings(system2("Rscript",
+    c(render_report, "--sample-dir", d, "--sex", "male", "--run-mode", "matched"),
+    stdout = TRUE, stderr = TRUE))
+  expect_equal(attr(out, "status"), 1L)
+  expect_true(any(grepl("--run-mode must be 'paired' or 'tumour_only'", out, fixed = TRUE)))
   expect_false(dir.exists(file.path(getwd(), "._render")))
 })
 

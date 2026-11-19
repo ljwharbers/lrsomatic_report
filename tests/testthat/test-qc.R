@@ -192,3 +192,33 @@ test_that("a sample_dir whose own path contains /normal/ is not read as normal-s
   expect_false(is.null(o$cramino))
   expect_false(o$has_normal)
 })
+
+# --- --run-mode ------------------------------------------------------------------
+
+test_that("--run-mode paired overrides a pair whose normal-side QC was skipped (E-F2)", {
+  # E skipped mosdepth, cramino and samtools stats: no normal-side file, so inferred tumour-only
+  root = make_tree(c("variants/phased/somatic_smallvariants.vcf.gz"))
+  on.exit(unlink(root, recursive = TRUE))
+  o = locate_outputs(root, "S")
+  expect_equal(o$mode, "tumour-only")
+  expect_equal(o$mode_source, "inferred")
+  p = apply_run_mode(o, "paired")
+  expect_equal(p$mode, "matched")
+  expect_equal(p$mode_source, "cli")
+  expect_false(p$has_normal)   # the QC comparison still needs the files themselves
+  # Every consumer reads outputs$mode: the overview caveat follows the flag
+  expect_false(build_overview(NULL, list(), list(), NULL, NULL, list(), list(outputs = p))$tumour_only)
+  expect_true(build_overview(NULL, list(), list(), NULL, NULL, list(), list(outputs = o))$tumour_only)
+})
+
+test_that("--run-mode tumour_only overrides, and an absent flag keeps the inference", {
+  root = make_tree(c("qc/normal/S_normal.flagstat", "qc/tumor/S_tumor.flagstat"))
+  on.exit(unlink(root, recursive = TRUE))
+  o = locate_outputs(root, "S")
+  expect_equal(o$mode, "matched")
+  expect_equal(apply_run_mode(o, "tumour_only")$mode, "tumour-only")
+  expect_equal(apply_run_mode(o, " Tumour_Only ")$mode, "tumour-only")
+  expect_identical(apply_run_mode(o, NULL), o)
+  expect_identical(apply_run_mode(o, ""), o)
+  expect_error(apply_run_mode(o, "matched"), "paired' or 'tumour_only")
+})

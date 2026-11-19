@@ -61,8 +61,8 @@ Rscript bin/render_report.R \
 ```
 
 This writes `SAMPLE_ID_report.html` and `SAMPLE_ID_small_variants.tsv.gz` to the current
-directory. Matched and tumour-only runs take the same command: the run mode and every input
-file are discovered from the sample directory.
+directory. Matched and tumour-only runs take the same command: every input file is discovered
+from the sample directory, and so is the run mode unless `--run-mode` states it.
 
 ## All options
 
@@ -79,6 +79,9 @@ file are discovered from the sample directory.
                   assets/gene_lists (default: the bundled set). See Gene panels.
 --embed           slim | full  (default: slim). Which small-variant rows and which
                   secondary figures are embedded in the HTML; see Report size.
+--run-mode        paired | tumour_only  (default: inferred — matched when any normal-side QC
+                  file is found). Sets the header badge and the tumour-only caveat; the
+                  pipeline passes it, since a pair whose QC was skipped has no normal-side file
 --output          Output HTML path  (default: <sample-id>_report.html in current dir).
                   The small-variant TSV is written to the same directory.
 --title           Report title
