@@ -45,6 +45,7 @@
   border-radius: 0 var(--card-radius) var(--card-radius) 0;
   max-width: 78ch;
 }
+.kf-caveat--strong { border-left-color: var(--color-danger); font-weight: 500; }
 
 .kf-legend {
   list-style: none;
@@ -261,6 +262,7 @@
   text-transform: uppercase;
   color: var(--color-text-muted);
 }
+.bm-tier-select { margin-left: 0.5rem; font-size: 0.66rem; letter-spacing: normal; text-transform: none; font-weight: 400; }
 
 .bm-value {
   font-family: var(--font-mono);

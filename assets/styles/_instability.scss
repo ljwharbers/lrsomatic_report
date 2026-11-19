@@ -101,3 +101,15 @@
   .instability-plots { grid-template-columns: 1fr 1fr; }
   .instability-table { font-size: 0.75rem; }
 }
+
+// ShatterSeek minimum-tier selector (section and overview card share .ss-tier-select)
+.ss-tier-control { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.84rem; margin: 0 0 0.7rem; }
+.ss-tier-select {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}

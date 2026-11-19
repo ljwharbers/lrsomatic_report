@@ -178,6 +178,8 @@ OVERVIEW = build_overview(variant_table, SECTION_DATA, all_panels, ascat_pp, tmb
 # embeds as base64; the labels are drawn over it in the browser (assets/js/circos_drivers.js)
 circos_labels = circos_driver_rows(OVERVIEW$findings)
 circos_loci = circos_label_loci(circos_labels$label, all_panels, SECTION_DATA, variant_table)
+# Copy-number ring: the CN section's source (Wakhan, else ASCAT), as in the overview
+circos_cn = circos_cn_segments(SECTION_DATA$cna, ascat_segments)
 circos_tmp = tempfile(fileext = ".svg")
 circos_res = NULL
 tryCatch({
@@ -185,7 +187,7 @@ tryCatch({
     snv_data    = snv_circos,
     sv_nontrans = SECTION_DATA$sv$circos$nontrans,
     sv_trans    = SECTION_DATA$sv$circos$translocations,
-    cnv_data    = ascat_segments,
+    cnv_data    = if (!is.null(circos_cn)) circos_cn$segments,
     cytobands   = cytobands,
     chrom_lengths = chrom_lens,
     chromosomes = chromosomes,

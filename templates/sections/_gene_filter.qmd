@@ -19,7 +19,7 @@ chip = function(value, label) {
 
 chips = ""
 for (nm in names(all_p)) {
-  label = paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
+  label = panel_label(nm, all_p)
   chips = paste0(chips, chip(nm, label))
 }
 chips = paste0(chips, chip("__custom__", "Custom…"))

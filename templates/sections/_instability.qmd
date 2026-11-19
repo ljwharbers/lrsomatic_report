@@ -21,64 +21,82 @@ inst_span = function(chrom, start, end) {
 inst_verdict = function(text, kind) tags$p(class = paste0("instability-verdict instability-verdict--", kind), text)
 inst_html = function(tag) cat("\n```{=html}\n", as.character(tag), "\n```\n\n", sep = "")
 # Path relative to the sample directory, for provenance lines
-inst_rel = function(p) {
-  root = sub("/+$", "", as.character(sample_dir))
-  ifelse(startsWith(p, paste0(root, "/")), substring(p, nchar(root) + 2L), p)
-}
+inst_rel = function(p) sample_rel_path(p, sample_dir)
 ```
 
 ### Chromothripsis
 
 ```{r shatterseek-verdict}
-if (!ss_ok) {
-  section_notice("ShatterSeek was not run for this sample (no shatterseek/<combination>/*.shatterseek.tsv found).")
-} else {
-  inst_verdict(shatterseek_verdict(ss), if (nrow(ss$high) > 0) "positive" else "negative")
-}
+if (!ss_ok) section_notice("ShatterSeek was not run for this sample (no shatterseek/<combination>/*.shatterseek.tsv found).")
 ```
 
-```{r shatterseek-calls, results='asis', eval=ss_ok && nrow(ss$high) > 0}
-# Every call of every caller combination in one table, a row per (chromosome, combination),
-# grouped by chromosome. No call anywhere: the verdict above is the whole result (no table,
-# no per-combination repetition of the same negative)
+```{r shatterseek-calls, results='asis', eval=ss_ok}
+# One view per minimum-tier setting (SHATTERSEEK_MIN_TIERS): verdict, and every call of every
+# caller combination in one table, a row per (chromosome, combination), grouped by chromosome.
+# No call: the verdict is the whole result. The selector below shows one view.
 multi = length(ss$combos) > 1
-chrom_rank = match(ss$high$chrom, chromosomes_for_sex("male"))
-chrom_rank[is.na(chrom_rank)] = 999L
-h = ss$high[order(chrom_rank, match(ss$high$combo, names(ss$combos)))]
-silent = setdiff(names(ss$combos), unique(h$combo))
-
-if (shatterseek_disagree(ss)) {
-  inst_html(section_notice(paste(
-    "The caller combinations disagree. A call made with only one copy-number or SV source is",
-    "less robust than one every combination supports; compare the rows below."), warn = TRUE))
+ss_view = function(t) {
+  x = shatterseek_at_tier(ss, t)
+  chrom_rank = match(x$high$chrom, chromosomes_for_sex("male"))
+  chrom_rank[is.na(chrom_rank)] = 999L
+  h = x$high[order(chrom_rank, match(x$high$combo, names(x$combos)))]
+  silent = setdiff(names(x$combos), unique(h$combo))
+  tags$div(class = "ss-view", `data-ss-min` = t,
+    hidden = if (t != SHATTERSEEK_MIN_TIER_DEFAULT) NA,
+    inst_verdict(shatterseek_verdict(x), if (nrow(h) > 0) "positive" else "negative"),
+    if (nrow(h) > 0 && shatterseek_disagree(x))
+      section_notice(paste(
+        "The caller combinations disagree. A call made with only one copy-number or SV source is",
+        "less robust than one every combination supports; compare the rows below."), warn = TRUE),
+    if (nrow(h) > 0) tags$div(class = "instability-scroll",
+      tags$table(class = "instability-table",
+        tags$thead(tags$tr(lapply(c("Chromosome", if (multi) "Combination", "Confidence", "Tiers met",
+                                    "Cluster span", "Intra-chr SVs", "Translocations",
+                                    "Oscillating CN segments"), tags$th))),
+        tags$tbody(lapply(seq_len(nrow(h)), function(i) tags$tr(
+          tags$td(class = "instability-table__key", h$chrom[i]),
+          if (multi) tags$td(x$labels[[h$combo[i]]]),
+          tags$td(tags$span(class = paste0("instability-pill instability-pill--",
+                                           if (h$confidence[i] == "high") "high" else "other"),
+                            h$confidence[i])),
+          tags$td(if (nzchar(h$criteria[i])) h$criteria[i] else "–"),
+          tags$td(class = "instability-table__num", inst_span(h$chrom[i], h$start[i], h$end[i])),
+          tags$td(class = "instability-table__num", inst_int(h$n_sv[i])),
+          tags$td(class = "instability-table__num", inst_int(h$n_tra[i])),
+          tags$td(class = "instability-table__num", inst_int(h$n_oscillating[i]))
+        )))
+      )
+    ),
+    if (nrow(h) > 0 && multi && length(silent))
+      tags$p(class = "table-footnote",
+             paste0("No chromothripsis called by ",
+                    paste(vapply(silent, function(cb)
+                            paste0(x$labels[[cb]], if (nrow(x$combos[[cb]]) == 0) " (empty output: nothing tested)" else ""),
+                            character(1)), collapse = ", "),
+                    if (t < SHATTERSEEK_MIN_TIER_DEFAULT) " at this tier" else "", "."))
+  )
 }
 inst_html(htmltools::tagList(
-  tags$div(class = "instability-scroll",
-    tags$table(class = "instability-table",
-      tags$thead(tags$tr(lapply(c("Chromosome", if (multi) "Combination", "Confidence", "Tiers met",
-                                  "Cluster span", "Intra-chr SVs", "Translocations",
-                                  "Oscillating CN segments"), tags$th))),
-      tags$tbody(lapply(seq_len(nrow(h)), function(i) tags$tr(
-        tags$td(class = "instability-table__key", h$chrom[i]),
-        if (multi) tags$td(ss$labels[[h$combo[i]]]),
-        tags$td(tags$span(class = paste0("instability-pill instability-pill--",
-                                         if (h$confidence[i] == "high") "high" else "other"),
-                          h$confidence[i])),
-        tags$td(if (nzchar(h$criteria[i])) h$criteria[i] else "–"),
-        tags$td(class = "instability-table__num", inst_span(h$chrom[i], h$start[i], h$end[i])),
-        tags$td(class = "instability-table__num", inst_int(h$n_sv[i])),
-        tags$td(class = "instability-table__num", inst_int(h$n_tra[i])),
-        tags$td(class = "instability-table__num", inst_int(h$n_oscillating[i]))
-      )))
-    )
-  ),
-  if (multi && length(silent))
-    tags$p(class = "table-footnote",
-           paste0("No chromothripsis called by ",
-                  paste(vapply(silent, function(cb)
-                          paste0(ss$labels[[cb]], if (nrow(ss$combos[[cb]]) == 0) " (empty output: nothing tested)" else ""),
-                          character(1)), collapse = ", "),
-                  "."))
+  if (nrow(ss$high) > 0)
+    tags$label(class = "ss-tier-control", "Show calls meeting: ", shatterseek_tier_select()),
+  lapply(as.integer(names(SHATTERSEEK_MIN_TIERS)), ss_view),
+  # Keeps every .ss-tier-select (here and on the overview card) and every [data-ss-min] view in
+  # step; window.ssMinTier and the "ss-tier" event are read by the ReConPlot figure selector
+  tags$script(HTML(sprintf('
+(function () {
+  window.ssMinTier = window.ssMinTier || "%d";', SHATTERSEEK_MIN_TIER_DEFAULT), '
+  function apply(t) {
+    window.ssMinTier = String(t);
+    document.querySelectorAll(".ss-tier-select").forEach(function (s) { s.value = window.ssMinTier; });
+    document.querySelectorAll("[data-ss-min]").forEach(function (el) {
+      el.hidden = el.getAttribute("data-ss-min") !== window.ssMinTier;
+    });
+    document.dispatchEvent(new CustomEvent("ss-tier", { detail: window.ssMinTier }));
+  }
+  document.querySelectorAll(".ss-tier-select").forEach(function (s) {
+    s.addEventListener("change", function () { apply(s.value); });
+  });
+})();'))
 ))
 ```
 
@@ -128,10 +146,11 @@ cat("\n:::\n\n")
 ```{r shatterseek-details, eval=ss_ok}
 table_details(
   summary = "Tiers and caveats",
-  tags$p("ShatterSeek (Cortes-Ciriano et al. 2020; PCAWG-corrected CHM13 fork) tests, per chromosome,",
+  tags$p("ShatterSeek (Cortes-Ciriano et al. 2020, in the version the pipeline runs) tests, per chromosome,",
          "the largest cluster of interleaved intra-chromosomal SVs against the hallmarks of chromothripsis.",
          "A chromosome is called ", tags$strong("high"), " confidence when it meets any PCAWG high-confidence tier",
-         "(significance at BH q ≤ 0.2 across the sample's chromosomes; NA counts as a fail):"),
+         "(significance at BH q ≤ 0.2 across the sample's chromosomes; NA counts as a fail); the tier selector",
+         "above (also on the overview card) limits the calls shown to HC1, or to HC1–HC2:"),
   tags$ul(
     tags$li(tags$strong("HC1"), ": ≥ 6 interleaved intra-chromosomal SVs, ≥ 7 adjacent segments oscillating between",
             "two copy-number states, fragment joins not significant (random joins), and breakpoints enriched on the",

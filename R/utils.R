@@ -375,9 +375,18 @@ load_all_gene_panels = function(gene_lists_dir, reference = NULL) {
     p = tryCatch(load_gene_panel(tsv_files[pick], reference),
       error = function(e) {
         message("Skipping gene panel '", nm, "': ", conditionMessage(e)); NULL })
-    if (!is.null(p)) panels[[nm]] = p
+    if (!is.null(p)) { p$builtin = TRUE; panels[[nm]] = p }
   }
   panels
+}
+
+# Display label of a panel key: a builtin's name capitalised ("lymphoid" -> "Lymphoid"), a
+# user list's file stem as given. Vectorised over `keys`; `panels` is the named panel list
+panel_label = function(keys, panels = list()) {
+  keys = as.character(keys)
+  builtin = vapply(keys, function(k) nzchar(k) && isTRUE(as.logical(unlist(panels[[k]]$builtin))),
+                   logical(1), USE.NAMES = FALSE)
+  ifelse(builtin & nzchar(keys), paste0(toupper(substr(keys, 1, 1)), substr(keys, 2, nchar(keys))), keys)
 }
 
 # Non-colliding key for a user panel: the first collision gets "-custom", further ones are numbered
@@ -506,6 +515,19 @@ js_facet_defs = function(dt, cols, seps = character(0), levels = list()) {
   }
 
   paste0("{", paste(entries, collapse = ","), "}")
+}
+
+# Path relative to --sample-dir, for provenance lines. Lexical on purpose: normalizePath()
+# would resolve the pipeline's staged symlinks out of the sample directory. Vectorised;
+# a path outside it, or without a root, is returned as given
+sample_rel_path = function(p, root) {
+  if (is.null(p)) return(p)
+  p = as.character(p)
+  if (is.null(root) || length(root) == 0 || is.na(root[1]) || !nzchar(root[1])) return(p)
+  root = sub("/+$", "", as.character(root[1]))
+  inside = !is.na(p) & startsWith(p, paste0(root, "/"))
+  p[inside] = sub("^/+", "", substring(p[inside], nchar(root) + 2L))
+  p
 }
 
 # Format a number for human-readable display

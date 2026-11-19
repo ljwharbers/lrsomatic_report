@@ -395,10 +395,14 @@ parse_caller_vcf = function(vcf_file, caller_name = "unknown", sample_id = NULL)
   con = gzfile(vcf_file, "rb")
   skip_n = 0L
   chrom_line = NULL
+  has_caller_tag = FALSE; has_dv = FALSE; sources = character(0)
   repeat {
     line = readLines(con, n = 1, warn = FALSE)
     if (length(line) == 0) break
     if (startsWith(line, "#CHROM")) { chrom_line = line; break }
+    if (startsWith(line, "##INFO=<ID=CALLER,")) has_caller_tag = TRUE
+    if (startsWith(line, "##DeepVariant_version")) has_dv = TRUE
+    if (startsWith(line, "##source=")) sources = c(sources, line)
     skip_n = skip_n + 1L
   }
   close(con)
@@ -455,9 +459,20 @@ parse_caller_vcf = function(vcf_file, caller_name = "unknown", sample_id = NULL)
   ps_list[!is.na(ps_list) & ps_list == "."] = NA_character_
   gt_list[!is.na(gt_list) & gt_list %in% c(".", "./.")] = NA_character_
 
+  # Which caller wrote each record: INFO/CALLER when the header declares it, else a
+  # DeepSomatic-only VCF (DeepVariant header, no other caller's ##source)
+  vcf_caller = if (has_caller_tag) {
+    m = regmatches(dt$INFO, regexec("(^|;)CALLER=([^;]+)", dt$INFO))
+    tolower(vapply(m, function(x) if (length(x) == 3) x[3] else NA_character_, character(1)))
+  } else if (has_dv && !any(grepl("clair", sources, ignore.case = TRUE))) {
+    rep("deepsomatic", nrow(dt))
+  } else rep(NA_character_, nrow(dt))
+  # DeepSomatic writes GT 1/1 on every somatic call by convention: not a genotype, so not shown
+  gt_list[vcf_caller %in% "deepsomatic"] = NA_character_
+
   data.table(chrom = dt$CHROM, pos = dt$POS, ref = dt$REF, alt = dt$ALT,
              vaf = vaf_list, dp = dp_list, gt = gt_list, ps = ps_list,
-             caller = caller_name)
+             caller = caller_name, vcf_caller = vcf_caller)
 }
 
 # Header-only provenance for the VCF(s) supplying VAF/DP/GT/PS (after a consensus merge the FORMAT fields need not match the `callers` column); NULL when there is nothing to describe
@@ -467,12 +482,7 @@ vaf_provenance = function(vcf_files, sample_dir = NULL, sample_id = NULL) {
   if (length(vcf_files) == 0) return(NULL)
 
   # Paths read better relative to the sample directory the caller passed in.
-  rel = function(p) {
-    if (is.null(sample_dir) || !nzchar(sample_dir)) return(p)
-    root = sub("/+$", "", normalizePath(sample_dir, mustWork = FALSE))
-    full = normalizePath(p, mustWork = FALSE)
-    if (startsWith(full, paste0(root, "/"))) substring(full, nchar(root) + 2L) else p
-  }
+  rel = function(p) sample_rel_path(p, sample_dir)
 
   # "##source=..." is optional colour; many VCFs carry none
   read_sources = function(p) {
@@ -516,6 +526,45 @@ vaf_provenance = function(vcf_files, sample_dir = NULL, sample_id = NULL) {
     sources = unique(unlist(lapply(vcf_files, read_sources))),
     sample  = chosen
   )
+}
+
+# ClairS-TO Verdict status file (<id>.verdict_status.tsv: status, purity, ploidy, purity_source,
+# message; one data row). NULL when absent or unreadable; columns are read by name
+parse_verdict_status = function(path) {
+  if (is.null(path) || length(path) == 0 || !file.exists(path) || isTRUE(file.size(path) == 0)) return(NULL)
+  dt = tryCatch(fread(path, sep = "\t", header = TRUE, colClasses = "character", na.strings = c("NA", ""),
+                      quote = ""),
+                error = function(e) { message("Verdict status: cannot read ", path, ": ", conditionMessage(e)); NULL })
+  if (is.null(dt) || nrow(dt) == 0) return(NULL)
+  setnames(dt, tolower(trimws(names(dt))))
+  get1 = function(k) if (k %in% names(dt)) as.character(dt[[k]][1]) else NA_character_
+  status = tolower(trimws(get1("status")))
+  if (is.na(status) || !nzchar(status)) return(NULL)
+  list(status = status,
+       purity = suppressWarnings(as.numeric(get1("purity"))),
+       ploidy = suppressWarnings(as.numeric(get1("ploidy"))),
+       purity_source = tolower(trimws(get1("purity_source"))),
+       message = trimws(get1("message")))
+}
+
+VERDICT_SOURCE_LABELS = c(ascat = "ASCAT", wakhan = "Wakhan", savana = "SAVANA",
+                          clairsto_internal = "ClairS-TO's own estimate", none = "no estimate")
+
+# Reader-facing sentence for a Verdict status; NULL when tagging was applied (or the status is unknown)
+verdict_note = function(v) {
+  if (is.null(v) || is.null(v$status)) return(NULL)
+  if (identical(v$status, "skipped")) {
+    msg = if (!is.na(v$message) && nzchar(v$message))
+            sub("[.!]+$", "", sub("^\\[[A-Z]+\\]\\s*", "", v$message)) else "no reason recorded"
+    src = if (!is.na(v$purity_source) && v$purity_source %in% names(VERDICT_SOURCE_LABELS))
+            VERDICT_SOURCE_LABELS[[v$purity_source]] else if (!is.na(v$purity_source)) v$purity_source else "unknown source"
+    pur = if (!is.na(v$purity)) formatC(v$purity, format = "f", digits = 2) else "unknown"
+    return(paste0("ClairS-TO germline tagging (Verdict) was skipped: ", msg, "; purity ", pur, " from ", src,
+                  ". Tumour-only calls likely contain many germline variants."))
+  }
+  if (identical(v$status, "not_run"))
+    return("ClairS-TO germline tagging (Verdict) did not run for this sample, so tumour-only calls were not screened for germline variants.")
+  NULL
 }
 
 # Canonical variant key joining VEP rows to VCF records: VEP reports indels at anchor + 1 with raw or dash-trimmed alleles; all forms reconcile as trimmed alleles at anchor + 1, SNVs/MNVs verbatim. `space` is "vcf" or "vep"
@@ -581,8 +630,9 @@ build_variant_table = function(vep_data, vaf_data, gene_panel = NULL) {
   vep_data[, join_key := variant_key(chrom, pos, ref, alt, space = vep_space)]
 
   if (!is.null(vaf_data) && nrow(vaf_data) > 0) {
+    if (!"vcf_caller" %in% names(vaf_data)) vaf_data = copy(vaf_data)[, vcf_caller := NA_character_]
     vdt = vaf_data[, .(join_key = variant_key(chrom, pos, ref, alt, space = "vcf"),
-                       vaf, dp, gt, ps)]
+                       vaf, dp, gt, ps, vcf_caller)]
     vdt = unique(vdt, by = "join_key")
     vep_data = merge(vep_data, vdt, by = "join_key", all.x = TRUE)
   } else {
@@ -609,6 +659,9 @@ build_variant_table = function(vep_data, vaf_data, gene_panel = NULL) {
   display_cols = display_cols[display_cols %in% names(vep_data)]
   out = vep_data[, ..display_cols]
   setattr(out, "vep_fields", vep_fields)
+  # Rows whose GT was blanked as DeepSomatic's (parse_caller_vcf()), for the provenance footnote
+  setattr(out, "n_gt_deepsomatic",
+          if ("vcf_caller" %in% names(vep_data)) sum(vep_data$vcf_caller %in% "deepsomatic") else 0L)
   out
 }
 

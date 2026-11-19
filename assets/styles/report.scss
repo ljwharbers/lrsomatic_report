@@ -1077,6 +1077,18 @@ svg.circos-drivers {
   .rp-none { grid-column: 1 / -1; }
 }
 
+// Reason tickboxes above the per-chromosome figures
+.rp-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  font-size: 0.84rem;
+  margin: 0 0 0.7rem;
+
+  .rp-reasons__label { font-weight: 600; }
+  .rp-reasons__item { cursor: pointer; margin: 0; }
+}
+
 @include dark-mode {
   .circos-container, .bnd-circos { border-color: #4a4540; }
 }

@@ -363,3 +363,83 @@ test_that("vaf_provenance does not fail on a path that does not exist", {
   expect_equal(prov$paths, "/nonexistent/somatic.vcf.gz")
   expect_length(prov$sources, 0L)
 })
+
+# --- ClairS-TO Verdict status ---------------------------------------------------
+
+write_verdict = function(row) {
+  f = tempfile(fileext = ".verdict_status.tsv")
+  writeLines(c("status\tpurity\tploidy\tpurity_source\tmessage", row), f)
+  f
+}
+
+test_that("a skipped Verdict reads as a specific germline warning", {
+  f = write_verdict(paste("skipped\t0.66\t1.99\tascat",
+    "[WARNING] Tumor purity estimation 0.66 is higher than 0.6, not applying verdict tagging!", sep = "\t"))
+  v = parse_verdict_status(f)
+  expect_equal(v$status, "skipped")
+  expect_equal(v$purity, 0.66)
+  expect_equal(v$purity_source, "ascat")
+  expect_equal(verdict_note(v), paste0(
+    "ClairS-TO germline tagging (Verdict) was skipped: Tumor purity estimation 0.66 is higher than 0.6, ",
+    "not applying verdict tagging; purity 0.66 from ASCAT. Tumour-only calls likely contain many germline variants."))
+})
+
+test_that("Verdict not_run gives a short note, applied and absent give none", {
+  expect_match(verdict_note(parse_verdict_status(write_verdict("not_run\tNA\tNA\tnone\t"))),
+               "did not run")
+  expect_null(verdict_note(parse_verdict_status(write_verdict("applied\t0.45\t2.01\tascat\t"))))
+  expect_null(parse_verdict_status(NULL))
+  expect_null(parse_verdict_status("/no/such/file.tsv"))
+  expect_null(verdict_note(NULL))
+  # NA purity and an empty message still make a readable sentence
+  expect_match(verdict_note(parse_verdict_status(write_verdict("skipped\tNA\tNA\tnone\t"))),
+               "skipped: no reason recorded; purity unknown from no estimate")
+})
+
+test_that("build_overview carries the Verdict status from outputs$verdict_status", {
+  f = write_verdict("skipped\t0.82\t1.99\tascat\tpurity too high")
+  ov = build_overview(NULL, list(), list(), NULL, NULL, list(),
+                      list(outputs = list(mode = "tumour-only", verdict_status = f)))
+  expect_true(ov$tumour_only)
+  expect_equal(ov$verdict$status, "skipped")
+  expect_null(build_overview(NULL, list(), list(), NULL, NULL, list(),
+                             list(outputs = list(mode = "tumour-only")))$verdict)
+})
+
+# --- DeepSomatic genotypes (REP-16) ---------------------------------------------
+
+test_that("DeepSomatic's conventional GT 1/1 is blanked, per CALLER tag or for a DeepSomatic-only VCF", {
+  rec = function(pos, info, s) list(fixed = c("chr1", pos, ".", "A", "G", ".", "PASS", info), samples = s)
+  # A merged VCF: INFO/CALLER decides per record
+  merged = parse_caller_vcf(write_vcf("GT:DP:AF:PS", "TUM",
+    list(rec("100", "CALLER=deepsomatic;SOMATIC", "1/1:12:0.33:."),
+         rec("200", "CALLER=clairs-to", "0/1:30:0.40:200")),
+    extra_header = c("##source=ClairS-TO", "##DeepVariant_version=1.10.0",
+                     '##INFO=<ID=CALLER,Number=1,Type=String,Description="Variant caller">')))
+  expect_equal(merged$vcf_caller, c("deepsomatic", "clairs-to"))
+  expect_equal(merged$gt, c(NA, "0/1"))
+  expect_equal(merged$vaf, c(0.33, 0.40))    # only the genotype goes
+  # DeepSomatic alone (D3): no CALLER tag, a DeepVariant header and no other caller's ##source
+  ds = parse_caller_vcf(write_vcf("GT:DP:VAF:PS", "TUM", list(rec("100", "SOMATIC", "1/1:12:0.33:.")),
+                                  extra_header = "##DeepVariant_version=1.10.0"))
+  expect_equal(ds$vcf_caller, "deepsomatic")
+  expect_true(is.na(ds$gt))
+  # ClairS: untouched
+  cl = parse_caller_vcf(write_vcf("GT:DP:AF", "TUM", list(rec("100", ".", "1/1:12:0.9")),
+                                  extra_header = "##source=ClairS"))
+  expect_equal(cl$gt, "1/1")
+  expect_true(is.na(cl$vcf_caller))
+})
+
+test_that("build_variant_table counts the rows whose GT was blanked as DeepSomatic's", {
+  vep = data.table(chrom = "chr1", pos = c(100L, 200L), ref = "A", alt = "G", symbol = c("G1", "G2"),
+                   gene_id = NA_character_, consequence = "missense_variant", impact = "MODERATE",
+                   hgvsp = NA_character_, existing = NA_character_, coord_space = "vcf")
+  vaf = data.table(chrom = "chr1", pos = c(100L, 200L), ref = "A", alt = "G", vaf = c(0.3, 0.4),
+                   dp = 10L, gt = c(NA, "0/1"), ps = NA_character_, caller = "somatic",
+                   vcf_caller = c("deepsomatic", "clairs-to"))
+  vt = build_variant_table(vep, vaf)
+  expect_equal(attr(vt, "n_gt_deepsomatic"), 1L)
+  expect_false("vcf_caller" %in% names(vt))
+  expect_equal(attr(build_variant_table(vep, vaf[, !"vcf_caller"]), "n_gt_deepsomatic"), 0L)
+})

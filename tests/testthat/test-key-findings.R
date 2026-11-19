@@ -434,12 +434,18 @@ test_that("chromothripsis names chromosome + combination and shows disagreement"
                               confidence = "high", criteria = "HC3"))
   b = build_biomarkers(list(shatterseek = ss), NULL, NULL, list())
   expect_equal(b$chromothripsis$value, "chr16")
-  expect_match(b$chromothripsis$detail, "chr16 high (SAVANA)", fixed = TRUE)
+  expect_match(b$chromothripsis$detail, "chr16 HC3 (SAVANA)", fixed = TRUE)
   expect_match(b$chromothripsis$detail, "disagree")
   expect_equal(b$chromothripsis$status, "warn")
+  # One card per minimum-tier setting: an HC3-only call is gone at HC1 and HC1-HC2
+  expect_setequal(names(b$chromothripsis$views), c("1", "2", "3"))
+  expect_equal(b$chromothripsis$views[["3"]]$value, "chr16")
+  expect_equal(b$chromothripsis$views[["1"]]$value, "none at this tier")
+  expect_match(b$chromothripsis$views[["2"]]$detail, "1 call below this tier")
   ss$high = ss$high[0]
-  expect_equal(build_biomarkers(list(shatterseek = ss), NULL, NULL, list())$chromothripsis$value,
-               "none called")
+  b0 = build_biomarkers(list(shatterseek = ss), NULL, NULL, list())
+  expect_equal(b0$chromothripsis$value, "none called")
+  expect_null(b0$chromothripsis$views)
 })
 
 test_that("ecDNA wording follows the classifier, and unclassified is never 'ecDNA'", {
@@ -483,4 +489,17 @@ test_that("tumour-only mode is reported for the caveat", {
   o = build_overview(NULL, list(), list(), NULL, NULL, list(),
                      list(outputs = list(mode = "tumour-only")))
   expect_true(o$tumour_only)
+})
+
+test_that("a deep deletion is a copy-number finding of the homozygous-deletion tier (REP-7)", {
+  cna = list(genes = data.table(panel = "p", gene = c("CDKN2A", "IGH"), chrom = c("chr9", "chr14"),
+                                start = c(21967752, 105586437), end = c(21995301, 106879844),
+                                min_cn = c(1, 1), max_cn = c(1, 1), min_minor = 0, n_segments = 1L,
+                                call = "deep deletion", partial = FALSE, loh = FALSE,
+                                source = "wakhan", role = NA_character_, expected = 4))
+  r = kf_cna_rows(cna, data.table(gene = character(), role = character()), "hg38")
+  setkey(r, gene)
+  expect_equal(r["CDKN2A"]$alteration, "deep deletion (CN 1)")
+  expect_equal(r["CDKN2A"]$tier, 1L)
+  expect_equal(r["IGH"]$tier, 3L)
 })

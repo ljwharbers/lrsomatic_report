@@ -50,7 +50,7 @@ register_section(list(
   }
 ))
 
-# Genome-wide totals for the header card: whatshap's own ALL row when it wrote one, otherwise
+# Genome-wide totals for the header card (phased, variants, heterozygous, fraction, denominator): whatshap's own ALL row when it wrote one, otherwise
 # the per-chromosome rows summed. NULL when there is nothing to total, which is what lets the
 # card be omitted rather than render a permanent "N/A". Every field is read through a names()
 # guard: `w$phased_fraction` is NULL when the column is absent, and `is.na(NULL)` is logical(0),
@@ -68,6 +68,7 @@ whatshap_totals = function(whatshap) {
   if (!is.null(all_row)) {
     phased   = num1(all_row, "phased")
     variants = num1(all_row, "variants")
+    het      = num1(all_row, "heterozygous_variants")
     fraction = num1(all_row, "phased_fraction")
   } else {
     # No ALL row: sum the per-chromosome rows rather than go quiet under a healthy table
@@ -84,13 +85,20 @@ whatshap_totals = function(whatshap) {
     }
     phased   = sum1("phased")
     variants = sum1("variants")
+    het      = sum1("heterozygous_variants")
     fraction = NA_real_
   }
 
-  # phased_fraction is a 0-1 fraction; recompute when the column is absent or the rows were summed
-  if (is.na(fraction) && !is.na(phased) && !is.na(variants) && variants > 0)
-    fraction = phased / variants
+  # phased_fraction is whatshap's phased / heterozygous (0-1); recompute it the same way when the
+  # column is absent or the rows were summed. Only without a heterozygous count is it phased /
+  # variants, and `denominator` says which
+  denominator = if (!is.na(het)) "heterozygous" else "variants"
+  if (is.na(fraction) && !is.na(phased)) {
+    base = if (!is.na(het)) het else variants
+    if (!is.na(base) && base > 0) fraction = phased / base
+  }
   if (is.na(phased) && is.na(fraction)) return(NULL)
 
-  list(phased = phased, variants = variants, fraction = fraction)
+  list(phased = phased, variants = variants, heterozygous = het, fraction = fraction,
+       denominator = denominator)
 }

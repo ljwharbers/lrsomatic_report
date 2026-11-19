@@ -442,3 +442,28 @@ test_that("a per-reference builtin is picked from the given directory by suffix"
   expect_setequal(resolve_gene_panel("custom", dir, "hg38")$genes, "MYC")
   expect_setequal(resolve_gene_panel("custom", dir, "t2t")$genes, "BCL2")
 })
+
+test_that("panel labels capitalise builtins only, a user list keeps its file stem (REP-13)", {
+  panels = load_all_gene_panels(gene_lists_root, "hg38")
+  expect_true(isTRUE(panels$lymphoid$builtin))
+  f = tempfile(fileext = ".tsv"); writeLines(c("gene", "EWSR1"), f)
+  panels$panel_ccs15_custom = load_gene_panel(f, "hg38")
+  expect_null(panels$panel_ccs15_custom$builtin)
+  expect_equal(panel_label(c("lymphoid", "panel_ccs15_custom", ""), panels),
+               c("Lymphoid", "panel_ccs15_custom", ""))
+})
+
+test_that("sample_rel_path strips --sample-dir lexically, so staged symlinks stay relative (E-F6)", {
+  expect_equal(sample_rel_path(c("/w/x/sample_dir/a/b.tsv", "/elsewhere/c.tsv", NA), "/w/x/sample_dir/"),
+               c("a/b.tsv", "/elsewhere/c.tsv", NA))
+  expect_null(sample_rel_path(NULL, "/w"))
+  expect_equal(sample_rel_path("/w/a", ""), "/w/a")
+  # A pipeline-staged file is a symlink out of the sample dir: normalizePath() would leave it absolute
+  skip_on_os("windows")
+  root = tempfile("sd"); dir.create(file.path(root, "variants"), recursive = TRUE)
+  target = tempfile("work", fileext = ".vcf.gz"); file.create(target)
+  link = file.path(root, "variants", "somatic.vcf.gz"); file.symlink(target, link)
+  on.exit(unlink(c(root, target), recursive = TRUE))
+  expect_equal(sample_rel_path(link, root), "variants/somatic.vcf.gz")
+  expect_equal(vaf_provenance(link, root)$paths, "variants/somatic.vcf.gz")
+})

@@ -25,6 +25,7 @@
 #        per_panel_n = named integer (genes / groups with a tier 1-2 finding per panel;
 #                      every panel named),
 #        tumour_only = logical(1),
+#        verdict     = parse_verdict_status() result or NULL (ClairS-TO germline tagging),
 #        n_nonpanel  = list(kept, total))  # non-panel small-variant rows embedded / eligible
 #
 # What is a finding: an event in a gene of a user-chosen gene list ("panel") that carries
@@ -745,9 +746,10 @@ kf_cna_rows = function(cna, roles, reference) {
   g = if (!is.null(cna)) cna$genes else NULL
   if (is.null(g) || nrow(g) == 0 || !"call" %in% names(g)) return(out)
   g = as.data.table(g)
-  g = g[!is.na(call) & call %in% c("amplification", "homozygous deletion")]
+  g = g[!is.na(call) & call %in% c("amplification", "homozygous deletion", "deep deletion")]
   if (nrow(g) == 0) return(out)
   src_lab = c(wakhan = "Wakhan", ascat = "ASCAT", savana = "SAVANA")
+  if (!"span_from" %in% names(g)) g[, span_from := NA_character_]
   # One row per gene locus; a gene in several panels lists them all
   # (panels may carry slightly different spans for one gene: one row per gene and call)
   g = g[, .(panels = paste(unique(panel), collapse = ","),
@@ -755,7 +757,7 @@ kf_cna_rows = function(cna, roles, reference) {
             partial = any(partial %in% TRUE), loh = any(loh %in% TRUE),
             min_cn = suppressWarnings(min(min_cn, na.rm = TRUE)),
             max_cn = suppressWarnings(max(max_cn, na.rm = TRUE)),
-            source = source[1]),
+            source = source[1], segment = any(span_from %in% "Wakhan segment")),
         by = .(gene, call)]
   par = kf_in_par(g$chrom, g$start, g$end, reference)
   recomb = grepl(KF_RECOMBINING_LOCI, toupper(g$gene))
@@ -772,6 +774,7 @@ kf_cna_rows = function(cna, roles, reference) {
                       ifelse(g$partial, ", partial gene", ""), ")")
   evidence = kf_join(
     paste0(sl, " copy number"),
+    ifelse(g$segment, "locus is Wakhan's segment, not the gene's span", ""),
     ifelse(par, "pseudoautosomal region — copy number unreliable", ""),
     ifelse(recomb & !par, "immunoglobulin / T-cell receptor locus — physiological rearrangement", ""),
     ifelse(g$loh & is_amp, "LOH", ""),
@@ -781,7 +784,7 @@ kf_cna_rows = function(cna, roles, reference) {
              panels = g$panels, vaf = NA_real_,
              source_id = paste0(g$chrom, ":", g$start, "-", g$end),
              genes = toupper(g$gene), dp = NA_real_, callers = ifelse(is.na(sl), "", sl),
-             locus = paste0(g$chrom, ":", kf_int(g$start), "–", kf_int(g$end)),
+             locus = paste0(ifelse(g$segment, "segment ", ""), g$chrom, ":", kf_int(g$start), "–", kf_int(g$end)),
              loh = g$loh, in_panel = TRUE)[!is.na(tier)]
 }
 
@@ -984,24 +987,16 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
                      if (length(nbc) > 1) "per caller, not summed" else ""))
   } else out$sv = kf_bm("sv", "Structural variants", "not run", "no SV caller output", "not_run")
 
-  # Chromothripsis
+  # Chromothripsis: one card per ShatterSeek minimum-tier setting (the report's selector)
   ss = section_data$shatterseek
   if (is.null(ss) || !identical(ss$status, "ok")) {
     out$chromothripsis = kf_bm("chromothripsis", "Chromothripsis", "not run", "ShatterSeek", "not_run")
-  } else if (is.null(ss$high) || nrow(ss$high) == 0) {
-    out$chromothripsis = kf_bm("chromothripsis", "Chromothripsis", "none called",
-                               paste0("ShatterSeek: ", paste(unname(ss$labels), collapse = ", ")))
   } else {
-    h = ss$high
-    by = h[, .(combos = paste(unique(combo_label), collapse = ", "),
-               conf = paste(unique(confidence), collapse = "/")), by = chrom]
-    dis = isTRUE(shatterseek_disagree(ss))
-    val = paste(by$chrom, collapse = ", ")
-    det = paste0(by$chrom, " ", by$conf, " (", by$combos, ")")
-    out$chromothripsis = kf_bm("chromothripsis", "Chromothripsis", val,
-                               c(det, if (dis) paste0("caller combinations disagree; ran: ",
-                                                      paste(unname(ss$labels), collapse = ", ")) else ""),
-                               if (dis) "warn" else "ok")
+    tiers = as.integer(names(SHATTERSEEK_MIN_TIERS))
+    views = lapply(tiers, function(t) kf_chromothripsis_bm(shatterseek_at_tier(ss, t)))
+    names(views) = tiers
+    out$chromothripsis = views[[as.character(SHATTERSEEK_MIN_TIER_DEFAULT)]]
+    if (!is.null(ss$high) && nrow(ss$high) > 0) out$chromothripsis$views = views
   }
 
   # ecDNA / focal amplicons (detected != ecDNA: read n_ecdna/n_bfb)
@@ -1049,6 +1044,27 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
   out
 }
 
+# The chromothripsis card for one ShatterSeek result: the called chromosomes, each with the PCAWG
+# tier(s) it meets and the caller combinations that called it
+kf_chromothripsis_bm = function(ss) {
+  if (is.null(ss$high) || nrow(ss$high) == 0) {
+    below = if (isTRUE(ss$n_below_tier > 0))
+              sprintf("%d call%s below this tier", ss$n_below_tier, if (ss$n_below_tier == 1) "" else "s") else ""
+    return(kf_bm("chromothripsis", "Chromothripsis", if (nzchar(below)) "none at this tier" else "none called",
+                 c(paste0("ShatterSeek: ", paste(unname(ss$labels), collapse = ", ")), below)))
+  }
+  h = ss$high
+  by = h[, .(combos = paste(unique(combo_label), collapse = ", "),
+             tiers = shatterseek_tiers(criteria),
+             conf = paste(unique(confidence), collapse = "/")), by = chrom]
+  dis = isTRUE(shatterseek_disagree(ss))
+  det = paste0(by$chrom, " ", ifelse(nzchar(by$tiers), by$tiers, by$conf), " (", by$combos, ")")
+  kf_bm("chromothripsis", "Chromothripsis", paste(by$chrom, collapse = ", "),
+        c(det, if (dis) paste0("caller combinations disagree; ran: ",
+                                paste(unname(ss$labels), collapse = ", ")) else ""),
+        if (dis) "warn" else "ok")
+}
+
 # Signature context the overview reports; the others are shown in their own section only
 KF_SIGNATURE_CONTEXT = "SBS"
 
@@ -1068,5 +1084,6 @@ build_overview = function(variant_table, section_data, all_panels, ascat_pp, tmb
        biomarkers  = build_biomarkers(section_data, ascat_pp, tmb_info, counts),
        per_panel_n = f$per_panel_n,
        tumour_only = identical(as.character(mode), "tumour-only"),
+       verdict     = if (!is.null(ctx$outputs)) parse_verdict_status(ctx$outputs$verdict_status) else NULL,
        n_nonpanel  = f$n_nonpanel)
 }

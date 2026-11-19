@@ -87,6 +87,7 @@
 
 .cna-genes__gene { font-weight: 600; font-style: italic; }
 .cna-genes__locus, .cna-genes__num { font-family: var(--font-mono); font-size: 0.78rem; }
+.cna-genes__span-from { display: block; font-family: var(--font-sans); font-size: 0.7rem; color: var(--color-text-muted); }
 .cna-genes__num { text-align: right; }
 .cna-genes__source { color: var(--color-text-muted); }
 
@@ -102,6 +103,7 @@
   &--amplification       { color: var(--cna-amp);    background: var(--cna-amp-bg);    font-weight: 600; }
   &--gain                { color: var(--cna-gain);   background: var(--cna-gain-bg); }
   &--homozygous-deletion { color: var(--cna-homdel); background: var(--cna-homdel-bg); font-weight: 600; }
+  &--deep-deletion { color: var(--cna-homdel); background: var(--cna-homdel-bg); font-weight: 600; }
   &--loss                { color: var(--cna-loss);   background: var(--cna-loss-bg); }
   &--none                { font-style: italic; }
 }

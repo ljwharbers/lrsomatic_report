@@ -8,7 +8,7 @@
 ov = OVERVIEW
 kf = if (!is.null(ov$findings)) ov$findings else empty_findings()
 ov_panels = if (length(all_panels) > 0) names(all_panels) else character(0)
-ov_label = function(p) ifelse(nzchar(p), paste0(toupper(substr(p, 1, 1)), substr(p, 2, nchar(p))), p)
+ov_label = function(p) panel_label(p, all_panels)
 ov_role = c(oncogene = "oncogene", tsg = "TSG", both = "oncogene/TSG")
 ov_type = c(`small variant` = "Small variant", SV = "SV", CNA = "Copy number")
 ov_num = function(x, digits = 2) ifelse(is.na(x), "", formatC(as.numeric(x), format = "f", digits = digits))
@@ -85,9 +85,12 @@ tags$div(
       tags$strong("Tumour-only sample: "),
       "without a matched normal, these calls can include germline variants. VAF is shown for judgement ",
       "(a germline heterozygous variant sits near 0.5, or near 1 under LOH)."),
+  if (isTRUE(ov$tumour_only) && !is.null(verdict_note(ov$verdict)))
+    tags$p(class = paste("kf-caveat", if (identical(ov$verdict$status, "skipped")) "kf-caveat--strong"),
+           verdict_note(ov$verdict)),
   tags$ul(class = "kf-legend", `aria-label` = "Tier legend",
     tags$li(class = "kf-legend__item kf-tier-1", tags$strong("Tier 1"),
-            " strong evidence: ClinVar (likely) pathogenic or truncating variant, breakpoint in the gene, amplification or homozygous deletion"),
+            " strong evidence: ClinVar (likely) pathogenic or truncating variant, breakpoint in the gene, amplification or homozygous / deep deletion"),
     tags$li(class = "kf-legend__item kf-tier-2", tags$strong("Tier 2"),
             " weaker: predicted-damaging missense, loss of function in an oncogene, SV with no exon annotated"),
     tags$li(class = "kf-legend__item kf-tier-3", tags$strong("Tier 3"),
@@ -143,7 +146,7 @@ table_details(
   fmt_bp(SV_PANEL_WINDOW_OTHER), " of other events) the gene is listed as “near” at tier 3, at most ",
   KF_MAX_PROXIMITY_PER_GENE, " rows per gene. Events of locus size inside IG/TR loci are V(D)J recombination: tier 3.",
   tags$br(),
-  tags$strong("Copy number"), " (gene-level calls of the Copy number section): amplification or homozygous deletion. ",
+  tags$strong("Copy number"), " (gene-level calls of the Copy number section): amplification or homozygous deletion (deep deletion: below the high-ploidy threshold but not CN 0). ",
   "Calls in a pseudoautosomal region (", if (!is.null(params$reference)) params$reference else "", ") and in IG/TR loci are tier 3. ",
   "Loss of heterozygosity is not a finding on its own; it is noted on the gene's other rows, and with a listed small variant ",
   "reads “possible biallelic (LOH)”.",
@@ -161,16 +164,25 @@ table_details(
 
 ```{r biomarkers}
 bm = ov$biomarkers
+bm_row = function(b, tier = NULL) {
+  tags$div(class = paste0("bm-row bm-", b$status, " bm-id-", b$id),
+    `data-ss-min` = tier,
+    hidden = if (!is.null(tier) && tier != SHATTERSEEK_MIN_TIER_DEFAULT) NA,
+    tags$div(class = "bm-label", b$label,
+             if (!is.null(tier)) shatterseek_tier_select(class = "bm-tier-select")),
+    tags$div(class = "bm-value",
+             b$value,
+             if (identical(b$status, "warn")) tags$span(class = "bm-flag", "check")),
+    if (!is.null(b$items) && length(b$items) > 0)
+      tags$ul(class = "bm-items", lapply(b$items, tags$li))
+    else if (nzchar(b$detail)) tags$div(class = "bm-detail", b$detail))
+}
+# The chromothripsis card has one row per ShatterSeek minimum-tier setting; the selector
+# (shared with the Chromothripsis section, script in _instability.qmd) shows one
 tags$div(class = "bm-list",
   lapply(bm, function(b) {
-    tags$div(class = paste0("bm-row bm-", b$status, " bm-id-", b$id),
-      tags$div(class = "bm-label", b$label),
-      tags$div(class = "bm-value",
-               b$value,
-               if (identical(b$status, "warn")) tags$span(class = "bm-flag", "check")),
-      if (!is.null(b$items) && length(b$items) > 0)
-        tags$ul(class = "bm-items", lapply(b$items, tags$li))
-      else if (nzchar(b$detail)) tags$div(class = "bm-detail", b$detail))
+    if (is.null(b$views)) bm_row(b)
+    else tagList(lapply(names(b$views), function(t) bm_row(b$views[[t]], as.integer(t))))
   }))
 ```
 
@@ -216,8 +228,11 @@ div(class = "metric-group overview-sequencing",
            "metric-phased",
            subtitle = paste(c(
              if (is.na(phasing$phased) || is.na(phasing$fraction)) NULL
-             else if (!is.na(phasing$variants))
-               sprintf("%.1f%% of %s", phasing$fraction * 100,
+             else if (!is.na(phasing$heterozygous))
+               sprintf("%.1f%% of %s heterozygous", phasing$fraction * 100,
+                       formatC(phasing$heterozygous, format = "d", big.mark = ","))
+             else if (identical(phasing$denominator, "variants") && !is.na(phasing$variants))
+               sprintf("%.1f%% of %s variants", phasing$fraction * 100,
                        formatC(phasing$variants, format = "d", big.mark = ","))
              else sprintf("%.1f%% phased", phasing$fraction * 100),
              "germline, WhatsHap"), collapse = " · "))
