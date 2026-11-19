@@ -306,3 +306,12 @@ test_that("a symbol-only list takes gene spans from another list before Wakhan's
   b = cna_gene_calls(segs, list(sarcoma = builtin, mine = custom), 2, "female", "wakhan")$genes[panel == "sarcoma"]
   expect_true(all(is.na(b$span_from)))
 })
+
+test_that("the ASCAT tab says 'skipped' without claiming a failure", {
+  none = ascat_missing_note(list(), "wakhan")
+  expect_match(none, "ASCAT was skipped \\(--skip_ascat\\) or produced nothing")
+  expect_match(none, "comes from Wakhan")
+  expect_false(grepl("failed", none))
+  expect_match(ascat_missing_note(list(ascat_segments = "x.segments_raw.txt"), "ascat"),
+               "^ASCAT ran .* plots were not found\\.$")
+})

@@ -41,6 +41,17 @@ circos_cn_segments = function(cna, ascat_segments = NULL) {
   NULL
 }
 
+# The ASCAT tab's notice when there are no ASCAT plots. A skipped ASCAT and one that failed
+# both stage nothing, so with no ASCAT file at all the wording names both
+ascat_missing_note = function(outputs, cn_source = NA_character_) {
+  ran = !is.null(outputs$ascat_segments) || !is.null(outputs$ascat_purityploidy)
+  other = if (!is.null(cn_source) && !is.na(cn_source) && cn_source != "ascat")
+            paste0(" Copy number in this report comes from ",
+                   if (identical(cn_source, "wakhan")) "Wakhan" else cn_source, ".") else ""
+  if (ran) return(paste0("ASCAT ran (its segments are present), but its plots were not found.", other))
+  paste0("No ASCAT output for this sample: ASCAT was skipped (--skip_ascat) or produced nothing.", other)
+}
+
 # Parse ASCAT purity/ploidy file
 parse_ascat_purityploidy = function(pp_file) {
   if (is.null(pp_file) || !file.exists(pp_file)) return(list(purity = NA_real_, ploidy = NA_real_))
