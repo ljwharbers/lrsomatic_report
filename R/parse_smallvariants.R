@@ -395,10 +395,14 @@ parse_caller_vcf = function(vcf_file, caller_name = "unknown", sample_id = NULL)
   con = gzfile(vcf_file, "rb")
   skip_n = 0L
   chrom_line = NULL
+  has_caller_tag = FALSE; has_dv = FALSE; sources = character(0)
   repeat {
     line = readLines(con, n = 1, warn = FALSE)
     if (length(line) == 0) break
     if (startsWith(line, "#CHROM")) { chrom_line = line; break }
+    if (startsWith(line, "##INFO=<ID=CALLER,")) has_caller_tag = TRUE
+    if (startsWith(line, "##DeepVariant_version")) has_dv = TRUE
+    if (startsWith(line, "##source=")) sources = c(sources, line)
     skip_n = skip_n + 1L
   }
   close(con)
@@ -455,9 +459,20 @@ parse_caller_vcf = function(vcf_file, caller_name = "unknown", sample_id = NULL)
   ps_list[!is.na(ps_list) & ps_list == "."] = NA_character_
   gt_list[!is.na(gt_list) & gt_list %in% c(".", "./.")] = NA_character_
 
+  # Which caller wrote each record: INFO/CALLER when the header declares it, else a
+  # DeepSomatic-only VCF (DeepVariant header, no other caller's ##source)
+  vcf_caller = if (has_caller_tag) {
+    m = regmatches(dt$INFO, regexec("(^|;)CALLER=([^;]+)", dt$INFO))
+    tolower(vapply(m, function(x) if (length(x) == 3) x[3] else NA_character_, character(1)))
+  } else if (has_dv && !any(grepl("clair", sources, ignore.case = TRUE))) {
+    rep("deepsomatic", nrow(dt))
+  } else rep(NA_character_, nrow(dt))
+  # DeepSomatic writes GT 1/1 on every somatic call by convention: not a genotype, so not shown
+  gt_list[vcf_caller %in% "deepsomatic"] = NA_character_
+
   data.table(chrom = dt$CHROM, pos = dt$POS, ref = dt$REF, alt = dt$ALT,
              vaf = vaf_list, dp = dp_list, gt = gt_list, ps = ps_list,
-             caller = caller_name)
+             caller = caller_name, vcf_caller = vcf_caller)
 }
 
 # Header-only provenance for the VCF(s) supplying VAF/DP/GT/PS (after a consensus merge the FORMAT fields need not match the `callers` column); NULL when there is nothing to describe
@@ -620,8 +635,9 @@ build_variant_table = function(vep_data, vaf_data, gene_panel = NULL) {
   vep_data[, join_key := variant_key(chrom, pos, ref, alt, space = vep_space)]
 
   if (!is.null(vaf_data) && nrow(vaf_data) > 0) {
+    if (!"vcf_caller" %in% names(vaf_data)) vaf_data = copy(vaf_data)[, vcf_caller := NA_character_]
     vdt = vaf_data[, .(join_key = variant_key(chrom, pos, ref, alt, space = "vcf"),
-                       vaf, dp, gt, ps)]
+                       vaf, dp, gt, ps, vcf_caller)]
     vdt = unique(vdt, by = "join_key")
     vep_data = merge(vep_data, vdt, by = "join_key", all.x = TRUE)
   } else {
@@ -648,6 +664,9 @@ build_variant_table = function(vep_data, vaf_data, gene_panel = NULL) {
   display_cols = display_cols[display_cols %in% names(vep_data)]
   out = vep_data[, ..display_cols]
   setattr(out, "vep_fields", vep_fields)
+  # Rows whose GT was blanked as DeepSomatic's (parse_caller_vcf()), for the provenance footnote
+  setattr(out, "n_gt_deepsomatic",
+          if ("vcf_caller" %in% names(vep_data)) sum(vep_data$vcf_caller %in% "deepsomatic") else 0L)
   out
 }
 

@@ -482,7 +482,9 @@ run or not found.
 
 **Small variants come from the VEP annotation only.** `*_SOMATIC_VEP.vcf.gz` defines the
 variant set; VAF, depth, genotype and phase set are joined from the VCF that VEP annotated.
-Runs predating `variants/phased/` yield VAF and depth but no phase set. If none is found the
+DeepSomatic writes the genotype `1/1` on every somatic call by convention, so the genotype of a
+DeepSomatic call (by `INFO/CALLER`, or a VCF with a DeepVariant header and no other caller's
+`##source`) is left blank, and the footnote says those calls carry no phase set. Runs predating `variants/phased/` yield VAF and depth but no phase set. If none is found the
 table still renders, without those columns.
 
 A footnote under the variant table names the file those columns actually came from and how
