@@ -746,7 +746,7 @@ kf_cna_rows = function(cna, roles, reference) {
   g = if (!is.null(cna)) cna$genes else NULL
   if (is.null(g) || nrow(g) == 0 || !"call" %in% names(g)) return(out)
   g = as.data.table(g)
-  g = g[!is.na(call) & call %in% c("amplification", "homozygous deletion")]
+  g = g[!is.na(call) & call %in% c("amplification", "homozygous deletion", "deep deletion")]
   if (nrow(g) == 0) return(out)
   src_lab = c(wakhan = "Wakhan", ascat = "ASCAT", savana = "SAVANA")
   # One row per gene locus; a gene in several panels lists them all

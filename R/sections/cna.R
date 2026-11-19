@@ -18,7 +18,8 @@
 #                             ascat_wgd, ascat_loh, ascat_gi),
 #     genes            = data.table(panel, gene, chrom, start, end, min_cn, max_cn, min_minor,
 #                                   n_segments, call, partial, loh, source, role, expected),
-#                        # call: "amplification" | "homozygous deletion" | "gain" | "loss" |
+#                        # call: "amplification" | "homozygous deletion" | "deep deletion" |
+#                        # "gain" | "loss" |
 #                        # "neutral" | NA (gene span overlaps no segment, n_segments == 0)
 #     wakhan_genes     = data.table(chrom, start, end, gene, hp1_state, hp2_state, total, minor),
 #     wakhan_genes_dropped = integer(1),   # rows dropped as state > CNA_MAX_PLAUSIBLE_CN
@@ -40,7 +41,7 @@
 # Calls (COSMIC Cancer Gene Census CNA definition): ploidy <= CNA_PLOIDY_SPLIT -> amplification
 # when total CN >= CNA_AMP_CN_LOW, homozygous deletion when total CN == 0; ploidy above it ->
 # amplification when CN >= CNA_AMP_CN_HIGH, homozygous deletion when CN < ploidy -
-# CNA_LOSS_OFFSET. Otherwise gain/loss against the expected CN: round(ploidy), and for chrX/chrY
+# CNA_LOSS_OFFSET, named "deep deletion" unless the total CN is 0. Otherwise gain/loss against the expected CN: round(ploidy), and for chrX/chrY
 # in a male max(1, round(ploidy / 2)) — 1 at any diploid-ish ploidy, 2 after a WGD.
 # A gene spanning several segments: amplification on max_cn, homozygous deletion on min_cn,
 # then loss, then gain; partial = TRUE when the per-segment calls disagree.
@@ -53,7 +54,8 @@ CNA_MAX_PLAUSIBLE_CN = 100
 CNA_PROFILE_YCAP     = 6      # profile y axis is capped here; segments above get a marker
 CNA_PROFILE_MIN_FRAC = 0.001  # profile only: segments narrower than this genome fraction are
                               # drawn widened (centred) so focal events stay visible
-CNA_CALL_LEVELS      = c("amplification", "homozygous deletion", "loss", "gain", "neutral")
+CNA_CALL_LEVELS      = c("amplification", "homozygous deletion", "deep deletion", "loss", "gain",
+                         "neutral")
 
 # Expected total CN per segment: round(ploidy); halved (min 1) on chrX/chrY in a male
 cna_expected_cn = function(chrom, ploidy, sex = "female") {
@@ -72,8 +74,9 @@ cna_call = function(total, minor, ploidy, expected) {
   low = ploidy <= CNA_PLOIDY_SPLIT
   amp = total >= ifelse(low, CNA_AMP_CN_LOW, CNA_AMP_CN_HIGH)
   hd  = ifelse(low, total == 0, total < ploidy - CNA_LOSS_OFFSET)
+  # Above the ploidy split the CGC threshold can fire on CN >= 1: that is a deep, not a homozygous, deletion
   call = fifelse(amp, "amplification",
-         fifelse(hd, "homozygous deletion",
+         fifelse(hd, fifelse(total == 0, "homozygous deletion", "deep deletion"),
          fifelse(total < expected, "loss",
          fifelse(total > expected, "gain", "neutral"))))
   call[is.na(total) | is.na(ploidy) | is.na(expected)] = NA_character_

@@ -73,9 +73,9 @@ test_that("cna_call applies the COSMIC thresholds on both sides of ploidy 2.7", 
                            "amplification", "amplification"))
   # exactly at the split still counts as the low side
   expect_equal(cna_call(5, 1, 2.7, 3)$call, "amplification")
-  # ploidy 4: amp >= 9, homdel < 4 - 2.7 = 1.3
+  # ploidy 4: amp >= 9, deletion < 4 - 2.7 = 1.3: CN 0 is homozygous, CN 1 deep (REP-7)
   high = cna_call(total = c(0, 1, 2, 3, 4, 5, 8, 9), minor = 1, ploidy = 4, expected = 4)
-  expect_equal(high$call, c("homozygous deletion", "homozygous deletion", "loss", "loss",
+  expect_equal(high$call, c("homozygous deletion", "deep deletion", "loss", "loss",
                             "neutral", "gain", "gain", "amplification"))
   expect_true(is.na(cna_call(NA, 1, 2, 2)$call))
   expect_true(is.na(cna_call(2, 1, NA, 2)$call))

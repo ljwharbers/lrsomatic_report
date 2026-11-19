@@ -130,8 +130,8 @@ thr = if (is.na(pl)) "no ploidy is available, so no calls were made." else if (l
   paste0("ploidy ≤ ", CNA_PLOIDY_SPLIT, ", so amplification = total CN ≥ ", CNA_AMP_CN_LOW,
          " and homozygous deletion = total CN 0.") else
   paste0("ploidy > ", CNA_PLOIDY_SPLIT, ", so amplification = total CN ≥ ", CNA_AMP_CN_HIGH,
-         " and homozygous deletion = total CN < ploidy − ", CNA_LOSS_OFFSET, " = ",
-         cna_fmt(pl - CNA_LOSS_OFFSET), ".")
+         " and deep deletion = total CN < ploidy − ", CNA_LOSS_OFFSET, " = ",
+         cna_fmt(pl - CNA_LOSS_OFFSET), " (homozygous deletion when the total CN is 0).")
 male = tolower(as.character(params$sex)) %in% c("male", "xy", "m")
 seg_txt = if (identical(cna$source, "wakhan"))
   paste0("Wakhan rank-1 integer_profile.bed (", formatC(nrow(cna$segments), big.mark = ","), " haplotype-resolved segments)") else

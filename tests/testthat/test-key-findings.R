@@ -490,3 +490,16 @@ test_that("tumour-only mode is reported for the caveat", {
                      list(outputs = list(mode = "tumour-only")))
   expect_true(o$tumour_only)
 })
+
+test_that("a deep deletion is a copy-number finding of the homozygous-deletion tier (REP-7)", {
+  cna = list(genes = data.table(panel = "p", gene = c("CDKN2A", "IGH"), chrom = c("chr9", "chr14"),
+                                start = c(21967752, 105586437), end = c(21995301, 106879844),
+                                min_cn = c(1, 1), max_cn = c(1, 1), min_minor = 0, n_segments = 1L,
+                                call = "deep deletion", partial = FALSE, loh = FALSE,
+                                source = "wakhan", role = NA_character_, expected = 4))
+  r = kf_cna_rows(cna, data.table(gene = character(), role = character()), "hg38")
+  setkey(r, gene)
+  expect_equal(r["CDKN2A"]$alteration, "deep deletion (CN 1)")
+  expect_equal(r["CDKN2A"]$tier, 1L)
+  expect_equal(r["IGH"]$tier, 3L)
+})

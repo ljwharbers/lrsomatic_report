@@ -102,6 +102,7 @@
   &--amplification       { color: var(--cna-amp);    background: var(--cna-amp-bg);    font-weight: 600; }
   &--gain                { color: var(--cna-gain);   background: var(--cna-gain-bg); }
   &--homozygous-deletion { color: var(--cna-homdel); background: var(--cna-homdel-bg); font-weight: 600; }
+  &--deep-deletion { color: var(--cna-homdel); background: var(--cna-homdel-bg); font-weight: 600; }
   &--loss                { color: var(--cna-loss);   background: var(--cna-loss-bg); }
   &--none                { font-style: italic; }
 }

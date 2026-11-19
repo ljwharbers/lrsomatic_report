@@ -154,7 +154,7 @@ From the gene-level calls of the copy-number section:
 | Tier | Rule |
 |---|---|
 | 1 | Amplification — not listed at all for a tumour suppressor |
-| 1 | Homozygous deletion — tier 2 for an oncogene |
+| 1 | Homozygous or deep deletion — tier 2 for an oncogene |
 | 3 | Either call in a **pseudoautosomal region** (reads from the chrX and chrY copies map to one of them, so a PAR gene can read CN 0 with nothing deleted) or at an **IG/TR locus** (physiologically rearranged and deleted in lymphocytes) |
 
 Loss of heterozygosity is not a finding on its own; it is noted on the gene ("LOH in gene").
@@ -176,10 +176,14 @@ is listed, because they can disagree — the purity biomarker is flagged when th
 Calls follow the COSMIC Cancer Gene Census CNA definition, on the total copy number of the
 segments overlapping each gene:
 
-| Ploidy | Amplification | Homozygous deletion |
+| Ploidy | Amplification | Homozygous / deep deletion |
 |---|---|---|
 | ≤ 2.7 | total CN ≥ 5 | total CN = 0 |
 | > 2.7 | total CN ≥ 9 | total CN < ploidy − 2.7 |
+
+Above ploidy 2.7 the deletion threshold can be met with copies left (CN 1 at ploidy ≥ 3.71):
+such a call reads **deep deletion**, and only a total CN of 0 reads homozygous deletion. Both
+are tier 1 key findings.
 
 Otherwise a gene is a **gain** or **loss** against the expected copy number, round(ploidy) —
 and on chrX/chrY in a male, max(1, round(ploidy / 2)). A gene spanning several segments is
