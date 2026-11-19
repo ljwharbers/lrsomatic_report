@@ -13,7 +13,10 @@
 #   list(findings    = data.table(gene, type, alteration, evidence, tier (integer), role,
 #                                 panels, vaf, source_id,            <- the stable contract
 #                                 genes,                             <- member symbols
-#                                 dp, callers, locus, loh, in_panel), <- extra, display only
+#                                 dp, callers, locus, loh, in_panel, <- extra, display only
+#                                 rescued, ev_tier),                 <- whitelist-rescued SVs
+#                      A whitelist-rescued SV row has tier KF_TIER_RESCUED and `rescued` TRUE;
+#                      `ev_tier` is the tier its evidence alone gives (= tier on other rows).
 #                      `gene` is the row's group key: one gene, or "EWSR1–ATF1" for a
 #                      rearrangement joining two listed genes, whose `genes` is
 #                      "EWSR1,ATF1" (equal to `gene` on every other row). Rows are ordered
@@ -41,7 +44,8 @@
 # at KF_MAX_NONPANEL (strongest evidence first). `panels` is "" on those rows.
 #
 # Tiers (kf_tier()): 1 = strong evidence in a list gene, 2 = weaker or role-discordant,
-# 3 = low confidence (SV merely near a gene, CN in a pseudoautosomal or IG/TR locus).
+# 3 = low confidence (SV merely near a gene, CN in a pseudoautosomal or IG/TR locus),
+# "rescued" (KF_TIER_RESCUED) = an SV kept only by the Severus whitelist, hidden by default.
 
 suppressPackageStartupMessages({
   library(data.table)
@@ -69,10 +73,21 @@ KF_FOCAL_SV_MAX           = 3e6   # a DEL/DUP up to this size counts when it cov
 # Two callers' calls are one event when both breakpoints agree within this distance (and
 # within half the event's size, so that two neighbouring small deletions stay apart)
 KF_SV_SAME_EVENT_BP       = 1000
+# Tier of a whitelist-rescued SV finding (Severus INFO/WL_RESCUE): below tier 3, shown on request
+KF_TIER_RESCUED           = 4L
 
 # High-impact consequences that truncate / abolish the product (loss of function)
 KF_LOF_TERMS = c("transcript_ablation", "splice_acceptor_variant", "splice_donor_variant",
                  "stop_gained", "frameshift_variant", "start_lost")
+
+# Consequences that put a variant in a gene's coding sequence or splice sites: a ClinVar
+# classification (variant-level) is credited to the gene rows carrying one of these
+KF_CLINVAR_GENE_TERMS = c(KF_LOF_TERMS, "missense_variant", "synonymous_variant",
+                          "stop_lost", "stop_retained_variant", "start_retained_variant",
+                          "inframe_insertion", "inframe_deletion", "protein_altering_variant",
+                          "coding_sequence_variant", "incomplete_terminal_codon_variant",
+                          "splice_region_variant", "splice_donor_5th_base_variant",
+                          "splice_donor_region_variant", "splice_polypyrimidine_tract_variant")
 
 KF_TYPES = c("small variant", "SV", "CNA")
 
@@ -90,7 +105,7 @@ empty_findings = function() {
              panels = character(), vaf = numeric(), source_id = character(),
              genes = character(),
              dp = numeric(), callers = character(), locus = character(),
-             loh = logical(), in_panel = logical())
+             loh = logical(), in_panel = logical(), rescued = logical(), ev_tier = integer())
 }
 
 # ---- tiering -------------------------------------------------------------------------------
@@ -107,7 +122,8 @@ empty_findings = function() {
 #                    recombining (a non-translocation event <= KF_FOCAL_SV_MAX at an IG/TR
 #                    locus: V(D)J recombination, tier 3), intronic (a
 #                    DEL/DUP/INS VEP annotated without exon effect, no Padfoot HIGH: tier 3),
-#                    unannotated (such a call with neither VEP nor Padfoot: tier 2)
+#                    unannotated (such a call with neither VEP nor Padfoot: tier 2),
+#                    rescued (every call of the event whitelist-rescued: KF_TIER_RESCUED)
 #               CNA: amplification, homdel, par (pseudoautosomal), recombining (IG/TR locus)
 #   role      "oncogene" | "tsg" | "both" | "" / NA
 # Returns integer 1-3, NA = not listed (amplification of a tumour suppressor).
@@ -134,12 +150,13 @@ kf_tier = function(type, evidence, role) {
         t
       },
       "SV" = {
-        if (has("recombining") || has("intronic")) 3L
-        else if (has("padfoot")) 1L
-        # Padfoot looked at the breakpoint and did not rate it HIGH
-        else if (has("direct") && (has("padfoot_low") || has("unannotated"))) 2L
-        else if (has("direct")) 1L
-        else if (has("proximity")) 3L else NA_integer_
+        t = if (has("recombining") || has("intronic")) 3L
+            else if (has("padfoot")) 1L
+            # Padfoot looked at the breakpoint and did not rate it HIGH
+            else if (has("direct") && (has("padfoot_low") || has("unannotated"))) 2L
+            else if (has("direct")) 1L
+            else if (has("proximity")) 3L else NA_integer_
+        if (!is.na(t) && has("rescued")) KF_TIER_RESCUED else t
       },
       "CNA" = {
         if (has("par") || has("recombining")) return(3L)
@@ -273,6 +290,14 @@ kf_small_variant_flags = function(vt) {
   high   = !is.na(impact) & impact == "HIGH"
   mod    = !is.na(impact) & impact == "MODERATE"
   terms  = strsplit(ifelse(is.na(csq), "", csq), "[,&]+")
+  # ClinVar classifies the variant, not each gene VEP lists for it: when some of a variant's
+  # rows are coding/splice, only those carry it (ATM p.Arg23Ter, not the Y_RNA downstream)
+  if (any(clin) && all(c("chrom", "pos", "ref", "alt") %in% names(vt))) {
+    in_gene = vapply(terms, function(t) any(trimws(t) %in% KF_CLINVAR_GENE_TERMS), logical(1))
+    key = paste(vt$chrom, vt$pos, vt$ref, vt$alt)
+    any_in_gene = ave(in_gene, key, FUN = any)
+    clin = clin & (in_gene | !any_in_gene)
+  }
   lof    = high & vapply(terms, function(t) any(trimws(t) %in% KF_LOF_TERMS), logical(1))
   am     = lc("am_class")
   am_lp  = !is.na(am) & am == "likely_pathogenic"
@@ -470,28 +495,39 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
   st[, `:=`(pos_a = suppressWarnings(as.numeric(pos_a)), pos_b = suppressWarnings(as.numeric(pos_b)))]
   ev = kf_sv_events(st)
   st[, `:=`(kf_event = ev$event, kf_class = ev$ev_class)]
+  # An event is rescued only when every call of it is: a rescued Severus call that SAVANA also
+  # made stands with SAVANA's
+  st[, kf_rescued := sv_is_rescued(st)]
+  st[, kf_ev_rescued := all(kf_rescued), by = kf_event]
 
   # Coordinate / symbol hits, every panel at once (SV scope is applied inside)
   ht = sv_panel_hit_table(st, all_panels)
   hits = if (nrow(ht) > 0)
-    ht[, .(row, gene = toupper(gene), panel, direct, gap, side, padfoot = FALSE)]
+    ht[, .(row, gene = toupper(gene), panel, direct, gap, side, match, padfoot = FALSE)]
   else data.table(row = integer(), gene = character(), panel = character(),
-                  direct = logical(), gap = numeric(), side = character(), padfoot = logical())
+                  direct = logical(), gap = numeric(), side = character(),
+                  match = character(), padfoot = logical())
 
   # sv_panel_hit_table() calls a DEL/DUP/INV/INS "direct" whenever its span overlaps the gene;
   # a 200 Mb inversion then "hits" every panel gene on the arm. Here a span hit counts only
   # when a breakpoint is in the gene, or the event is a focal (<= KF_FOCAL_SV_MAX) DEL/DUP
-  # covering it; a gene merely inside a large event is left to the copy-number rows
+  # covering it; a gene merely inside a large event is left to the copy-number rows.
+  # A symbol hit is the same case: VEP lists every gene a record spans (a Severus
+  # same-chromosome BND included), so it is position-tested too wherever a list gives the
+  # gene coordinates
   hits[, focal := FALSE]
-  sp = which(hits$side == "span" & hits$direct %in% TRUE)
+  iv = rbindlist(lapply(all_panels, function(p) panel_gene_intervals(p, "sv")))
+  if (nrow(iv)) iv[, gene := toupper(gene)]
+  sp = which(hits$direct %in% TRUE &
+             (hits$side == "span" | (hits$match == "symbol" & hits$gene %in% iv$gene)))
   if (length(sp)) {
-    iv = rbindlist(lapply(all_panels, function(p) panel_gene_intervals(p, "sv")))
-    if (nrow(iv)) iv[, gene := toupper(gene)]
     r = hits$row[sp]
     # (no local named like a column: data.table's i/j would read the column instead)
     is_bp = kf_bp_in_gene(st$chrom_a[r], st$pos_a[r], st$chrom_b[r], st$pos_b[r], hits$gene[sp], iv)
     sz = abs(st$pos_b[r] - st$pos_a[r])
-    is_focal = !is_bp & st$svclass[r] %in% c("DEL", "DUP") & !is.na(sz) & sz <= KF_FOCAL_SV_MAX
+    # The event's class: a Severus breakend matched to SAVANA's DEL is a deletion
+    is_focal = !is_bp & st$kf_class[r] %in% c("DEL", "DUP") &
+               !is.na(sz) & sz <= KF_FOCAL_SV_MAX
     set(hits, i = sp, j = "focal", value = is_focal)
     drop_i = sp[!is_bp & !is_focal]
     if (length(drop_i)) set(hits, i = drop_i, j = "direct", value = NA)   # dropped below
@@ -509,7 +545,7 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
           gg = intersect(pg[[k]], sets[[nm]])
           if (!length(gg)) return(NULL)
           data.table(row = hi[k], gene = gg, panel = nm, direct = FALSE, gap = NA_real_,
-                     side = "", padfoot = TRUE, focal = FALSE)
+                     side = "", match = "padfoot", padfoot = TRUE, focal = FALSE)
         }))
       }))
       if (nrow(pf)) hits = rbind(hits, pf)
@@ -543,6 +579,10 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
   rg[, pf_genes := col("padfoot_genes")]
   rg[, vep_impact := toupper(col("impact"))]
   rg[, vep_csq := col("consequence")]
+  rg[, rescued := st$kf_ev_rescued[r]]
+  rg[, support := suppressWarnings(as.integer(col("support")))]
+  rg[, filt := col("filter")]
+  rg[, wl := col("wl_rescue")]
   # Partner genes of a junction: Padfoot's, else VEP's symbols on either side
   pf_sym = kf_padfoot_symbols(rg$pf_genes)
   vep_sym = kf_padfoot_symbols(paste(col("gene_a", ""), col("gene_b", ""), sep = ","))
@@ -600,11 +640,26 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
               else if (unannot) "exon effect not annotated (no VEP / Padfoot annotation for this call)"
               else ""
     rk = match(gchrom, chroms); rk[is.na(rk)] = 999L
+    resc_txt = if (!rescued) "" else {
+      w = sort(unique(wl[!is.na(wl)]))
+      failed = !is.na(filt) & !filt %in% SV_PASS_FILTERS
+      f = sort(unique(filt[failed]))
+      s = support[!is.na(support)]
+      n = uniqueN(id); nf = uniqueN(id[failed])
+      paste0(if (n == 1L) "whitelist-rescued" else paste(n, "calls whitelist-rescued"),
+             if (length(w)) paste0(" (", paste(w, collapse = "/"), ")"),
+             if (nf > 0L) paste0(", ", if (n == 1L) "" else paste0(nf, " "), "failed ",
+                                 paste(f, collapse = "/")),
+             if (length(s)) paste0(" · ", if (min(s) == max(s)) min(s) else paste0(min(s), "–", max(s)),
+                                   " supporting read", if (max(s) == 1L) "" else "s",
+                                   if (n > 1L && min(s) == max(s)) " each" else ""))
+    }
     list(cls = class_lab(svclass),
          loc = paste0(loci[1], if (length(loci) > 1) paste0(" +", length(loci) - 1L, " more") else ""),
          partner = paste(prt, collapse = ", "),
          callers = paste(unique(caller), collapse = ","),
          junction = junction, any_bp = any(bp), main = main, pf_txt = pf_txt, low_txt = low_txt,
+         resc_txt = resc_txt,
          pf_first = if (any(padfoot)) pf_genes[which(padfoot)[1]] else NA_character_,
          crank = min(rk),
          events = paste(sort(unique(event)), collapse = ","),
@@ -614,15 +669,16 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
                             if (unannot) "unannotated",
                             # V(D)J recombination: any non-translocation event of locus size
                             if (grepl(KF_RECOMBINING_LOCI, gene[1]) && grp[1] != "translocation" &&
-                                all(!is.na(size) & size <= KF_FOCAL_SV_MAX)) "recombining"),
+                                all(!is.na(size) & size <= KF_FOCAL_SV_MAX)) "recombining",
+                            if (rescued) "rescued"),
                           collapse = "+")
-                  else "proximity",
+                  else paste(c("proximity", if (rescued) "rescued"), collapse = "+"),
          panels = kf_union_panels(panels, names(all_panels)),
          vaf = suppressWarnings(max(vaf, na.rm = TRUE)),
          source_id = paste(unique(id), collapse = ","),
          locus = loci[1],
          min_gap = suppressWarnings(min(gap, na.rm = TRUE)))
-  }, by = .(gene, grp, strong)]
+  }, by = .(gene, grp, strong, rescued)]
   agg[!is.finite(vaf), vaf := NA_real_]
 
   # A gene's proximity rows: when the same event (any caller) already hits it strongly they
@@ -633,7 +689,8 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
     s = strong_ev$ev[strong_ev$gene == g]
     length(s) > 0 && all(ev_of(e) %in% ev_of(s))
   }, agg$gene, agg$events)
-  agg = agg[strong == TRUE | !redundant]
+  # A rescued call merely near a gene would be tier 3: never listed, so never counted in the cap
+  agg = agg[(strong == TRUE | !redundant) & !(rescued & !strong)]
   agg[, n_more := 0L]
   prox = agg[strong == FALSE][order(gene, min_gap)]
   if (nrow(prox) > 0) {
@@ -647,7 +704,9 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
 
   agg[, role := kf_role_of(gene, roles)]
   agg[, tier := kf_tier("SV", tokens, role)]
-  agg = agg[!is.na(tier)]
+  agg[, ev_tier := kf_tier("SV", gsub("+rescued", "", tokens, fixed = TRUE), role)]
+  # A rescued call that would be tier 3 on its evidence is not listed at all
+  agg = agg[!is.na(tier) & !(rescued & ev_tier >= 3L)]
   if (nrow(agg) == 0) return(out)
   agg[, `:=`(genes = gene, merged = FALSE)]
   agg = kf_merge_sv_partners(agg, names(all_panels))
@@ -670,7 +729,7 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
                                                          function(p) paste(utils::head(p, 3), collapse = "/"),
                                                          character(1))), ""),
                       " (", cl, ")")
-  evidence = kf_join(agg$main, agg$pf_txt, agg$low_txt)
+  evidence = kf_join(agg$resc_txt, agg$main, agg$pf_txt, agg$low_txt)
   evidence = paste0(evidence, ifelse(n_ev > 1, paste0(" · ", n_ev, " events"), ""))
   evidence = paste0(evidence, ifelse(agg$n_more > 0,
                                      paste0(" (+", agg$n_more, " more nearby SV group",
@@ -684,7 +743,8 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
              evidence = evidence, tier = as.integer(agg$tier), role = agg$role,
              panels = agg$panels, vaf = agg$vaf, source_id = agg$source_id,
              genes = agg$genes, dp = NA_real_, callers = cl, locus = agg$locus,
-             loh = FALSE, in_panel = TRUE)
+             loh = FALSE, in_panel = TRUE, rescued = agg$rescued,
+             ev_tier = as.integer(agg$ev_tier))
 }
 
 # A rearrangement whose breakpoints hit two listed genes (EWSR1-ATF1) is one row, not one per
@@ -716,7 +776,7 @@ kf_merge_sv_partners = function(agg, panel_order = NULL) {
     split_u = function(x) unique(unlist(strsplit(x[nzchar(x)], ",", fixed = TRUE)))
     tok = unique(unlist(strsplit(d$tokens, "+", fixed = TRUE)))
     add[[length(add) + 1L]] = data.table(
-      gene = paste(g, collapse = "–"), grp = d$grp[1], strong = TRUE,
+      gene = paste(g, collapse = "–"), grp = d$grp[1], strong = TRUE, rescued = all(d$rescued),
       cls = d$cls[1], loc = d$loc[1], partner = "",
       callers = paste(split_u(d$callers), collapse = ","),
       junction = TRUE, any_bp = length(bp) > 0,
@@ -725,14 +785,16 @@ kf_merge_sv_partners = function(agg, panel_order = NULL) {
              else paste0("breakpoints in ", paste(utils::head(bp, -1), collapse = ", "),
                          " and ", utils::tail(bp, 1)),
       pf_txt = { p = d$pf_txt[nzchar(d$pf_txt)]; if (length(p)) p[1] else "" },
-      low_txt = "", pf_first = d$pf_first[1], crank = min(d$crank),
+      low_txt = "", resc_txt = { p = d$resc_txt[nzchar(d$resc_txt)]; if (length(p)) p[1] else "" },
+      pf_first = d$pf_first[1], crank = min(d$crank),
       events = paste(sort(as.integer(split_u(d$events))), collapse = ","),
       tokens = paste(tok, collapse = "+"),
       panels = kf_union_panels(d$panels, panel_order),
       vaf = if (all(is.na(d$vaf))) NA_real_ else max(d$vaf, na.rm = TRUE),
       source_id = paste(split_u(d$source_id), collapse = ","),
       locus = d$locus[1], min_gap = NA_real_, n_more = 0L,
-      role = "", tier = min(d$tier), genes = paste(g, collapse = ","), merged = TRUE)
+      role = "", tier = min(d$tier), ev_tier = min(d$ev_tier),
+      genes = paste(g, collapse = ","), merged = TRUE)
     drop = c(drop, m)
   }
   if (length(add) == 0) return(agg)
@@ -804,7 +866,11 @@ build_findings = function(variant_table, section_data, all_panels, reference) {
   sv_tab = if (!is.null(section_data$sv)) section_data$sv$table else NULL
   rows = rbindlist(list(empty_findings(), sv,
                         kf_sv_rows(sv_tab, panels, roles),
-                        kf_cna_rows(cna, roles, reference)), use.names = TRUE)
+                        kf_cna_rows(cna, roles, reference)), use.names = TRUE, fill = TRUE)
+  if (nrow(rows)) {
+    rows[is.na(rescued), rescued := FALSE]
+    rows[is.na(ev_tier), ev_tier := tier]
+  }
   # LOH annotates every row of its gene
   if (nrow(rows)) rows[gene %in% loh_genes, loh := TRUE]
   # One group per gene (or per joined rearrangement): its rows are contiguous, groups ordered
@@ -830,19 +896,25 @@ CIRCOS_LABEL_TIERS = 1:2
 # Tier 1-2 finding lines as label rows: one row per (line, member gene), so the joined
 # "EWSR1–ATF1" row labels EWSR1 and ATF1 at their own loci. `group` is the line's `gene`
 # (its key-findings group), `genes` the group's members, which is what a Custom… list matches.
+# A whitelist-rescued line whose evidence is tier 1-2 is a row too, at that tier with
+# `rescued` 1: the browser labels it only while rescued SVs are shown.
 circos_driver_rows = function(findings) {
   empty = data.table(label = character(), group = character(), genes = character(),
                      panels = character(), tier = integer(), type = character(),
-                     alteration = character())
+                     alteration = character(), rescued = integer())
   if (is.null(findings) || nrow(findings) == 0) return(empty)
+  resc = if ("rescued" %in% names(findings)) findings$rescued %in% TRUE else rep(FALSE, nrow(findings))
+  evt = if ("ev_tier" %in% names(findings)) findings$ev_tier else findings$tier
   # Non-panel rows (panels "") stay: a typed Custom… list labels them, as the overview shows them
-  f = findings[tier %in% CIRCOS_LABEL_TIERS]
+  keep = (!resc & findings$tier %in% CIRCOS_LABEL_TIERS) | (resc & evt %in% CIRCOS_LABEL_TIERS)
+  f = findings[keep]
   if (nrow(f) == 0) return(empty)
+  f_tier = ifelse(resc[keep], evt[keep], f$tier)
   members = strsplit(ifelse(nzchar(f$genes), f$genes, f$gene), ",", fixed = TRUE)
   idx = rep(seq_len(nrow(f)), lengths(members))
   out = data.table(label = trimws(unlist(members)), group = f$gene[idx], genes = f$genes[idx],
-                   panels = f$panels[idx], tier = as.integer(f$tier[idx]), type = f$type[idx],
-                   alteration = f$alteration[idx])
+                   panels = f$panels[idx], tier = as.integer(f_tier[idx]), type = f$type[idx],
+                   alteration = f$alteration[idx], rescued = as.integer(resc[keep][idx]))
   unique(out[nzchar(label)])
 }
 
@@ -956,11 +1028,20 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
                         paste0("ASCAT ", kf_pct(gen$ascat_loh)) else ""))
   } else out$loh = kf_bm("loh", "LOH fraction", "not run", "no copy-number segments", "not_run")
 
-  # Coding TMB (compute_tmb(); same wording as the old header card)
+  # Coding TMB (compute_tmb()): SNVs lead, since long-read homopolymer indel errors can make up
+  # most of the total; the total and the split follow, all over unique variants
   if (!is.null(tmb_info) && !is.null(tmb_info$tmb) && !is.na(tmb_info$tmb)) {
-    out$tmb = kf_bm("tmb", "Coding TMB", paste0(kf_num(tmb_info$tmb), " mut/Mb"),
+    has_split = !is.null(tmb_info$tmb_snv) && !is.na(tmb_info$tmb_snv)
+    out$tmb = kf_bm("tmb", "Coding TMB",
+                    if (has_split) paste0(kf_num(tmb_info$tmb_snv), " mut/Mb (SNVs)")
+                    else paste0(kf_num(tmb_info$tmb), " mut/Mb"),
                     if (!is.null(tmb_info$n_nonsyn) && !is.na(tmb_info$n_nonsyn))
-                      paste0(tmb_info$n_nonsyn, " non-syn / ", tmb_info$denominator_mb, " Mb"))
+                      if (has_split)
+                        paste0(kf_int(tmb_info$n_snv), " SNV", if (tmb_info$n_snv == 1) "" else "s",
+                               " + ", kf_int(tmb_info$n_indel), " indel",
+                               if (tmb_info$n_indel == 1) "" else "s", " non-syn / ",
+                               tmb_info$denominator_mb, " Mb · all ", kf_num(tmb_info$tmb), " mut/Mb")
+                      else paste0(kf_int(tmb_info$n_nonsyn), " non-syn / ", tmb_info$denominator_mb, " Mb"))
   } else out$tmb = kf_bm("tmb", "Coding TMB", "not run", "no small-variant calls", "not_run")
 
   # Small variants
@@ -978,11 +1059,20 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
         else NULL
   if (length(nbc) > 0) {
     cl = KF_CALLER_LABEL[names(nbc)]; cl[is.na(cl)] = names(nbc)[is.na(cl)]
-    tr = if (!is.null(svd$table) && nrow(svd$table) > 0 && all(c("caller", "svclass") %in% names(svd$table)))
-           vapply(names(nbc), function(c) sum(svd$table$caller == c & svd$table$svclass == "translocation"), integer(1))
+    # Whitelist-rescued rows are counted apart: "Severus 323 (+9,388 whitelist-rescued)"
+    nres = svd$n_rescued_by_caller
+    nres = if (is.null(nres)) setNames(rep(0L, length(nbc)), names(nbc))
+           else setNames(as.integer(nres[names(nbc)]), names(nbc))
+    nres[is.na(nres)] = 0L
+    tbl = svd$table
+    pass_rows = if (!is.null(tbl) && nrow(tbl) > 0) !sv_is_rescued(tbl) else logical(0)
+    tr = if (!is.null(tbl) && nrow(tbl) > 0 && all(c("caller", "svclass") %in% names(tbl)))
+           vapply(names(nbc), function(c) sum(pass_rows & tbl$caller == c & tbl$svclass == "translocation"), integer(1))
          else NULL
     out$sv = kf_bm("sv", "Structural variants",
-                   paste(sprintf("%s %s", cl, kf_int(nbc)), collapse = " · "),
+                   paste(sprintf("%s %s%s", cl, kf_int(nbc - nres),
+                                 ifelse(nres > 0, paste0(" (+", kf_int(nres), " whitelist-rescued)"), "")),
+                         collapse = " · "),
                    c(if (!is.null(tr)) paste0("translocations: ", paste(sprintf("%s %s", cl, kf_int(tr)), collapse = ", ")) else "",
                      if (length(nbc) > 1) "per caller, not summed" else ""))
   } else out$sv = kf_bm("sv", "Structural variants", "not run", "no SV caller output", "not_run")

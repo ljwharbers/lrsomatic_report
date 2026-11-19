@@ -7,7 +7,8 @@
 // per alteration of that gene:
 //   tbody  data-gene   group key            data-genes   comma-joined member symbols
 //   tr     data-panels comma-joined panel keys ("" = no panel)
-//          data-tier   1 | 2 | 3            data-type    small variant | SV | CNA
+//          data-tier   1 | 2 | 3 | 4        data-type    small variant | SV | CNA
+//          data-rescued "1" on a whitelist-rescued SV line (tier 4, "Rescued")
 // Rows are computed in R for EVERY embedded panel (R/key_findings.R); this script only shows
 // and hides them. A line is shown when its panels intersect the ticked ones, or one of its
 // group's genes is in a typed Custom… list; a group is shown when any of its lines is. The
@@ -18,7 +19,11 @@
 // findings table without a gene list would be every HIGH-impact variant in the genome.
 //
 // window.registerPanelListener() calls the listener at least twice per change, so apply() is
-// a pure function of (state, showLow) and safe to repeat.
+// a pure function of (state, showLow, showRescued) and safe to repeat.
+//
+// Whitelist-rescued SVs are hidden until shown, and that choice is shared with the SV table
+// and the circos driver labels: window.SV_SHOW_RESCUED, changed through setShowRescued(),
+// which fires "sv-rescue-change" on document for every consumer.
 //
 // The predicates are exported for node (tests/js/test-key-findings.js); the DOM half only runs
 // when a document exists.
@@ -48,20 +53,23 @@
 
   // Visibility of every line and group plus the counts the widget prints. Tier-3 lines that
   // match stay hidden unless showLow; they are counted in nLow so the toggle can say how many.
+  // Rescued lines (row.rescued) likewise stay hidden unless showRescued, counted in nRescued.
   // row.group is the group index (defaults to one group per row).
   //   groups[k] = {rows, matched, visible, head (row index | -1), tier, panels (shown union)}
   //   order     = group indices, shown groups by best shown tier, then R order
-  function kfSummarise(rows, state, showLow) {
+  function kfSummarise(rows, state, showLow, showRescued) {
     const all = !state || !!state.all;
     const visible = [];
     const groups = [], byKey = {};
-    let matched = 0, nLow = 0, shown = 0;
+    let matched = 0, nLow = 0, nRescued = 0, shown = 0;
     rows.forEach(function (row, i) {
       const m = kfRowMatches(row, state);
-      const low = Number(row.tier) >= 3;
+      const rescued = !!row.rescued;
+      const low = !rescued && Number(row.tier) >= 3;
       if (m) matched++;
       if (m && low) nLow++;
-      const v = m && (!low || !!showLow);
+      if (m && rescued) nRescued++;
+      const v = m && (rescued ? !!showRescued : (!low || !!showLow));
       if (v) shown++;
       visible.push(v);
 
@@ -92,7 +100,8 @@
     });
     const nGroups = groups.filter(function (g) { return g.matched; }).length;
     const nGroupsShown = groups.filter(function (g) { return g.visible; }).length;
-    return { visible: visible, matched: matched, nLow: nLow, shown: shown, all: all,
+    return { visible: visible, matched: matched, nLow: nLow, nRescued: nRescued,
+             shown: shown, all: all,
              empty: !all && matched === 0, groups: groups, order: order,
              nGroups: nGroups, nGroupsShown: nGroupsShown };
   }
@@ -106,7 +115,16 @@
     return out.length ? out.join(", ") : "none";
   }
 
-  const api = { kfRowMatches: kfRowMatches, kfSummarise: kfSummarise, kfListLabel: kfListLabel };
+  // The one place the shared rescued-SV choice changes
+  function setShowRescued(v) {
+    if (typeof window === "undefined") return;
+    window.SV_SHOW_RESCUED = !!v;
+    if (typeof document !== "undefined" && typeof CustomEvent === "function")
+      document.dispatchEvent(new CustomEvent("sv-rescue-change", { detail: { show: !!v } }));
+  }
+
+  const api = { kfRowMatches: kfRowMatches, kfSummarise: kfSummarise, kfListLabel: kfListLabel,
+                setShowRescued: setShowRescued };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (typeof window !== "undefined") window.keyFindings = api;
   if (typeof document === "undefined") return;
@@ -122,13 +140,15 @@
       trs.push(tr);
       rows.push({ gene: tr.getAttribute("data-gene") || "", genes: genes, group: k,
                   panels: (tr.getAttribute("data-panels") || "").split(","),
-                  tier: Number(tr.getAttribute("data-tier")) });
+                  tier: Number(tr.getAttribute("data-tier")),
+                  rescued: tr.getAttribute("data-rescued") === "1" });
     });
   });
   const tableWrap = root.querySelector(".kf-table-wrap");
   const needList = root.querySelector(".kf-need-list");
   const empty = root.querySelector(".kf-empty");
   const toggle = root.querySelector(".kf-toggle-low");
+  const toggleRescued = root.querySelector(".kf-toggle-rescued");
   const count = root.querySelector(".kf-count");
   const printLine = root.querySelector(".kf-print-panels");
   const customNote = root.querySelector(".kf-custom-note");
@@ -144,7 +164,8 @@
   let showLow = false;
 
   function apply() {
-    const s = kfSummarise(rows, state, showLow);
+    const showRescued = !!window.SV_SHOW_RESCUED;
+    const s = kfSummarise(rows, state, showLow, showRescued);
     trs.forEach(function (tr, i) {
       tr.hidden = !s.visible[i];
       const head = s.groups[rows[i].group].head === i;
@@ -180,6 +201,12 @@
         ? "Hide " + s.nLow + " lower-confidence finding" + (s.nLow === 1 ? "" : "s")
         : "Show " + s.nLow + " lower-confidence finding" + (s.nLow === 1 ? "" : "s") + " (tier 3)";
     }
+    if (toggleRescued) {
+      toggleRescued.hidden = s.all || s.nRescued === 0;
+      toggleRescued.setAttribute("aria-pressed", showRescued ? "true" : "false");
+      toggleRescued.textContent = (showRescued ? "Hide " : "Show ") + s.nRescued +
+        " whitelist-rescued SV finding" + (s.nRescued === 1 ? "" : "s");
+    }
     if (count) {
       count.textContent = s.all ? "" :
         (s.nGroupsShown + " of " + s.nGroups + " gene" + (s.nGroups === 1 ? "" : "s") + " shown");
@@ -188,6 +215,10 @@
   }
 
   if (toggle) toggle.addEventListener("click", function () { showLow = !showLow; apply(); });
+  if (toggleRescued) toggleRescued.addEventListener("click", function () {
+    setShowRescued(!window.SV_SHOW_RESCUED);
+  });
+  document.addEventListener("sv-rescue-change", apply);
 
   // "Lymphoid · 4 genes" hints in the empty state tick the chip itself, through its own change
   // handler (click() toggles the box and fires change), so tables and filters follow too

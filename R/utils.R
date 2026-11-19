@@ -615,7 +615,11 @@ count_small_variants = function(vep_data) {
   list(total = nrow(u), snv = sum(is_snv), indel = nrow(u) - sum(is_snv))
 }
 
-# Coding TMB from a variant_table; consequence may be comma-joined; denominator_mb defaults to 30
+# Coding TMB from a variant_table: non-synonymous variants, each counted once however many
+# gene rows it has, over denominator_mb (30). Also split into SNVs and indels (the
+# count_small_variants() rule), because long-read homopolymer indel errors can dominate the
+# total: tmb_snv is the figure to compare across platforms. consequence may be ","/"&"-joined.
+#   returns list(n_nonsyn, n_snv, n_indel, tmb, tmb_snv, denominator_mb)
 compute_tmb = function(variant_table, denominator_mb = 30) {
   nonsyn_terms = c(
     "missense_variant", "frameshift_variant", "stop_gained", "stop_lost",
@@ -623,16 +627,28 @@ compute_tmb = function(variant_table, denominator_mb = 30) {
     "splice_acceptor_variant", "splice_donor_variant", "protein_altering_variant"
   )
   if (is.null(variant_table) || nrow(variant_table) == 0) {
-    return(list(n_nonsyn = NA_integer_, tmb = NA_real_, denominator_mb = denominator_mb))
+    return(list(n_nonsyn = NA_integer_, n_snv = NA_integer_, n_indel = NA_integer_,
+                tmb = NA_real_, tmb_snv = NA_real_, denominator_mb = denominator_mb))
   }
-  is_nonsyn = vapply(variant_table$consequence, function(csq) {
+  vt = as.data.table(variant_table)
+  is_nonsyn = vapply(vt$consequence, function(csq) {
     if (is.na(csq) || csq == "") return(FALSE)
-    any(trimws(unlist(strsplit(csq, ","))) %in% nonsyn_terms)
-  }, logical(1))
-  n_nonsyn = sum(is_nonsyn, na.rm = TRUE)
+    any(trimws(unlist(strsplit(csq, "[,&]"))) %in% nonsyn_terms)
+  }, logical(1), USE.NAMES = FALSE)
+  key_cols = intersect(c("chrom", "pos", "ref", "alt"), names(vt))
+  u = if (length(key_cols) == 4L) unique(vt[is_nonsyn, ..key_cols]) else vt[is_nonsyn]
+  base = c("A", "C", "G", "T")
+  is_snv = if (length(key_cols) == 4L)
+             toupper(as.character(u$ref)) %in% base & toupper(as.character(u$alt)) %in% base
+           else rep(NA, nrow(u))
+  n_nonsyn = nrow(u)
+  n_snv = if (anyNA(is_snv)) NA_integer_ else sum(is_snv)
   list(
     n_nonsyn       = n_nonsyn,
+    n_snv          = n_snv,
+    n_indel        = if (is.na(n_snv)) NA_integer_ else n_nonsyn - n_snv,
     tmb            = round(n_nonsyn / denominator_mb, 2),
+    tmb_snv        = if (is.na(n_snv)) NA_real_ else round(n_snv / denominator_mb, 2),
     denominator_mb = denominator_mb
   )
 }

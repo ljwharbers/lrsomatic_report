@@ -20,8 +20,10 @@ In page order:
     ticked, the table is replaced by a prompt listing how many tier 1–2 findings each embedded
     list has.
   - **Genome-wide biomarkers**: purity / ploidy, whole-genome duplication, LOH fraction, coding
-    TMB, small-variant counts, SV counts per caller, chromothripsis, ecDNA / focal amplicons
-    and dominant mutational signatures. A biomarker whose tool did not run reads "not run".
+    TMB (non-synonymous SNVs per Mb, with the total including indels; each variant counted once),
+    small-variant counts, SV counts per caller (whitelist-rescued calls apart), chromothripsis,
+    ecDNA / focal amplicons and dominant mutational signatures. A biomarker whose tool did not
+    run reads "not run".
   - **Sequencing** cards: mean coverage, read N50, error rate, phased germline variants.
 - **Circos overview** — ideogram, somatic **SNV density** (per 1 Mb window), non-breakend SVs
   and copy number (the overview's source: Wakhan, else ASCAT, named in the caption), with
@@ -118,7 +120,7 @@ Considered when the gene is in the list's small-variant scope:
 
 | Tier | Rule |
 |---|---|
-| 1 | ClinVar pathogenic or likely pathogenic ("Conflicting classifications" never counts) |
+| 1 | ClinVar pathogenic or likely pathogenic ("Conflicting classifications" never counts). ClinVar classifies the variant, so when VEP lists several genes for it, only the genes where it is coding or at a splice site get the credit (not a gene merely downstream or upstream of it); a variant coding in none of its genes keeps it on all |
 | 1 | VEP impact HIGH (truncating: stop gained, frameshift, splice donor/acceptor, start lost, transcript ablation; or another HIGH consequence) |
 | 2 | VEP impact MODERATE with a damaging prediction: AlphaMissense *likely pathogenic*; where AlphaMissense gives no call, EVE pathogenic; failing both, SIFT *deleterious* together with PolyPhen *probably damaging* |
 
@@ -146,7 +148,21 @@ events are listed per event class.
 | 3 | "Near": a breakend within 1 Mb of the gene (100 kb for other event types) without touching it; at most 3 such rows per gene, and none for an event already listed with stronger evidence for the gene |
 
 A gene that merely lies inside a larger event (for example a 40 Mb inversion or deletion) is
-not an SV finding; it is left to the copy-number rows.
+not an SV finding; it is left to the copy-number rows. That includes a gene VEP names on a
+breakend record (VEP lists every gene a same-chromosome breakend spans): wherever a list gives
+the gene coordinates, "breakpoint in" needs the breakpoint inside it.
+
+**Whitelist-rescued SVs.** With `--severus_whitelist`, Severus keeps calls that failed its own
+filters when they lie in the whitelist regions, and tags them `INFO/WL_RESCUE` (most have one or
+two supporting reads; on a 30x sample with `--whitelist-single-read any` they were 9,388 of
+9,711 records). Such a finding gets its own tier, **Rescued**, below tier 3: it is hidden until
+"Show whitelist-rescued SVs" is pressed, and its evidence names the rescue reason, any filter
+the call failed and its read support. A rescued call whose evidence would only be tier 3 is not
+listed; one that SAVANA also made is not rescued (the event stands with SAVANA's call). The
+same choice shows or hides rescued rows in the SV table and their circos labels; the SV card
+counts them apart ("Severus 323 (+9,388 whitelist-rescued)"), and the genome circos does not
+draw them. ShatterSeek and ReConPlot were given every call. A non-PASS Severus record that was
+not rescued is not shown at all, as for small variants.
 
 ### Copy number
 
@@ -159,7 +175,8 @@ From the gene-level calls of the copy-number section:
 | 3 | Either call in a **pseudoautosomal region** (reads from the chrX and chrY copies map to one of them, so a PAR gene can read CN 0 with nothing deleted) or at an **IG/TR locus** (physiologically rearranged and deleted in lymphocytes) |
 
 Loss of heterozygosity is not a finding on its own; it is noted on the gene ("LOH in gene").
-Tier 3 alterations are hidden until "Show lower-confidence findings" is clicked.
+Tier 3 alterations are hidden until "Show lower-confidence findings" is clicked, and
+whitelist-rescued SVs until "Show whitelist-rescued SVs" is.
 
 **Custom… lists.** A list typed into the report matches by gene symbol among the findings of the
 embedded lists and among up to 500 small variants outside them that are ClinVar (likely)

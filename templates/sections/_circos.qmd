@@ -53,7 +53,8 @@ if (!is.null(circos_tmp) && file.exists(circos_tmp)) {
     paste(sprintf("%s: %s", names(geom), vapply(geom, js_num, character(1))), collapse = ", "),
     "},\n  anchors: ", js_rows(anchors, c("gene", "theta", "x", "y")),
     ",\n  rows: ", js_rows(lab_rows,
-                          c("label", "group", "genes", "panels", "tier", "type", "alteration")),
+                          c("label", "group", "genes", "panels", "tier", "type", "alteration",
+                            "rescued")),
     "};"))) else NULL
   # No viewBox in the markup: circos_drivers.js sets it from geom (Quarto lowercases
   # attributes on markup it processes, and an SVG `viewbox` is ignored)
@@ -86,7 +87,12 @@ if (!is.null(circos_tmp) && file.exists(circos_tmp)) {
                          formatC(dens_cap, format = "d", big.mark = ","))
                else "."),
         "Substitution types are shown in the",
-        tags$a(href = "#mutational-signatures", "Mutational signatures"), "section."
+        tags$a(href = "#mutational-signatures", "Mutational signatures"), "section.",
+        if (isTRUE(SECTION_DATA$sv$circos_rescued > 0))
+          sprintf(paste("The SV track and links leave out %s whitelist-rescued call%s (see",
+                        "Structural variants); their gene labels appear only while rescued SVs are shown."),
+                  formatC(SECTION_DATA$sv$circos_rescued, format = "d", big.mark = ","),
+                  if (SECTION_DATA$sv$circos_rescued == 1) "" else "s")
       )
     ),
     tags$div(class = "circos-legend",
