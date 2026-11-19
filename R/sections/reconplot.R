@@ -47,12 +47,13 @@ reconplot_chromosomes = function(findings = NULL, sv_table = NULL, shatterseek_h
                      criteria = if ("criteria" %in% names(shatterseek_high))
                                   as.character(shatterseek_high$criteria[keep]) else NA_character_)
     if (nrow(ssd)) {
+      # Integer in every group (min() of no tier would be the double Inf)
       ssd = ssd[, .(tiers = shatterseek_tiers(criteria),
-                    ss_tier = suppressWarnings(min(shatterseek_best_tier(criteria), na.rm = TRUE))), by = chrom]
-      ssd[!is.finite(ss_tier), ss_tier := NA_real_]
+                    ss_tier = { b = shatterseek_best_tier(criteria)
+                                if (all(is.na(b))) NA_integer_ else min(b, na.rm = TRUE) }), by = chrom]
       out[[length(out) + 1]] = data.table(
         chrom = ssd$chrom, always = TRUE, panels = "", genes = "", kind = "chromothripsis",
-        ss_tier = as.integer(ssd$ss_tier), prio = 1L,
+        ss_tier = ssd$ss_tier, prio = 1L,
         reason = paste0("chromothripsis call", ifelse(nzchar(ssd$tiers), paste0(" (", ssd$tiers, ")"), "")))
     }
   }

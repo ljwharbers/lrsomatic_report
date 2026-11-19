@@ -158,3 +158,14 @@ test_that("a whitelist-rescued Padfoot HIGH_ONCO call neither selects nor outran
   kept = reconplot_cap(r, 3L, paste0("chr", 1:22))$kept$chrom
   expect_equal(kept, c("chr4", "chr5", "chr8"))
 })
+
+test_that("ReConPlot chromosomes: an HC-tiered and an untiered chromothripsis call together", {
+  ss = data.table(chrom = c("X", "7", "7"), confidence = c("high", "low", "low"),
+                  criteria = c("HC1", "", NA))
+  r = reconplot_chromosomes(shatterseek_high = ss)
+  setkey(r, chrom)
+  expect_equal(r["chrX"]$ss_tier, 1L)
+  expect_true(is.na(r["chr7"]$ss_tier))
+  expect_equal(r["chr7"]$reasons, "chromothripsis call")
+  expect_type(r$ss_tier, "integer")
+})
