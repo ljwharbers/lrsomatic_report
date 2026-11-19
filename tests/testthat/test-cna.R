@@ -266,3 +266,19 @@ test_that("the profile plot builds from segments and is NULL when there are none
   expect_null(cna_profile_plot(.empty_cn_segments(), "chr1", c(chr1 = 1e6)))
   expect_null(cna_profile_plot(NULL, "chr1", c(chr1 = 1e6)))
 })
+
+test_that("the circos copy-number ring follows the CN section's source (REP-8)", {
+  wk = list(source = "wakhan", segments = data.table(
+    chrom = c("chr1", "chr2", "chr3"), start = c(1, 1, 1), end = c(100, 200, 300),
+    cn_a = c(1, 5, NA), cn_b = c(3, 2, NA), total = c(4, 7, NA), minor = c(1, 2, NA)))
+  r = circos_cn_segments(wk, ascat_segments = data.table(chr = "chr9"))
+  expect_equal(r$source, "wakhan")
+  expect_equal(r$segments$chr, c("chr1", "chr2"))           # a segment without a total is not drawn
+  expect_equal(r$segments$major_cn, c(3, 4))                 # higher haplotype, capped at 4
+  expect_equal(r$segments$minor_cn, c(1, 2))
+  expect_equal(r$segments$total_cn, c(4, 4))
+  # skip_ascat: Wakhan still draws a ring; no CN section at all: ASCAT's own segments, else nothing
+  expect_equal(circos_cn_segments(NULL, data.table(chr = "chr9"))$source, "ascat")
+  expect_null(circos_cn_segments(NULL, NULL))
+  expect_null(circos_cn_segments(list(source = NA_character_, segments = data.table()), NULL))
+})

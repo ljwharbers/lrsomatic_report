@@ -21,6 +21,26 @@ parse_ascat_segments = function(segments_file) {
   dt
 }
 
+# The genome circos's copy-number ring from the copy-number section's own segments (the source
+# the overview and the gene-level calls use), capped at 4 like parse_ascat_segments();
+# major/minor = the higher/lower of cn_a/cn_b (Wakhan HP1/HP2, ASCAT nMajor/nMinor). Falls back
+# to `ascat_segments` (parse_ascat_segments()). list(segments, source) or NULL
+circos_cn_segments = function(cna, ascat_segments = NULL) {
+  s = if (!is.null(cna)) cna$segments else NULL
+  if (!is.null(s) && nrow(s) > 0 && !is.null(cna$source) && !is.na(cna$source)) {
+    s = as.data.table(s)[!is.na(total)]
+    if (nrow(s) > 0) {
+      a = suppressWarnings(as.numeric(s$cn_a)); b = suppressWarnings(as.numeric(s$cn_b))
+      return(list(source = cna$source, segments = data.table(
+        chr = ensure_chr_prefix(as.character(s$chrom)), startpos = s$start, endpos = s$end,
+        major_cn = pmin(pmax(a, b), 4), minor_cn = pmin(pmin(a, b), 4), total_cn = pmin(s$total, 4))))
+    }
+  }
+  if (!is.null(ascat_segments) && nrow(ascat_segments) > 0)
+    return(list(source = "ascat", segments = ascat_segments))
+  NULL
+}
+
 # Parse ASCAT purity/ploidy file
 parse_ascat_purityploidy = function(pp_file) {
   if (is.null(pp_file) || !file.exists(pp_file)) return(list(purity = NA_real_, ploidy = NA_real_))

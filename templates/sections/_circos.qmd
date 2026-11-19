@@ -72,6 +72,12 @@ if (!is.null(circos_tmp) && file.exists(circos_tmp)) {
       tags$figcaption(class = "report-figure__caption",
         if (has_labels) "Gene labels: the tier 1–2 key findings of the ticked gene list(s), bold for tier 1.",
         "Tracks, outer to inner: ideogram · SNV density · SV · copy number.",
+        if (!is.null(circos_cn))
+          paste0("Copy number: ", { l = c(wakhan = "Wakhan rank-1 haplotype-resolved segments (major / minor = the higher / lower haplotype)",
+                                          ascat = "ASCAT allele-specific segments")[circos_cn$source]
+                                    if (is.na(l)) circos_cn$source else l },
+                 ", the source of the overview's purity / ploidy and gene-level calls; capped at 4.")
+        else "No copy-number segments were found, so the copy-number ring is empty.",
         # One string: adjacent tagList members render with a space, which would orphan the "."
         paste0(sprintf("SNV density is the number of somatic single-nucleotide variants per %s window",
                        fmt_bp(CIRCOS_SNV_BIN)),

@@ -24,7 +24,8 @@ In page order:
     and dominant mutational signatures. A biomarker whose tool did not run reads "not run".
   - **Sequencing** cards: mean coverage, read N50, error rate, phased germline variants.
 - **Circos overview** — ideogram, somatic **SNV density** (per 1 Mb window), non-breakend SVs
-  and ASCAT copy number, with translocation links, and the tier 1–2 key-finding genes of the
+  and copy number (the overview's source: Wakhan, else ASCAT, named in the caption), with
+  translocation links, and the tier 1–2 key-finding genes of the
   ticked gene list(s) labelled around the outside.
 - **Copy number profile** — ASCAT plots; a static haplotype-resolved **Wakhan** profile of the
   rank-1 solution with the solutions table; and **gene-level copy number** for every gene of the
