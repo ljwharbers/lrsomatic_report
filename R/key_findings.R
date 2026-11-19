@@ -1025,11 +1025,20 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
                         paste0("ASCAT ", kf_pct(gen$ascat_loh)) else ""))
   } else out$loh = kf_bm("loh", "LOH fraction", "not run", "no copy-number segments", "not_run")
 
-  # Coding TMB (compute_tmb(); same wording as the old header card)
+  # Coding TMB (compute_tmb()): SNVs lead, since long-read homopolymer indel errors can make up
+  # most of the total; the total and the split follow, all over unique variants
   if (!is.null(tmb_info) && !is.null(tmb_info$tmb) && !is.na(tmb_info$tmb)) {
-    out$tmb = kf_bm("tmb", "Coding TMB", paste0(kf_num(tmb_info$tmb), " mut/Mb"),
+    has_split = !is.null(tmb_info$tmb_snv) && !is.na(tmb_info$tmb_snv)
+    out$tmb = kf_bm("tmb", "Coding TMB",
+                    if (has_split) paste0(kf_num(tmb_info$tmb_snv), " mut/Mb (SNVs)")
+                    else paste0(kf_num(tmb_info$tmb), " mut/Mb"),
                     if (!is.null(tmb_info$n_nonsyn) && !is.na(tmb_info$n_nonsyn))
-                      paste0(tmb_info$n_nonsyn, " non-syn / ", tmb_info$denominator_mb, " Mb"))
+                      if (has_split)
+                        paste0(kf_int(tmb_info$n_snv), " SNV", if (tmb_info$n_snv == 1) "" else "s",
+                               " + ", kf_int(tmb_info$n_indel), " indel",
+                               if (tmb_info$n_indel == 1) "" else "s", " non-syn / ",
+                               tmb_info$denominator_mb, " Mb · all ", kf_num(tmb_info$tmb), " mut/Mb")
+                      else paste0(kf_int(tmb_info$n_nonsyn), " non-syn / ", tmb_info$denominator_mb, " Mb"))
   } else out$tmb = kf_bm("tmb", "Coding TMB", "not run", "no small-variant calls", "not_run")
 
   # Small variants

@@ -20,8 +20,10 @@ In page order:
     ticked, the table is replaced by a prompt listing how many tier 1–2 findings each embedded
     list has.
   - **Genome-wide biomarkers**: purity / ploidy, whole-genome duplication, LOH fraction, coding
-    TMB, small-variant counts, SV counts per caller (whitelist-rescued calls apart), chromothripsis, ecDNA / focal amplicons
-    and dominant mutational signatures. A biomarker whose tool did not run reads "not run".
+    TMB (non-synonymous SNVs per Mb, with the total including indels; each variant counted once),
+    small-variant counts, SV counts per caller (whitelist-rescued calls apart), chromothripsis,
+    ecDNA / focal amplicons and dominant mutational signatures. A biomarker whose tool did not
+    run reads "not run".
   - **Sequencing** cards: mean coverage, read N50, error rate, phased germline variants.
 - **Circos overview** — ideogram, somatic **SNV density** (per 1 Mb window), non-breakend SVs
   and ASCAT copy number, with translocation links, and the tier 1–2 key-finding genes of the

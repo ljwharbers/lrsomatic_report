@@ -519,6 +519,28 @@ test_that("the SV biomarker counts whitelist-rescued rows apart", {
   expect_match(b$sv$detail, "translocations: Severus 1, SAVANA 1", fixed = TRUE)
 })
 
+test_that("coding TMB counts unique variants, SNVs apart from indels", {
+  # One missense SNV listed under two genes, one frameshift, one synonymous
+  vt = kf_vt(symbol = c("TP53", "WRAP53", "MYC", "KRAS"),
+             pos = c(100L, 100L, 200L, 300L), ref = c("C", "C", "AT", "G"),
+             alt = c("T", "T", "A", "A"),
+             consequence = c("missense_variant", "missense_variant&splice_region_variant",
+                             "frameshift_variant", "synonymous_variant"))
+  t = compute_tmb(vt)
+  expect_equal(t[c("n_nonsyn", "n_snv", "n_indel")], list(n_nonsyn = 2L, n_snv = 1L, n_indel = 1L))
+  expect_equal(t$tmb, round(2 / 30, 2))
+  expect_equal(t$tmb_snv, round(1 / 30, 2))
+  b = build_biomarkers(list(), NULL, t, list())
+  expect_equal(b$tmb$value, "0.03 mut/Mb (SNVs)")
+  expect_equal(b$tmb$detail, "1 SNV + 1 indel non-syn / 30 Mb · all 0.07 mut/Mb")
+  # A table without alleles still gives the total
+  t2 = compute_tmb(vt[, .(consequence)])
+  expect_equal(t2$n_nonsyn, 3L)
+  expect_true(is.na(t2$tmb_snv))
+  expect_equal(build_biomarkers(list(), NULL, t2, list())$tmb$value, "0.10 mut/Mb")
+  expect_true(is.na(compute_tmb(NULL)$tmb))
+})
+
 test_that("SVs are counted per caller, never summed", {
   sv = list(n_by_caller = c(severus = 120L, savana = 64L),
             table = kf_sv(caller = c("severus", "savana", "savana"),
