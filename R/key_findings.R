@@ -749,6 +749,7 @@ kf_cna_rows = function(cna, roles, reference) {
   g = g[!is.na(call) & call %in% c("amplification", "homozygous deletion", "deep deletion")]
   if (nrow(g) == 0) return(out)
   src_lab = c(wakhan = "Wakhan", ascat = "ASCAT", savana = "SAVANA")
+  if (!"span_from" %in% names(g)) g[, span_from := NA_character_]
   # One row per gene locus; a gene in several panels lists them all
   # (panels may carry slightly different spans for one gene: one row per gene and call)
   g = g[, .(panels = paste(unique(panel), collapse = ","),
@@ -756,7 +757,7 @@ kf_cna_rows = function(cna, roles, reference) {
             partial = any(partial %in% TRUE), loh = any(loh %in% TRUE),
             min_cn = suppressWarnings(min(min_cn, na.rm = TRUE)),
             max_cn = suppressWarnings(max(max_cn, na.rm = TRUE)),
-            source = source[1]),
+            source = source[1], segment = any(span_from %in% "Wakhan segment")),
         by = .(gene, call)]
   par = kf_in_par(g$chrom, g$start, g$end, reference)
   recomb = grepl(KF_RECOMBINING_LOCI, toupper(g$gene))
@@ -773,6 +774,7 @@ kf_cna_rows = function(cna, roles, reference) {
                       ifelse(g$partial, ", partial gene", ""), ")")
   evidence = kf_join(
     paste0(sl, " copy number"),
+    ifelse(g$segment, "locus is Wakhan's segment, not the gene's span", ""),
     ifelse(par, "pseudoautosomal region — copy number unreliable", ""),
     ifelse(recomb & !par, "immunoglobulin / T-cell receptor locus — physiological rearrangement", ""),
     ifelse(g$loh & is_amp, "LOH", ""),
@@ -782,7 +784,7 @@ kf_cna_rows = function(cna, roles, reference) {
              panels = g$panels, vaf = NA_real_,
              source_id = paste0(g$chrom, ":", g$start, "-", g$end),
              genes = toupper(g$gene), dp = NA_real_, callers = ifelse(is.na(sl), "", sl),
-             locus = paste0(g$chrom, ":", kf_int(g$start), "–", kf_int(g$end)),
+             locus = paste0(ifelse(g$segment, "segment ", ""), g$chrom, ":", kf_int(g$start), "–", kf_int(g$end)),
              loh = g$loh, in_panel = TRUE)[!is.na(tier)]
 }
 

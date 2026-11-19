@@ -282,3 +282,27 @@ test_that("the circos copy-number ring follows the CN section's source (REP-8)",
   expect_null(circos_cn_segments(NULL, NULL))
   expect_null(circos_cn_segments(list(source = NA_character_, segments = data.table()), NULL))
 })
+
+test_that("a symbol-only list takes gene spans from another list before Wakhan's file (REP-9)", {
+  segs = seg_dt(c("chr9", "chr3"), c(21e6, 160e6), c(23e6, 190e6), c(0, 2), c(0, 1))
+  builtin = fake_panel(c("CDKN2A", "PIK3CA"), c("chr9", "chr3"), c(21967752, 179148114),
+                       c(21995301, 179240093), c("CDKN2A", "PIK3CA"))
+  custom = fake_panel(c("cdkn2a", "PIK3CA", "ONLYWAKHAN", "NOWHERE"))
+  wg = data.table(chrom = "chr5", start = 1e6, end = 2e7, gene = "ONLYWAKHAN",
+                  hp1_state = 2, hp2_state = 2, total = 4, minor = 2)
+  g = cna_gene_calls(segs, list(sarcoma = builtin, mine = custom), ploidy = 2, sex = "female",
+                     source = "wakhan", wakhan_genes = wg)$genes[panel == "mine"]
+  setkey(g, gene)
+  # The list's own spelling, the builtin's span, called on the segments like any coordinate row
+  expect_equal(g["cdkn2a"]$call, "homozygous deletion")
+  expect_equal(g["cdkn2a"]$start, 21967752)
+  expect_equal(g["cdkn2a"]$span_from, "sarcoma")
+  expect_equal(g["PIK3CA"]$source, "wakhan")
+  # Only what no list places falls back to Wakhan's file, labelled as a segment
+  expect_equal(g["ONLYWAKHAN"]$source, "wakhan-genes")
+  expect_equal(g["ONLYWAKHAN"]$span_from, "Wakhan segment")
+  expect_false("NOWHERE" %in% g$gene)
+  # A list's own coordinate rows carry no span_from
+  b = cna_gene_calls(segs, list(sarcoma = builtin, mine = custom), 2, "female", "wakhan")$genes[panel == "sarcoma"]
+  expect_true(all(is.na(b$span_from)))
+})

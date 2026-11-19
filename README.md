@@ -398,8 +398,9 @@ Coordinate matching is the reliable mode: whether VEP annotates a breakend with 
 at all depends on the sample's VEP invocation (1.6%–90% of breakend rows across the samples
 measured), so a symbol-only panel can hide exactly the translocations it exists to find. The
 note under the SV table says which mode is in force. Coordinates are also what gene-level copy
-number is called on; a symbol-only list gets copy-number calls only where Wakhan's per-gene
-file has the gene.
+number is called on; a symbol-only list takes each gene's span from another embedded list that
+has it (the builtins, for a reference they ship for), and only failing that from Wakhan's
+per-gene file, whose coordinates are the Wakhan segment's (labelled so in the table).
 
 Because coordinates are only valid for one genome, a coordinate panel must declare its
 reference (a leading `# reference: hg38` line, or a `reference` column) and a mismatch with the

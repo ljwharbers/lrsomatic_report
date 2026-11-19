@@ -15,8 +15,10 @@ cna_label = function(x) ifelse(x %in% names(cna_src_label), cna_src_label[x], x)
 # One row per gene locus; a gene in several panels lists them all
 cna_rows = NULL
 if (!is.null(cna_genes) && nrow(cna_genes) > 0) {
+  if (!"span_from" %in% names(cna_genes)) cna_genes[, span_from := NA_character_]
   cna_rows = cna_genes[, .(panels = paste(unique(panel), collapse = ","),
-                           role = { r = role[!is.na(role) & nzchar(role)]; if (length(r)) r[1] else NA_character_ }),
+                           role = { r = role[!is.na(role) & nzchar(role)]; if (length(r)) r[1] else NA_character_ },
+                           span_from = span_from[1]),
                        by = .(gene, chrom, start, end, min_cn, max_cn, min_minor, n_segments,
                               call, partial, loh, source, expected)]
   cna_rows[, flagged := !is.na(call) & (call != "neutral" | loh)]
@@ -46,7 +48,8 @@ htmltools::tagList(
   if (length(cna_no_coords) > 0)
     section_notice(paste0("Panel", if (length(cna_no_coords) > 1) "s" else "", " without gene coordinates: ",
                           paste(cna_no_coords, collapse = ", "),
-                          ". Their genes are called only where Wakhan's own per-gene file lists them."))
+                          ". Their genes take their span from another embedded gene list where one has it, ",
+                          "otherwise from Wakhan's own per-gene file, whose coordinates are the segment's, not the gene's."))
 )
 ```
 
@@ -87,7 +90,10 @@ trs = lapply(seq_len(nrow(cna_rows)), function(i) {
     `data-flagged` = if (r$flagged) "1" else "0",
     tags$td(class = "cna-genes__gene", r$gene),
     tags$td(gsub(",", ", ", r$panels, fixed = TRUE)),
-    tags$td(class = "cna-genes__locus", locus[i]),
+    tags$td(class = "cna-genes__locus", locus[i],
+            if (!is.na(r$span_from)) tags$span(class = "cna-genes__span-from",
+              if (r$span_from == "Wakhan segment") "Wakhan segment, not the gene's span"
+              else paste0("span from ", r$span_from))),
     tags$td(class = "cna-genes__num", cell_cn(r$min_cn, r$max_cn)),
     tags$td(class = "cna-genes__num", if (is.na(r$min_minor)) "–" else cna_fmt(r$min_minor)),
     tags$td(tags$span(class = paste0("cna-call cna-call--", call_slug[i]),
