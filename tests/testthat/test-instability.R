@@ -51,8 +51,9 @@ test_that("two combos that disagree are both kept, labelled, and flagged", {
   expect_identical(x$high[combo == "severus_wakhan", chrom], "chr3")
   expect_true(shatterseek_disagree(x))
   v = shatterseek_verdict(x)
-  expect_match(v, "^High-confidence chromothripsis on chr3 \\(all combinations\\)")
-  expect_match(v, "chr8 \\(Severus \\+ ASCAT only\\)")
+  # The verdict names the PCAWG tier(s) each chromosome meets, not only "high"
+  expect_match(v, "^High-confidence chromothripsis on chr3 \\[HC1\\] \\(all combinations\\)")
+  expect_match(v, "chr8 \\[HC1,HC2\\] \\(Severus \\+ ASCAT only\\)")
 })
 
 test_that("renamed, missing and extra columns are tolerated; directory names the combo", {
@@ -70,7 +71,7 @@ test_that("renamed, missing and extra columns are tolerated; directory names the
   expect_identical(x$high$confidence, "high")
   expect_identical(x$high$criteria, "HC3")
   expect_false(shatterseek_disagree(x))
-  expect_identical(shatterseek_verdict(x), "High-confidence chromothripsis on chr5 (SAVANA).")
+  expect_identical(shatterseek_verdict(x), "High-confidence chromothripsis on chr5 [HC3] (SAVANA).")
 })
 
 test_that("a file without a chromosome column is skipped with a message", {
@@ -220,4 +221,24 @@ test_that("real AITL6 (0-byte seeds) parses to none_detected", {
   inputs = s$locate(file.path(aitl6, "ecdna"), "AITL6")
   x = s$parse(inputs, list(), list())
   expect_identical(x$status, "none_detected")
+})
+
+test_that("the best tier of a call and the minimum-tier views", {
+  expect_identical(shatterseek_best_tier(c("HC1,HC2", "HC3", "HC2,HC3", "", NA)),
+                   c(1L, 3L, 2L, NA, NA))
+  expect_identical(shatterseek_tiers(c("HC3", "HC1,HC2")), "HC1,HC2,HC3")
+  x = run_section("shatterseek", file.path(instab_fx, "ss_two_combos"))
+  # chr3 (HC1) in both combinations, chr8 HC1,HC2 in one
+  expect_identical(shatterseek_at_tier(x, 3L), x)
+  expect_equal(nrow(shatterseek_at_tier(x, 1L)$high), 3)
+  y = x
+  y$high = copy(x$high)[chrom == "chr3", criteria := "HC3"]
+  h1 = shatterseek_at_tier(y, 1L)
+  expect_identical(h1$high$chrom, "chr8")
+  expect_equal(h1$n_below_tier, 2L)
+  expect_match(shatterseek_verdict(h1), "chr8 \\[HC1,HC2\\]")
+  # No call left at this tier: say so, never "No chromothripsis called"
+  y$high = y$high[chrom == "chr3"]
+  v = shatterseek_verdict(shatterseek_at_tier(y, 2L))
+  expect_match(v, "^No chromothripsis call meets HC1–HC2; 2 calls meet only a lower tier")
 })

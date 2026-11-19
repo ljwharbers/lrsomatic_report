@@ -33,7 +33,9 @@ In page order:
   ecDNA / focal amplicons (CoRAL, AmpliconClassifier). A negative result is one line: no
   chromothripsis in any combination is a single sentence naming them all, and calls are one
   table with a column for the combination; amplicons of which none is ecDNA or BFB are listed
-  in a collapsed block under the verdict.
+  in a collapsed block under the verdict. Each call names the PCAWG tier(s) it meets (HC1,
+  HC2, HC3), and a minimum-tier selector (all tiers, HC1–HC2, HC1 only), shared with the
+  overview's chromothripsis card, narrows the calls shown; it opens on all tiers.
 - **Mutational signatures** — SigProfilerAssignment COSMIC fits for SBS96, DBS78 and ID83, with
   the mutational profile and a proposed aetiology per signature (see
   [Mutational signatures](#mutational-signatures)).

@@ -434,12 +434,18 @@ test_that("chromothripsis names chromosome + combination and shows disagreement"
                               confidence = "high", criteria = "HC3"))
   b = build_biomarkers(list(shatterseek = ss), NULL, NULL, list())
   expect_equal(b$chromothripsis$value, "chr16")
-  expect_match(b$chromothripsis$detail, "chr16 high (SAVANA)", fixed = TRUE)
+  expect_match(b$chromothripsis$detail, "chr16 HC3 (SAVANA)", fixed = TRUE)
   expect_match(b$chromothripsis$detail, "disagree")
   expect_equal(b$chromothripsis$status, "warn")
+  # One card per minimum-tier setting: an HC3-only call is gone at HC1 and HC1-HC2
+  expect_setequal(names(b$chromothripsis$views), c("1", "2", "3"))
+  expect_equal(b$chromothripsis$views[["3"]]$value, "chr16")
+  expect_equal(b$chromothripsis$views[["1"]]$value, "none at this tier")
+  expect_match(b$chromothripsis$views[["2"]]$detail, "1 call below this tier")
   ss$high = ss$high[0]
-  expect_equal(build_biomarkers(list(shatterseek = ss), NULL, NULL, list())$chromothripsis$value,
-               "none called")
+  b0 = build_biomarkers(list(shatterseek = ss), NULL, NULL, list())
+  expect_equal(b0$chromothripsis$value, "none called")
+  expect_null(b0$chromothripsis$views)
 })
 
 test_that("ecDNA wording follows the classifier, and unclassified is never 'ecDNA'", {

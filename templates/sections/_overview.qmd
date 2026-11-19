@@ -164,16 +164,25 @@ table_details(
 
 ```{r biomarkers}
 bm = ov$biomarkers
+bm_row = function(b, tier = NULL) {
+  tags$div(class = paste0("bm-row bm-", b$status, " bm-id-", b$id),
+    `data-ss-min` = tier,
+    hidden = if (!is.null(tier) && tier != SHATTERSEEK_MIN_TIER_DEFAULT) NA,
+    tags$div(class = "bm-label", b$label,
+             if (!is.null(tier)) shatterseek_tier_select(class = "bm-tier-select")),
+    tags$div(class = "bm-value",
+             b$value,
+             if (identical(b$status, "warn")) tags$span(class = "bm-flag", "check")),
+    if (!is.null(b$items) && length(b$items) > 0)
+      tags$ul(class = "bm-items", lapply(b$items, tags$li))
+    else if (nzchar(b$detail)) tags$div(class = "bm-detail", b$detail))
+}
+# The chromothripsis card has one row per ShatterSeek minimum-tier setting; the selector
+# (shared with the Chromothripsis section, script in _instability.qmd) shows one
 tags$div(class = "bm-list",
   lapply(bm, function(b) {
-    tags$div(class = paste0("bm-row bm-", b$status, " bm-id-", b$id),
-      tags$div(class = "bm-label", b$label),
-      tags$div(class = "bm-value",
-               b$value,
-               if (identical(b$status, "warn")) tags$span(class = "bm-flag", "check")),
-      if (!is.null(b$items) && length(b$items) > 0)
-        tags$ul(class = "bm-items", lapply(b$items, tags$li))
-      else if (nzchar(b$detail)) tags$div(class = "bm-detail", b$detail))
+    if (is.null(b$views)) bm_row(b)
+    else tagList(lapply(names(b$views), function(t) bm_row(b$views[[t]], as.integer(t))))
   }))
 ```
 

@@ -985,24 +985,16 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
                      if (length(nbc) > 1) "per caller, not summed" else ""))
   } else out$sv = kf_bm("sv", "Structural variants", "not run", "no SV caller output", "not_run")
 
-  # Chromothripsis
+  # Chromothripsis: one card per ShatterSeek minimum-tier setting (the report's selector)
   ss = section_data$shatterseek
   if (is.null(ss) || !identical(ss$status, "ok")) {
     out$chromothripsis = kf_bm("chromothripsis", "Chromothripsis", "not run", "ShatterSeek", "not_run")
-  } else if (is.null(ss$high) || nrow(ss$high) == 0) {
-    out$chromothripsis = kf_bm("chromothripsis", "Chromothripsis", "none called",
-                               paste0("ShatterSeek: ", paste(unname(ss$labels), collapse = ", ")))
   } else {
-    h = ss$high
-    by = h[, .(combos = paste(unique(combo_label), collapse = ", "),
-               conf = paste(unique(confidence), collapse = "/")), by = chrom]
-    dis = isTRUE(shatterseek_disagree(ss))
-    val = paste(by$chrom, collapse = ", ")
-    det = paste0(by$chrom, " ", by$conf, " (", by$combos, ")")
-    out$chromothripsis = kf_bm("chromothripsis", "Chromothripsis", val,
-                               c(det, if (dis) paste0("caller combinations disagree; ran: ",
-                                                      paste(unname(ss$labels), collapse = ", ")) else ""),
-                               if (dis) "warn" else "ok")
+    tiers = as.integer(names(SHATTERSEEK_MIN_TIERS))
+    views = lapply(tiers, function(t) kf_chromothripsis_bm(shatterseek_at_tier(ss, t)))
+    names(views) = tiers
+    out$chromothripsis = views[[as.character(SHATTERSEEK_MIN_TIER_DEFAULT)]]
+    if (!is.null(ss$high) && nrow(ss$high) > 0) out$chromothripsis$views = views
   }
 
   # ecDNA / focal amplicons (detected != ecDNA: read n_ecdna/n_bfb)
@@ -1048,6 +1040,27 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
     out$signatures$items = items
   }
   out
+}
+
+# The chromothripsis card for one ShatterSeek result: the called chromosomes, each with the PCAWG
+# tier(s) it meets and the caller combinations that called it
+kf_chromothripsis_bm = function(ss) {
+  if (is.null(ss$high) || nrow(ss$high) == 0) {
+    below = if (isTRUE(ss$n_below_tier > 0))
+              sprintf("%d call%s below this tier", ss$n_below_tier, if (ss$n_below_tier == 1) "" else "s") else ""
+    return(kf_bm("chromothripsis", "Chromothripsis", if (nzchar(below)) "none at this tier" else "none called",
+                 c(paste0("ShatterSeek: ", paste(unname(ss$labels), collapse = ", ")), below)))
+  }
+  h = ss$high
+  by = h[, .(combos = paste(unique(combo_label), collapse = ", "),
+             tiers = shatterseek_tiers(criteria),
+             conf = paste(unique(confidence), collapse = "/")), by = chrom]
+  dis = isTRUE(shatterseek_disagree(ss))
+  det = paste0(by$chrom, " ", ifelse(nzchar(by$tiers), by$tiers, by$conf), " (", by$combos, ")")
+  kf_bm("chromothripsis", "Chromothripsis", paste(by$chrom, collapse = ", "),
+        c(det, if (dis) paste0("caller combinations disagree; ran: ",
+                                paste(unname(ss$labels), collapse = ", ")) else ""),
+        if (dis) "warn" else "ok")
 }
 
 # Signature context the overview reports; the others are shown in their own section only
