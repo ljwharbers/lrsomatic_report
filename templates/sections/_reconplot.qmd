@@ -25,6 +25,9 @@ if (!is.null(reconplot)) {
   # genome-wide figure (reconplot_chromosomes() in R/sections/reconplot.R says which and why)
   sel = reconplot_chromosomes(OVERVIEW$findings, SECTION_DATA$sv$table,
                               SECTION_DATA$shatterseek$high)
+  # Size cap: the best-ranked RECONPLOT_MAX_CHROMS chromosomes; the footnote names the rest
+  capped = reconplot_cap(sel, RECONPLOT_MAX_CHROMS, chromosomes)
+  sel = capped$kept
 
   combos = reconplot$combos
   label = function(cb) if (cb %in% names(RECONPLOT_COMBO_LABELS)) RECONPLOT_COMBO_LABELS[[cb]] else cb
@@ -113,8 +116,11 @@ if (!is.null(reconplot)) {
                  "No figure matches the selected reasons, ShatterSeek tier and gene list(s); tick a list or a reason to show its chromosomes.")))
       }
       rest = length(chroms) - length(show)
+      over = intersect(capped$dropped$chrom, names(chroms))
       omitted = c(if (!is.null(x$genome)) "the genome-wide figure",
-                  if (rest > 0) plural(rest, "other per-chromosome figure"))
+                  if (rest > 0) paste0(plural(rest, "other per-chromosome figure"),
+                    if (length(over)) sprintf(" (%s of them with a call, beyond the %d embedded: %s)",
+                                              length(over), RECONPLOT_MAX_CHROMS, paste(over, collapse = ", ")) else ""))
       if (length(omitted) > 0) {
         # One HTML string: htmltools' newlines between children would render as " ."
         raw_html(tags$p(class = "table-footnote", HTML(sprintf(

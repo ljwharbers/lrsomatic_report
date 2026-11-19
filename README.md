@@ -232,7 +232,8 @@ one of them. Slim mode embeds:
   tier 1–2 SV or copy-number key finding of a gene list (shown while that list is ticked).
   Padfoot's plain `HIGH` does not count: it is common in large fragile-site genes. Tickboxes above the
   figures switch each kind of reason off, and a chromothripsis reason follows the ShatterSeek
-  tier selector;
+  tier selector. At most 12 chromosomes are embedded per combination, best reason first
+  (chromothripsis, Padfoot, tier-1 then tier-2 findings); the footnote names the rest;
 - every ReConPlot **focus** figure (`reconplot/<combination>/focus/`, the regions and genes the
   pipeline was asked to draw), as a "Your regions" block that opens the ReConPlot section; the
   automatic per-chromosome figures then follow in a collapsed block;

@@ -120,6 +120,20 @@ reconplot_chromosomes = function(findings = NULL, sv_table = NULL, shatterseek_h
         }), by = chrom]
 }
 
+# Slim mode embeds the per-chromosome figures of at most this many chromosomes (per combination),
+# best reason first: chromothripsis (lower tier first), Padfoot, tier-1 then tier-2 findings
+RECONPLOT_MAX_CHROMS = 12L
+
+# reconplot_chromosomes() rows ranked and split at `n`: list(kept, dropped), both in rank order
+reconplot_cap = function(sel, n = RECONPLOT_MAX_CHROMS, chromosomes = NULL) {
+  if (is.null(sel) || nrow(sel) == 0) return(list(kept = sel, dropped = sel))
+  cr = if (!is.null(chromosomes)) match(sel$chrom, chromosomes) else seq_len(nrow(sel))
+  o = order(sel$priority, is.na(sel$ss_tier), sel$ss_tier, is.na(cr), cr)
+  r = sel[o]
+  k = seq_len(min(n, nrow(r)))
+  list(kept = r[k], dropped = r[-k])
+}
+
 RECONPLOT_COMBOS = c("severus_ascat", "severus_wakhan", "savana")
 RECONPLOT_COMBO_LABELS = c(severus_ascat = "Severus + ASCAT", severus_wakhan = "Severus + Wakhan",
                            savana = "SAVANA")

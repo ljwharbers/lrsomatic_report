@@ -133,3 +133,14 @@ test_that("ReConPlot reasons are capped", {
   r = reconplot_chromosomes(f)
   expect_match(r$reasons, "2 more$")
 })
+
+test_that("the slim-mode cap keeps the best-ranked chromosomes", {
+  sel = data.table(chrom = c("chr1", "chr2", "chr3", "chr4", "chr5"),
+                   priority = c(4L, 3L, 1L, 2L, 1L), ss_tier = c(NA, NA, 3L, NA, 1L))
+  r = reconplot_cap(sel, 3L, paste0("chr", 1:22))
+  # chromothripsis HC1 before HC3, then Padfoot; findings dropped
+  expect_equal(r$kept$chrom, c("chr5", "chr3", "chr4"))
+  expect_equal(r$dropped$chrom, c("chr2", "chr1"))
+  expect_equal(nrow(reconplot_cap(sel, 10L)$dropped), 0)
+  expect_equal(nrow(reconplot_cap(reconplot_chromosomes())$kept), 0)
+})
