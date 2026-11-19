@@ -230,7 +230,12 @@ one of them. Slim mode embeds:
   figures only for chromosomes with a high-impact call: a ShatterSeek chromothripsis call or
   an SV with a Padfoot cancer-gene rating, `HIGH_ONCO` or `HIGH_TSG` (always shown), or a
   tier 1–2 SV or copy-number key finding of a gene list (shown while that list is ticked).
-  Padfoot's plain `HIGH` does not count: it is common in large fragile-site genes;
+  Padfoot's plain `HIGH` does not count: it is common in large fragile-site genes. Tickboxes above the
+  figures switch each kind of reason off, and a chromothripsis reason follows the ShatterSeek
+  tier selector;
+- every ReConPlot **focus** figure (`reconplot/<combination>/focus/`, the regions and genes the
+  pipeline was asked to draw), as a "Your regions" block that opens the ReConPlot section; the
+  automatic per-chromosome figures then follow in a collapsed block;
 - the first six CoRAL amplicon plots;
 - no ASCAT diagnostic plots (GC correction, tumour separation).
 
@@ -458,7 +463,7 @@ as part of the pattern. When several files match, one named for the sample is pr
 |---|---|
 | Small variants | `*_SOMATIC_VEP.vcf.gz` (variant set and annotation); VAF / depth / genotype / phase set from `variants/phased/somatic_smallvariants.vcf.gz`, else `variants/clairs{,to}/somatic.vcf.gz`, else any non-germline VCF in those directories; ClairS-TO germline tagging status from `variants/clairsto/<id>.verdict_status.tsv` (`status`, `purity`, `ploidy`, `purity_source`, `message`; status `applied`, `skipped` or `not_run`) |
 | Structural variants | Severus: `severus_somatic.vcf.gz`, `*_SV_VEP.vcf.gz` (fallback `SV_filtered_with_gene_annotations.tsv`). SAVANA: `*.pon_filtered.classified.somatic.vcf[.gz]`, else `*.classified.somatic.vcf[.gz]`; `*_VEP_SAVANA.vcf.gz`. Padfoot: `padfoot/<combination>/annotated_svs.tsv` (`severus_wakhan` for Severus, `savana` for SAVANA) |
-| ReConPlot | `reconplot/<combination>/genome_wide/*_genome_wide.png`, `reconplot/<combination>/per_chromosome/*_chr*.png` |
+| ReConPlot | `reconplot/<combination>/genome_wide/*_genome_wide.png`, `reconplot/<combination>/per_chromosome/*_chr*.png`, `reconplot/<combination>/focus/*.png` |
 | Copy number | ASCAT: `*.segments_raw.txt`, `*.purityploidy.txt`, `*.metrics.txt` (beside them), `*.tumour.{ASCATprofile,ASPCF,sunrise}.png` and diagnostic PNGs. Wakhan: `wakhan/solutions_ranks.tsv`, `wakhan/solution_rank_<N>/integer_profile.bed` and `…/genes/genes_copynumber_states.bed` (also `solution_<N>/` and the `repository_name` directory). SAVANA: `*_fitted_purity_ploidy.tsv` |
 | Genome instability | `shatterseek/<combination>/*.shatterseek.tsv`; `ecdna/coral/*_CNV_SEEDS.bed`, `ecdna/coral/{cycles,reconstruct}/*_amplicon_summary.txt`, `ecdna/coral/plots/*_amplicon<N>_{graph,cycles}.png`, `ecdna/amplicon_classifier/*_amplicon_classification_profiles.tsv`, `*_gene_list.tsv`, `*_result_table.tsv` |
 | Mutational signatures | `signatures/**/COSMIC_v<ver>/{SBS96,DBS78,ID83}/Assignment_Solution/**/Assignment_Solution_Activities.txt` and `Assignment_Solution_Samples_Stats.txt`; matrices `*.SBS96.all`, `*.DBS78.all`, `*.ID83.all` |

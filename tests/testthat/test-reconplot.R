@@ -26,7 +26,7 @@ make_reconplot_tree = function(sample_id = "S1", symlink = FALSE) {
 
 rp_ctx = list(chromosomes = paste0("chr", c(1:22, "X", "Y")), embed = "slim")
 
-test_that("ReConPlot figures are found per combination, PDFs and focus plots ignored", {
+test_that("ReConPlot figures are found per combination, PDFs ignored, focus plots apart", {
   t = make_reconplot_tree()
   on.exit(unlink(c(t$dir, t$src), recursive = TRUE))
   s = SECTIONS$reconplot
@@ -38,6 +38,22 @@ test_that("ReConPlot figures are found per combination, PDFs and focus plots ign
   # Display order from ctx$chromosomes
   expect_equal(names(x$chroms), c("chr1", "chr2", "chr10", "chrX"))
   expect_false(any(grepl("focus|\\.pdf$", c(x$genome, x$chroms))))
+  # focus/ figures (the user's regions) are their own list, labelled without the sample prefix
+  expect_equal(names(x$focus), "MYC")
+  expect_match(x$focus[["MYC"]], "severus_ascat/focus/S1_MYC\\.png$")
+})
+
+test_that("a combination with only focus figures is kept; region labels read as text", {
+  d = tempfile("rp_")
+  on.exit(unlink(d, recursive = TRUE))
+  dir.create(file.path(d, "reconplot", "savana", "focus"), recursive = TRUE)
+  file.create(file.path(d, "reconplot", "savana", "focus",
+                        c("S1_chr8_chr18_60.0Mb-66.0Mb.png", "S1_chr8_chr18_60.0Mb-66.0Mb.pdf")))
+  s = SECTIONS$reconplot
+  res = s$parse(s$locate(d, "S1"), list(), rp_ctx)
+  expect_equal(names(res$combos), "savana")
+  expect_length(res$combos$savana$chroms, 0)
+  expect_equal(names(res$combos$savana$focus), "chr8 chr18 60.0Mb-66.0Mb")
 })
 
 test_that("staged symlinked files are discovered", {
@@ -48,6 +64,7 @@ test_that("staged symlinked files are discovered", {
   res = s$parse(s$locate(t$dir, "S1"), list(), rp_ctx)
   expect_equal(length(res$combos), 2L)
   expect_equal(length(res$combos$savana$chroms), 4L)
+  expect_equal(length(res$combos$savana$focus), 1L)
 })
 
 test_that("no ReConPlot output parses to NULL", {
@@ -60,7 +77,7 @@ test_that("no ReConPlot output parses to NULL", {
 # ---- which per-chromosome figures slim mode embeds -----------------------------------------
 
 test_that("ReConPlot chromosomes: ShatterSeek and Padfoot HIGH always, findings per list", {
-  ss = data.table(chrom = c("7", "chr3"), confidence = c("high", "none"))
+  ss = data.table(chrom = c("7", "chr3"), confidence = c("high", "none"), criteria = c("HC2,HC3", ""))
   # Plain HIGH (chr20) is too common to select by; HIGH_ONCO is the cancer-gene rating
   # Both mates of the translocation, in Padfoot's "GENE (where)" notation; HIGH_TSG is a
   # cancer-gene rating too (chr13), plain HIGH is not (chr20)
@@ -85,6 +102,13 @@ test_that("ReConPlot chromosomes: ShatterSeek and Padfoot HIGH always, findings 
   # chr3's call has confidence none, chr1's SV is not HIGH; small variants and tier 3 never select
   expect_setequal(r$chrom, c("chr7", "chr22", "chr12", "chr9", "chr13"))
   expect_true(r["chr7"]$always)
+  # The reason kinds and the best chromothripsis tier drive the figure selector
+  expect_equal(r["chr7"]$reasons, "chromothripsis call (HC2,HC3)")
+  expect_equal(r["chr7"]$kinds, "chromothripsis")
+  expect_equal(r["chr7"]$ss_tier, 2L)
+  expect_equal(r["chr7"]$priority, 1L)
+  expect_equal(r["chr22"]$kinds, "padfoot,finding")
+  expect_equal(r["chr9"]$priority, 3L)
   expect_true(r["chr13"]$always)
   expect_equal(r["chr13"]$reasons, "Padfoot HIGH_TSG: RB1")
   expect_true(r["chr22"]$always)
@@ -97,8 +121,9 @@ test_that("ReConPlot chromosomes: ShatterSeek and Padfoot HIGH always, findings 
   expect_false(r["chr9"]$always)
   expect_setequal(strsplit(r["chr9"]$panels, ",")[[1]], c("sarcoma", "lymphoid"))
   expect_equal(r["chr9"]$genes, "CDKN2A")
-  # An always-shown chromosome carries no list (nothing to hide it by)
-  expect_equal(r["chr22"]$panels, "")
+  # An always-shown chromosome keeps its finding's lists: the selector can untick Padfoot
+  expect_equal(r["chr22"]$panels, "sarcoma")
+  expect_true(is.na(r["chr22"]$ss_tier))
   expect_equal(nrow(reconplot_chromosomes()), 0)
 })
 
