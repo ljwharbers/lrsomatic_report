@@ -51,6 +51,30 @@ test_that("ClinVar pathogenic alone makes a tier-1 finding; Conflicting never do
   expect_equal(f$tier, 1L)
 })
 
+test_that("ClinVar is credited to the gene carrying the coding/splice consequence only", {
+  # B DLBCL7: ATM p.Arg23Ter is ClinVar pathogenic; VEP also lists the Y_RNA downstream of it
+  vt = kf_vt(symbol = c("ATM", "Y_RNA"), chrom = "chr11", pos = 108227000L,
+             impact = c("HIGH", "MODIFIER"),
+             consequence = c("stop_gained", "downstream_gene_variant"),
+             clinvar = "Pathogenic")
+  f = kf_run(vt)
+  expect_equal(f$gene, "ATM")
+  expect_match(f$evidence, "ClinVar: Pathogenic")
+  # A variant no gene row of which is coding keeps ClinVar on every row (cannot single one out)
+  vt = kf_vt(symbol = c("TP53", "WRAP53"), impact = "MODIFIER",
+             consequence = c("intron_variant", "upstream_gene_variant"), clinvar = "Pathogenic")
+  expect_setequal(kf_run(vt)$gene, c("TP53", "WRAP53"))
+  # Different variants do not lend each other a coding row
+  vt = kf_vt(symbol = c("TP53", "WRAP53"), pos = c(7675000L, 7675100L), impact = c("MODERATE", "MODIFIER"),
+             consequence = c("missense_variant", "intron_variant"), clinvar = "Pathogenic")
+  expect_setequal(kf_run(vt)$gene, c("TP53", "WRAP53"))
+  # A splice-region row counts as in the gene
+  vt = kf_vt(symbol = c("TP53", "WRAP53"), impact = c("LOW", "MODIFIER"),
+             consequence = c("splice_region_variant&intron_variant", "upstream_gene_variant"),
+             clinvar = "Likely_pathogenic")
+  expect_equal(kf_run(vt)$gene, "TP53")
+})
+
 test_that("HIGH impact alone is tier 1, and shortens the HGVSp", {
   f = kf_run(kf_vt(symbol = "TP53", impact = "HIGH", consequence = "frameshift_variant",
                    hgvsp = "ENSP00000269305.4:p.Pro72fs"))

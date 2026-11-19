@@ -109,7 +109,7 @@ Considered when the gene is in the list's small-variant scope:
 
 | Tier | Rule |
 |---|---|
-| 1 | ClinVar pathogenic or likely pathogenic ("Conflicting classifications" never counts) |
+| 1 | ClinVar pathogenic or likely pathogenic ("Conflicting classifications" never counts). ClinVar classifies the variant, so when VEP lists several genes for it, only the genes where it is coding or at a splice site get the credit (not a gene merely downstream or upstream of it); a variant coding in none of its genes keeps it on all |
 | 1 | VEP impact HIGH (truncating: stop gained, frameshift, splice donor/acceptor, start lost, transcript ablation; or another HIGH consequence) |
 | 2 | VEP impact MODERATE with a damaging prediction: AlphaMissense *likely pathogenic*; where AlphaMissense gives no call, EVE pathogenic; failing both, SIFT *deleterious* together with PolyPhen *probably damaging* |
 

@@ -79,6 +79,15 @@ KF_TIER_RESCUED           = 4L
 KF_LOF_TERMS = c("transcript_ablation", "splice_acceptor_variant", "splice_donor_variant",
                  "stop_gained", "frameshift_variant", "start_lost")
 
+# Consequences that put a variant in a gene's coding sequence or splice sites: a ClinVar
+# classification (variant-level) is credited to the gene rows carrying one of these
+KF_CLINVAR_GENE_TERMS = c(KF_LOF_TERMS, "missense_variant", "synonymous_variant",
+                          "stop_lost", "stop_retained_variant", "start_retained_variant",
+                          "inframe_insertion", "inframe_deletion", "protein_altering_variant",
+                          "coding_sequence_variant", "incomplete_terminal_codon_variant",
+                          "splice_region_variant", "splice_donor_5th_base_variant",
+                          "splice_donor_region_variant", "splice_polypyrimidine_tract_variant")
+
 KF_TYPES = c("small variant", "SV", "CNA")
 
 KF_SV_CLASS_LABEL = c(translocation = "translocation",
@@ -280,6 +289,14 @@ kf_small_variant_flags = function(vt) {
   high   = !is.na(impact) & impact == "HIGH"
   mod    = !is.na(impact) & impact == "MODERATE"
   terms  = strsplit(ifelse(is.na(csq), "", csq), "[,&]+")
+  # ClinVar classifies the variant, not each gene VEP lists for it: when some of a variant's
+  # rows are coding/splice, only those carry it (ATM p.Arg23Ter, not the Y_RNA downstream)
+  if (any(clin) && all(c("chrom", "pos", "ref", "alt") %in% names(vt))) {
+    in_gene = vapply(terms, function(t) any(trimws(t) %in% KF_CLINVAR_GENE_TERMS), logical(1))
+    key = paste(vt$chrom, vt$pos, vt$ref, vt$alt)
+    any_in_gene = ave(in_gene, key, FUN = any)
+    clin = clin & (in_gene | !any_in_gene)
+  }
   lof    = high & vapply(terms, function(t) any(trimws(t) %in% KF_LOF_TERMS), logical(1))
   am     = lc("am_class")
   am_lp  = !is.na(am) & am == "likely_pathogenic"
