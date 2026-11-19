@@ -269,6 +269,29 @@ key findings) is computed from the full table in either mode.
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 `wakhan/*_heatmap_ploidy_purity.html`; the report names them.
 
+> **Changed in 2.1.0:**
+> - New `--run-mode paired|tumour_only` states the run mode instead of inferring it from
+>   normal-side QC files (the pipeline passes it; without it the report infers as before).
+> - A **Verdict status** warning: when the pipeline's `verdict_status.tsv` says ClairS-TO's
+>   germline tagging was skipped (or did not run), the tumour-only caveat and the small-variant
+>   section say so, with the reason and the purity used.
+> - **Whitelist-rescued Severus SVs** get their own tier, **Rescued**, hidden until "Show
+>   whitelist-rescued SVs" is pressed; the SV table, circos labels and SV card follow the same
+>   choice. Non-PASS Severus records that were not rescued are no longer shown.
+> - **ShatterSeek** calls name their PCAWG tier(s) and a minimum-tier selector, shared with the
+>   overview's chromothripsis card, narrows them.
+> - **ReConPlot**: the pipeline's focus figures open the section as "Your regions"; the
+>   automatic per-chromosome figures follow, collapsed, with tickboxes by reason and at most
+>   12 chromosomes embedded per combination in slim mode.
+> - Copy number: CN >= 1 below the high-ploidy threshold reads **deep deletion** (tier 1);
+>   symbol-only list genes take their span from another list; the circos draws the copy number
+>   the overview uses and names it; no ASCAT output reads "skipped".
+> - Key findings: ClinVar is credited only to the gene the variant is coding in; "breakpoint in"
+>   needs the breakpoint inside the gene on breakend records too.
+> - TMB counts each variant once and gives non-synonymous SNVs apart from indels; the phased-
+>   variants card's percentage is of heterozygous variants; DeepSomatic's conventional `1/1`
+>   genotype is blanked; provenance lines give paths relative to `--sample-dir`; wording fixes.
+
 > **Changed in 2.0.0** (tested in the pipeline first through the pre-releases `2.0.0rc1` and
 > `2.0.0rc2`; the release itself changes only `VERSION`, `recipe/meta.yaml` and this note):
 > - The genome circos **labels the key findings**: the tier 1–2 genes of the ticked gene
@@ -546,7 +569,7 @@ Auto-detection reads `##contig` lines from the VEP somatic VCF.
 ### Container (recommended)
 
 Every release is published as a container, so nothing needs installing (`<version>` is the
-content of `VERSION`, e.g. `2.0.0`):
+content of `VERSION`, e.g. `2.1.0`):
 
 ```bash
 # Docker / Podman
