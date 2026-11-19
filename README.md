@@ -163,8 +163,10 @@ the call failed and its read support. A rescued call whose evidence would only b
 listed; one that SAVANA also made is not rescued (the event stands with SAVANA's call). The
 same choice shows or hides rescued rows in the SV table and their circos labels; the SV card
 counts them apart ("Severus 323 (+9,388 whitelist-rescued)"), and the genome circos does not
-draw them. ShatterSeek and ReConPlot were given every call. A non-PASS Severus record that was
-not rescued is not shown at all, as for small variants.
+draw them. ShatterSeek and ReConPlot were given every call. A non-PASS record that was not
+rescued is not shown at all, as for small variants; this applies to both callers, but SAVANA's
+somatic VCF holds PASS records only (its noise calls stay in `classified.vcf`), so in practice
+it drops Severus records.
 
 ### Copy number
 
@@ -280,7 +282,8 @@ output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 >   section say so, with the reason and the purity used.
 > - **Whitelist-rescued Severus SVs** get their own tier, **Rescued**, hidden until "Show
 >   whitelist-rescued SVs" is pressed; the SV table, circos labels and SV card follow the same
->   choice. Non-PASS Severus records that were not rescued are no longer shown.
+>   choice. Non-PASS SV records that were not rescued are no longer shown (in practice
+>   Severus': SAVANA's somatic VCF is PASS-only).
 > - **ShatterSeek** calls name their PCAWG tier(s) and a minimum-tier selector, shared with the
 >   overview's chromothripsis card, narrows them.
 > - **ReConPlot**: the pipeline's focus figures open the section as "Your regions"; the

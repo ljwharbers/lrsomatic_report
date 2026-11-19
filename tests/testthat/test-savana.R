@@ -19,6 +19,21 @@ test_that("MATEID collapses SAVANA's breakend pairs to one row each", {
   expect_equal(sum(r$svtype == "INS"), 3L)
 })
 
+test_that("a non-PASS SAVANA record is left out, as for Severus", {
+  # SAVANA writes its non-PASS calls (PREDICTED_NOISE, FAIL) to classified.vcf only; the
+  # somatic VCFs of the campaign runs are all PASS, so this only guards the rule
+  v = readLines(savana_vcf)
+  i = grep("\tID_26414_1\t", v)
+  v[i] = sub("\tPASS\t", "\tPREDICTED_NOISE\t", v[i])
+  f = tempfile(fileext = ".vcf"); writeLines(v, f)
+  on.exit(unlink(f))
+  r = parse_sv_vcf(f, "savana")
+  expect_equal(nrow(r), 11L)
+  expect_false("ID_26414_1" %in% r$id)
+  expect_equal(attr(r, "n_failed"), 1L)
+  expect_equal(attr(savana_records(), "n_failed"), 0L)
+})
+
 test_that("same-chromosome pairs are typed from BP_NOTATION and become spans", {
   r = savana_records()
   expect_equal(r[id == "ID_25860_1", svtype], "DEL")   # +-
