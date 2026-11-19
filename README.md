@@ -137,7 +137,9 @@ events are listed per event class.
 | 3 | "Near": a breakend within 1 Mb of the gene (100 kb for other event types) without touching it; at most 3 such rows per gene, and none for an event already listed with stronger evidence for the gene |
 
 A gene that merely lies inside a larger event (for example a 40 Mb inversion or deletion) is
-not an SV finding; it is left to the copy-number rows.
+not an SV finding; it is left to the copy-number rows. That includes a gene VEP names on a
+breakend record (VEP lists every gene a same-chromosome breakend spans): wherever a list gives
+the gene coordinates, "breakpoint in" needs the breakpoint inside it.
 
 **Whitelist-rescued SVs.** With `--severus_whitelist`, Severus keeps calls that failed its own
 filters when they lie in the whitelist regions, and tags them `INFO/WL_RESCUE` (most have one or

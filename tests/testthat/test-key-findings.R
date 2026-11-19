@@ -378,6 +378,36 @@ test_that("a gene inside a large event is not a finding; a focal deletion coveri
   expect_equal(kf_run(sd = list(sv = list(table = intr)))$tier, 2L)
 })
 
+test_that("a symbol hit on a breakend is position-tested where a list gives coordinates", {
+  # A1 CCS15-PB: VEP names CDKN2B on Severus' CDKN2A-CDKN2B-spanning breakend, but the
+  # breakpoints are in CDKN2A; with SAVANA's DEL it is a focal deletion covering CDKN2B
+  sym = list(name = "custom", path = "custom.tsv", reference = "", has_coords = FALSE,
+             has_scopes = FALSE, genes = c("CDKN2A", "CDKN2B"))
+  panels = c(kf_panels(), list(custom = sym))
+  sv = kf_sv(id = c("severus_BND1", "ID_1"), caller = c("severus", "savana"),
+             svclass = c("intra-chr breakend", "DEL"), svtype = c("BND", "DEL"),
+             chrom_a = "chr9", pos_a = c(21969562L, 21969562L),
+             chrom_b = "chr9", pos_b = c(24835347L, 24835348L),
+             gene_a = c("CDKN2A,CDKN2B,MTAP", NA))
+  b_iv = data.table(gene = "CDKN2B", chrom = "chr9", start = 22002903L, end = 22009305L)
+  panels$b$chrom = c(unlist(panels$b$chrom), "chr9")
+  panels$b$start = c(unlist(panels$b$start), b_iv$start)
+  panels$b$end = c(unlist(panels$b$end), b_iv$end)
+  panels$b$interval_gene = c(unlist(panels$b$interval_gene), "CDKN2B")
+  panels$b$genes = c(unlist(panels$b$genes), "CDKN2B")
+  panels$b$genes_sv = c(unlist(panels$b$genes_sv), "CDKN2B")
+  f = kf_run(sd = list(sv = list(table = sv)), panels = panels)
+  expect_match(f[gene == "CDKN2A"]$evidence, "breakpoint in CDKN2A")
+  expect_match(f[gene == "CDKN2B"]$evidence, "^focal deletion \\(2.9 Mb\\) covers CDKN2B")
+  # A gene no list places stays a symbol hit, as before (nothing to test it against)
+  expect_match(kf_run(sd = list(sv = list(table = sv[1])),
+                      panels = list(custom = modifyList(sym, list(genes = "MTAP"))))$evidence,
+               "breakpoint in MTAP")
+  # Without the SAVANA call the breakend is not typed: CDKN2B inside its span is not a finding
+  f = kf_run(sd = list(sv = list(table = sv[1])), panels = panels)
+  expect_false("CDKN2B" %in% f[tier <= 2]$gene)
+})
+
 test_that("proximity rows are tier 3, labelled with the distance, and capped per gene", {
   near = 127742951 + 50000   # 50 kb past MYC
   sv = kf_sv(svclass = c("translocation", "DEL", "DUP", "INS", "INV"),

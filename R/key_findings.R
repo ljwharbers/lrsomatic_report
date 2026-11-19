@@ -502,24 +502,31 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
   # Coordinate / symbol hits, every panel at once (SV scope is applied inside)
   ht = sv_panel_hit_table(st, all_panels)
   hits = if (nrow(ht) > 0)
-    ht[, .(row, gene = toupper(gene), panel, direct, gap, side, padfoot = FALSE)]
+    ht[, .(row, gene = toupper(gene), panel, direct, gap, side, match, padfoot = FALSE)]
   else data.table(row = integer(), gene = character(), panel = character(),
-                  direct = logical(), gap = numeric(), side = character(), padfoot = logical())
+                  direct = logical(), gap = numeric(), side = character(),
+                  match = character(), padfoot = logical())
 
   # sv_panel_hit_table() calls a DEL/DUP/INV/INS "direct" whenever its span overlaps the gene;
   # a 200 Mb inversion then "hits" every panel gene on the arm. Here a span hit counts only
   # when a breakpoint is in the gene, or the event is a focal (<= KF_FOCAL_SV_MAX) DEL/DUP
-  # covering it; a gene merely inside a large event is left to the copy-number rows
+  # covering it; a gene merely inside a large event is left to the copy-number rows.
+  # A symbol hit is the same case: VEP lists every gene a record spans (a Severus
+  # same-chromosome BND included), so it is position-tested too wherever a list gives the
+  # gene coordinates
   hits[, focal := FALSE]
-  sp = which(hits$side == "span" & hits$direct %in% TRUE)
+  iv = rbindlist(lapply(all_panels, function(p) panel_gene_intervals(p, "sv")))
+  if (nrow(iv)) iv[, gene := toupper(gene)]
+  sp = which(hits$direct %in% TRUE &
+             (hits$side == "span" | (hits$match == "symbol" & hits$gene %in% iv$gene)))
   if (length(sp)) {
-    iv = rbindlist(lapply(all_panels, function(p) panel_gene_intervals(p, "sv")))
-    if (nrow(iv)) iv[, gene := toupper(gene)]
     r = hits$row[sp]
     # (no local named like a column: data.table's i/j would read the column instead)
     is_bp = kf_bp_in_gene(st$chrom_a[r], st$pos_a[r], st$chrom_b[r], st$pos_b[r], hits$gene[sp], iv)
     sz = abs(st$pos_b[r] - st$pos_a[r])
-    is_focal = !is_bp & st$svclass[r] %in% c("DEL", "DUP") & !is.na(sz) & sz <= KF_FOCAL_SV_MAX
+    # The event's class: a Severus breakend matched to SAVANA's DEL is a deletion
+    is_focal = !is_bp & st$kf_class[r] %in% c("DEL", "DUP") &
+               !is.na(sz) & sz <= KF_FOCAL_SV_MAX
     set(hits, i = sp, j = "focal", value = is_focal)
     drop_i = sp[!is_bp & !is_focal]
     if (length(drop_i)) set(hits, i = drop_i, j = "direct", value = NA)   # dropped below
@@ -537,7 +544,7 @@ kf_sv_rows = function(sv_table, all_panels, roles, max_proximity = KF_MAX_PROXIM
           gg = intersect(pg[[k]], sets[[nm]])
           if (!length(gg)) return(NULL)
           data.table(row = hi[k], gene = gg, panel = nm, direct = FALSE, gap = NA_real_,
-                     side = "", padfoot = TRUE, focal = FALSE)
+                     side = "", match = "padfoot", padfoot = TRUE, focal = FALSE)
         }))
       }))
       if (nrow(pf)) hits = rbind(hits, pf)
