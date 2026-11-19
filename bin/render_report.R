@@ -149,7 +149,8 @@ for (gp in gene_panels) {
 default_panels = unique(default_panels)
 # Sentinel rather than character(0): an empty vector round-trips through execute_params as NULL
 if (length(default_panels) == 0) default_panels = "__all__"
-message("Gene panels selected on load: ", paste(default_panels, collapse = ", "))
+message("Gene panels selected on load: ",
+        if (identical(default_panels, "__all__")) "none" else paste(default_panels, collapse = ", "))
 
 # ---- Render: copy templates/ and assets/ to a writable dir (the repo may be read-only and Quarto writes next to the .qmd) ----
 work = file.path(getwd(), "._render")

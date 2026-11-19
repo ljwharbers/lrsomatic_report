@@ -375,9 +375,18 @@ load_all_gene_panels = function(gene_lists_dir, reference = NULL) {
     p = tryCatch(load_gene_panel(tsv_files[pick], reference),
       error = function(e) {
         message("Skipping gene panel '", nm, "': ", conditionMessage(e)); NULL })
-    if (!is.null(p)) panels[[nm]] = p
+    if (!is.null(p)) { p$builtin = TRUE; panels[[nm]] = p }
   }
   panels
+}
+
+# Display label of a panel key: a builtin's name capitalised ("lymphoid" -> "Lymphoid"), a
+# user list's file stem as given. Vectorised over `keys`; `panels` is the named panel list
+panel_label = function(keys, panels = list()) {
+  keys = as.character(keys)
+  builtin = vapply(keys, function(k) nzchar(k) && isTRUE(as.logical(unlist(panels[[k]]$builtin))),
+                   logical(1), USE.NAMES = FALSE)
+  ifelse(builtin & nzchar(keys), paste0(toupper(substr(keys, 1, 1)), substr(keys, 2, nchar(keys))), keys)
 }
 
 # Non-colliding key for a user panel: the first collision gets "-custom", further ones are numbered

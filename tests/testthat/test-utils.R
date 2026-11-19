@@ -442,3 +442,13 @@ test_that("a per-reference builtin is picked from the given directory by suffix"
   expect_setequal(resolve_gene_panel("custom", dir, "hg38")$genes, "MYC")
   expect_setequal(resolve_gene_panel("custom", dir, "t2t")$genes, "BCL2")
 })
+
+test_that("panel labels capitalise builtins only, a user list keeps its file stem (REP-13)", {
+  panels = load_all_gene_panels(gene_lists_root, "hg38")
+  expect_true(isTRUE(panels$lymphoid$builtin))
+  f = tempfile(fileext = ".tsv"); writeLines(c("gene", "EWSR1"), f)
+  panels$panel_ccs15_custom = load_gene_panel(f, "hg38")
+  expect_null(panels$panel_ccs15_custom$builtin)
+  expect_equal(panel_label(c("lymphoid", "panel_ccs15_custom", ""), panels),
+               c("Lymphoid", "panel_ccs15_custom", ""))
+})

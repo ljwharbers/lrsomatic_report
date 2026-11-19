@@ -8,7 +8,7 @@
 ov = OVERVIEW
 kf = if (!is.null(ov$findings)) ov$findings else empty_findings()
 ov_panels = if (length(all_panels) > 0) names(all_panels) else character(0)
-ov_label = function(p) ifelse(nzchar(p), paste0(toupper(substr(p, 1, 1)), substr(p, 2, nchar(p))), p)
+ov_label = function(p) panel_label(p, all_panels)
 ov_role = c(oncogene = "oncogene", tsg = "TSG", both = "oncogene/TSG")
 ov_type = c(`small variant` = "Small variant", SV = "SV", CNA = "Copy number")
 ov_num = function(x, digits = 2) ifelse(is.na(x), "", formatC(as.numeric(x), format = "f", digits = digits))
