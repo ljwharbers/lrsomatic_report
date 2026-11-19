@@ -20,7 +20,7 @@ In page order:
     ticked, the table is replaced by a prompt listing how many tier 1–2 findings each embedded
     list has.
   - **Genome-wide biomarkers**: purity / ploidy, whole-genome duplication, LOH fraction, coding
-    TMB, small-variant counts, SV counts per caller, chromothripsis, ecDNA / focal amplicons
+    TMB, small-variant counts, SV counts per caller (whitelist-rescued calls apart), chromothripsis, ecDNA / focal amplicons
     and dominant mutational signatures. A biomarker whose tool did not run reads "not run".
   - **Sequencing** cards: mean coverage, read N50, error rate, phased germline variants.
 - **Circos overview** — ideogram, somatic **SNV density** (per 1 Mb window), non-breakend SVs
@@ -139,6 +139,17 @@ events are listed per event class.
 A gene that merely lies inside a larger event (for example a 40 Mb inversion or deletion) is
 not an SV finding; it is left to the copy-number rows.
 
+**Whitelist-rescued SVs.** With `--severus_whitelist`, Severus keeps calls that failed its own
+filters when they lie in the whitelist regions, and tags them `INFO/WL_RESCUE` (most have one or
+two supporting reads; on a 30x sample with `--whitelist-single-read any` they were 9,388 of
+9,711 records). Such a finding gets its own tier, **Rescued**, below tier 3: it is hidden until
+"Show whitelist-rescued SVs" is pressed, and its evidence names the rescue reason, any filter
+the call failed and its read support. A rescued call whose evidence would only be tier 3 is not
+listed; one that SAVANA also made is not rescued (the event stands with SAVANA's call). The
+same choice shows or hides rescued rows in the SV table and their circos labels; the SV card
+counts them apart ("Severus 323 (+9,388 whitelist-rescued)"), and the genome circos does not
+draw them. ShatterSeek and ReConPlot were given every call.
+
 ### Copy number
 
 From the gene-level calls of the copy-number section:
@@ -150,7 +161,8 @@ From the gene-level calls of the copy-number section:
 | 3 | Either call in a **pseudoautosomal region** (reads from the chrX and chrY copies map to one of them, so a PAR gene can read CN 0 with nothing deleted) or at an **IG/TR locus** (physiologically rearranged and deleted in lymphocytes) |
 
 Loss of heterozygosity is not a finding on its own; it is noted on the gene ("LOH in gene").
-Tier 3 alterations are hidden until "Show lower-confidence findings" is clicked.
+Tier 3 alterations are hidden until "Show lower-confidence findings" is clicked, and
+whitelist-rescued SVs until "Show whitelist-rescued SVs" is.
 
 **Custom… lists.** A list typed into the report matches by gene symbol among the findings of the
 embedded lists and among up to 500 small variants outside them that are ClinVar (likely)

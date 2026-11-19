@@ -5,15 +5,26 @@
 if (is.null(sv_table) || nrow(sv_table) == 0) {
   section_notice("No somatic structural variants detected.")
 }
+# Whitelist-rescued rows (Severus INFO/WL_RESCUE) are hidden until shown; the choice is shared
+# with the key findings and the circos labels (window.SV_SHOW_RESCUED, key_findings.js)
+sv_rescued = sv_is_rescued(sv_table)
+n_sv_rescued = sum(sv_rescued)
 ```
 
 ```{r sv-bnd-circos}
 # Breakend circos: R selects and serialises the data, assets/js/bnd_circos.js draws it so it re-lays-out per filter (see R/circos_bnd.R)
 bnd_res = NULL
+bnd_rescued_left_out = 0L
 if (!is.null(sv_table) && nrow(sv_table) > 0) {
   bnd_res = tryCatch({
     # One filtered set feeds both calls
     bnd_drawn = bnd_links(sv_table, chromosomes)
+    # Over the payload cap with rescued rows: draw the default (non-rescued) view only
+    if (nrow(bnd_drawn) > BND_CIRCOS_MAX_LINKS && n_sv_rescued > 0) {
+      bnd_pass = bnd_links(sv_table[!sv_rescued], chromosomes)
+      bnd_rescued_left_out = nrow(bnd_drawn) - nrow(bnd_pass)
+      bnd_drawn = bnd_pass
+    }
     bnd_circos_data(bnd_drawn,
                     bnd_panel_genes(bnd_drawn, params$all_panels),
                     cytobands, chrom_lens, chromosomes)
@@ -73,7 +84,8 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   sv_padfoot_cols = intersect(PADFOOT_COLS, names(sv_display))
   setcolorder(sv_display, intersect(c("id", "panel_hit", "svclass", "svtype",
                                       "locus", "size", "genes",
-                                      "vaf", "support", "consequence", "impact",
+                                      "vaf", "support", "filter", "wl_rescue",
+                                      "consequence", "impact",
                                       sv_padfoot_cols, "caller"), names(sv_display)))
   cat("<script>window.SV_COLS = ", js_col_index_map(names(sv_display)), ";</script>\n",
       sep = "")
@@ -81,7 +93,8 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   # Tickbox facet values (facet_filter.js), emitted after setcolorder; a column with one value
   # (`caller` for a single-caller run) keeps its plain text box — js_facet_defs() skips it
   sv_facet_cols = c("svclass", "svtype", "impact", "consequence", "caller",
-                    intersect("padfoot_impact", sv_padfoot_cols))
+                    intersect("padfoot_impact", sv_padfoot_cols),
+                    if (n_sv_rescued > 0) "filter")
   cat("<script>window.SV_FACET_COLS = ", js_vec(sv_facet_cols), ";</script>\n", sep = "")
   cat("<script>window.SV_FACETS = ",
       js_facet_defs(sv_display,
@@ -89,6 +102,44 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
                     seps   = c(consequence = ","),
                     levels = list(impact = IMPACT_LEVELS)),
       ";</script>\n", sep = "")
+}
+```
+
+```{r sv-rescue-toggle, results='asis'}
+# Rescued rows are filtered by one more ext.search predicate, pushed before the panel and facet
+# predicates, so the facet counts and the breakend circos measure the shown rows only
+if (n_sv_rescued > 0) {
+  fmt_n0 = function(x) formatC(as.integer(x), format = "d", big.mark = ",")
+  cat(sprintf(paste0('<p class="sv-rescue-toggle"><label><input type="checkbox" id="sv-show-rescued"> ',
+                     'Show the %s whitelist-rescued call%s</label> ',
+                     '<span class="sv-rescue-toggle__note">%s of %s rows are calls Severus kept only because ',
+                     'they lie in the whitelist regions (<code>WL_RESCUE</code>); hidden by default.</span></p>\n'),
+              fmt_n0(n_sv_rescued), if (n_sv_rescued == 1) "" else "s",
+              fmt_n0(n_sv_rescued), fmt_n0(nrow(sv_table))))
+  cat(r"----(<script>
+(function () {
+  if (!window.jQuery || !$.fn.dataTable) return;
+  $.fn.dataTable.ext.search.push(function (settings, searchData, index, rowData) {
+    if (settings.nTable !== window.svTableElem || window.SV_SHOW_RESCUED) return true;
+    const cols = window.SV_COLS || {};
+    const k = cols["wl_rescue"];
+    const v = k === undefined ? null : (rowData || searchData)[k];
+    return v === null || v === undefined || v === "";
+  });
+  function sync() {
+    const box = document.getElementById("sv-show-rescued");
+    if (box) box.checked = !!window.SV_SHOW_RESCUED;
+    if (window.svTableElem) $(window.svTableElem).DataTable().draw();
+  }
+  document.addEventListener("change", function (e) {
+    if (!e.target || e.target.id !== "sv-show-rescued") return;
+    if (window.keyFindings && window.keyFindings.setShowRescued)
+      window.keyFindings.setShowRescued(e.target.checked);
+  });
+  document.addEventListener("sv-rescue-change", sync);
+})();
+</script>
+)----")
 }
 ```
 
@@ -126,7 +177,9 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   # Hidden, not dropped: the JS by-name lookups and the CSV export read these columns
   # svtype_raw too: it differs from svtype only for a SAVANA pair typed from BP_NOTATION (footnote)
   hidden = intersect(c("chrom_a", "pos_a", "chrom_b", "pos_b", "gene_a", "gene_b",
-                       "sv_len", "size_bp", "locus_sort", "svtype_raw"), names(sv_display))
+                       "sv_len", "size_bp", "locus_sort", "svtype_raw",
+                       # FILTER / WL_RESCUE say something only when a row was rescued
+                       if (n_sv_rescued == 0) c("filter", "wl_rescue")), names(sv_display))
 
   exp_opts = list(orthogonal = "export",
                   columns    = seq_len(ncol(sv_display)) - 1L)
@@ -170,6 +223,11 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
     )
   # Padfoot's high-impact classes (HIGH_ONCO, HIGH_TSG, ...): the set is open-ended, so tint
   # whichever HIGH* values this table actually carries
+  rescue_vals = sort(unique(sv_display$wl_rescue[sv_rescued]))
+  if (length(rescue_vals) > 0) {
+    dtbl = DT::formatStyle(dtbl, columns = "wl_rescue", target = "row",
+                           fontStyle = DT::styleEqual(rescue_vals, rep("italic", length(rescue_vals))))
+  }
   pf_high = if ("padfoot_impact" %in% names(sv_display))
               sort(unique(grep("^HIGH", sv_display$padfoot_impact, value = TRUE))) else character(0)
   if (length(pf_high) > 0) {
@@ -403,6 +461,15 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
               fmt_n(p$n_with_genes))
     else if (!is.null(p$annotation_path)) ""
     else "No VEP SV annotation was found for it, so its gene columns are empty."
+    rescued = if (isTRUE(p$n_rescued > 0))
+      sprintf(paste("%s of these rows (in italics, hidden until the box above the table is ticked) are",
+                    "<strong>whitelist-rescued</strong> (%s): calls that failed Severus' own filters and were kept",
+                    "only because they lie in the %s regions — %s with a single supporting read, %s with a",
+                    "non-PASS %s, shown in that column. They are not counted in the overview's SV card and are",
+                    "left out of the genome circos; ShatterSeek and ReConPlot were given every call."),
+              fmt_n(p$n_rescued), code("INFO/WL_RESCUE"), code("--severus_whitelist"),
+              fmt_n(p$n_rescued_1read), fmt_n(p$n_rescued_fail), code("FILTER"))
+    else ""
     typed = if (isTRUE(p$n_typed > 0))
       sprintf(paste("SAVANA writes every rearrangement as a %s mate pair; %s same-chromosome pairs",
                     "are typed here from %s (%s DEL, %s DUP, %s/%s INV) and treated as spans like",
@@ -412,7 +479,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
               code("++"), code("--"), code("svtype_raw"), code("BND"), code("TUMOUR_AF"))
     else if (nm == "savana") sprintf("Its VAF is %s at the first breakend.", code("TUMOUR_AF"))
     else ""
-    paste0("<strong>", lab(nm), "</strong>: ", paste(c(src, genes, typed), collapse = " "))
+    paste0("<strong>", lab(nm), "</strong>: ", paste(c(src, genes, rescued, typed), collapse = " "))
   }
   callers_note = paste(vapply(names(sv_prov), caller_note, character(1)), collapse = "<br>")
   multi_note = if (length(unique(sv_table$caller)) > 1)
@@ -468,6 +535,10 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
             if (bnd_res$n_links == 1) "" else "s",
             fmt_bp(SV_PANEL_WINDOW_BND), code("panel_hit"))
   else NULL
+  if (!is.null(circos_note) && isTRUE(bnd_rescued_left_out > 0))
+    circos_note = paste(circos_note, sprintf(paste("With every row there would be more arcs than it can",
+                                                   "draw, so the %s whitelist-rescued breakends have no arc."),
+                                             fmt_n(bnd_rescued_left_out)))
 
   table_details(
     summary = "How these rows and this plot are built",

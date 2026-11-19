@@ -42,6 +42,21 @@ check("tier 3 is never labelled", genes(st(["lymphoid"])), ["CDKN2A", "KMT2D"]);
 check("custom list reaches non-panel rows", genes(st([], ["TP53"])), ["TP53"]);
 check("custom list matches the group's members", genes(st([], ["ATF1"])), ["EWSR1", "ATF1"]);
 
+// Whitelist-rescued rows ([7] = 1) label only on request; a gene with a PASS line is not rescued
+const rrows = rows.concat([
+  ["NF1",   "NF1",   "NF1",   "sarcoma", 1, "SV", "translocation", 1],
+  ["KMT2D", "KMT2D", "KMT2D", "lymphoid", 1, "SV", "deletion", 1]
+]);
+const ranchors = anchors.concat([["NF1", 20, 7, 7]]);
+const rlab = (show) => cd.circosDriverLabels(rrows, ranchors, st(["sarcoma", "lymphoid"]),
+                                             kf.kfRowMatches, show);
+check("rescued: hidden by default", rlab(false).map((g) => g.gene).indexOf("NF1"), -1);
+check("rescued: shown on request", rlab(true).map((g) => g.gene).indexOf("NF1") >= 0, true);
+check("rescued: rescued-only gene flagged", rlab(true).filter((g) => g.gene === "NF1")[0].rescued, true);
+const kmt = rlab(true).filter((g) => g.gene === "KMT2D")[0];
+check("rescued: a PASS line keeps the gene unflagged, best tier wins", [kmt.rescued, kmt.tier], [false, 1]);
+check("rescued: off, KMT2D keeps its PASS tier", rlab(false).filter((g) => g.gene === "KMT2D")[0].tier, 2);
+
 const cdk = cd.circosDriverLabels(rows, anchors, st(["sarcoma"]), kf.kfRowMatches)
   .filter((g) => g.gene === "CDKN2A")[0];
 check("one label per gene takes the best tier", cdk.tier, 1);

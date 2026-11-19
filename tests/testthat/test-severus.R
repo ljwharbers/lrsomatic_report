@@ -331,7 +331,7 @@ test_that("build_sv_table maps the gene-annotated TSV onto the shared schema", {
 
 SV_OUT_COLS = c("id", "svclass", "svtype", "chrom_a", "pos_a", "gene_a",
                 "chrom_b", "pos_b", "gene_b", "sv_len", "vaf",
-                "consequence", "impact", "support", "svtype_raw")
+                "consequence", "impact", "support", "svtype_raw", "filter", "wl_rescue")
 
 test_that("the column contract is the one SV_TABLE_COLS declares", {
   expect_equal(SV_TABLE_COLS, SV_OUT_COLS)
@@ -347,6 +347,41 @@ test_that("Severus read support is FORMAT/DV and svtype_raw equals svtype", {
   expect_equal(r$vaf, 0.4)
   expect_equal(r$svtype_raw, "DEL")
   expect_equal(attr(r, "n_records"), 1L)
+})
+
+# One record with a FILTER and INFO of our choosing, read support in FORMAT/DV
+frec = function(id, filter, info, chrom = "chr1", pos = 100, alt = "<DEL>", dv = 1) {
+  paste(chrom, pos, id, "N", alt, "60.0", filter, info, "GT:VAF:DR:DV",
+        paste0("0/1:0.1:9:", dv), sep = "\t")
+}
+
+test_that("WL_RESCUE and FILTER reach the table; a rescued mate pair stays one row", {
+  v = write_severus_vcf(c(
+    frec("d1", "PASS", "SVTYPE=DEL;END=900;SVLEN=800"),
+    frec("d2", "PASS", "SVTYPE=DEL;END=1900;SVLEN=800;INSIDE_WHITELIST=TRUE;WL_RESCUE=WHITELIST",
+         pos = 1100),
+    frec("d3", "FAIL_MAP_CONS", "SVTYPE=DEL;END=2900;SVLEN=800;INSIDE_WHITELIST=TRUE;WL_RESCUE=WHITELIST",
+         pos = 2100, dv = 2),
+    frec("severus_BND1_1", "PASS", "SVTYPE=BND;MATE_ID=severus_BND1_2;WL_RESCUE=RECIPROCAL",
+         alt = "N[chr2:5000["),
+    frec("severus_BND1_2", "PASS", "SVTYPE=BND;MATE_ID=severus_BND1_1;WL_RESCUE=RECIPROCAL",
+         chrom = "chr2", pos = 5000, alt = "]chr1:100]N")))
+  on.exit(unlink(v))
+  r = parse_severus_somatic_records(v)
+  setkey(r, id)
+  expect_equal(nrow(r), 4L)
+  expect_equal(r["d1"]$wl_rescue, NA_character_)
+  expect_equal(r["d2"]$wl_rescue, "WHITELIST")
+  expect_equal(r["d3"]$filter, "FAIL_MAP_CONS")
+  expect_equal(r["d3"]$support, 2L)
+  expect_equal(r["severus_BND1_1"]$wl_rescue, "RECIPROCAL")
+  expect_equal(sv_is_rescued(r), c(FALSE, TRUE, TRUE, TRUE))
+  t = build_sv_table_from_vep(r, NULL)
+  expect_equal(t$filter, r$filter)
+  expect_equal(t$wl_rescue, r$wl_rescue)
+  # A table without the column is all non-rescued, not an error
+  expect_equal(sv_is_rescued(data.table(id = c("a", "b"))), c(FALSE, FALSE))
+  expect_equal(sv_is_rescued(NULL), logical(0))
 })
 
 test_that("both SV table builders return exactly the shared column contract", {

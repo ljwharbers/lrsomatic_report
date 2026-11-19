@@ -27,7 +27,9 @@ ov_num = function(x, digits = 2) ifelse(is.na(x), "", formatC(as.numeric(x), for
 # <tr> per alteration. Tier, gene and list cells are emitted on every line; key_findings.js
 # marks the first shown line of a group as its head and hides them on the others.
 if (!"genes" %in% names(kf)) kf[, genes := gene]
+if (!"rescued" %in% names(kf)) kf[, rescued := FALSE]
 kf_groups = unique(kf$gene)
+kf_n_rescued = sum(kf$rescued %in% TRUE)
 kf_row = function(i, group_loh) {
   r = kf[i]
   role = if (!is.na(r$role) && nzchar(r$role)) ov_role[[r$role]] else NULL
@@ -35,11 +37,14 @@ kf_row = function(i, group_loh) {
   lists = lists[nzchar(lists)]
   vaf = ov_num(r$vaf)
   dp = if ("dp" %in% names(r) && !is.na(r$dp)) paste0("DP ", formatC(r$dp, format = "d", big.mark = ",")) else ""
+  resc = isTRUE(r$rescued)
   tags$tr(
-    class = paste0("kf-row kf-tier-", r$tier),
+    class = paste0("kf-row kf-tier-", if (resc) "rescued" else r$tier),
     `data-gene` = toupper(r$gene), `data-panels` = r$panels,
     `data-tier` = r$tier, `data-type` = r$type,
-    tags$td(class = "kf-tier", tags$span(class = "kf-tier__label", paste("Tier", r$tier))),
+    `data-rescued` = if (resc) "1" else NULL,
+    tags$td(class = "kf-tier", tags$span(class = "kf-tier__label",
+                                         if (resc) "Rescued" else paste("Tier", r$tier))),
     tags$td(class = "kf-gene",
             tags$span(class = "kf-gene__symbol", r$gene),
             if (!is.null(role)) tags$span(class = "kf-gene__role", role),
@@ -91,7 +96,10 @@ tags$div(
     tags$li(class = "kf-legend__item kf-tier-2", tags$strong("Tier 2"),
             " weaker: predicted-damaging missense, loss of function in an oncogene, SV with no exon annotated"),
     tags$li(class = "kf-legend__item kf-tier-3", tags$strong("Tier 3"),
-            " low confidence: SV near (not in) the gene, intronic SV, copy number in a pseudoautosomal or IG/TR locus")),
+            " low confidence: SV near (not in) the gene, intronic SV, copy number in a pseudoautosomal or IG/TR locus"),
+    if (kf_n_rescued > 0)
+      tags$li(class = "kf-legend__item kf-tier-rescued", tags$strong("Rescued"),
+              " SV that failed Severus' own filters and was kept only by the whitelist; hidden unless shown")),
   if (length(ov_panels) == 0)
     section_notice("No gene list is embedded in this report, so no key findings can be listed.")
   else tags$div(class = "kf-need-list",
@@ -111,6 +119,9 @@ tags$div(
   tags$div(class = "kf-actions",
     tags$button(type = "button", class = "kf-toggle-low", hidden = NA, `aria-expanded` = "false",
                 "Show lower-confidence findings"),
+    if (kf_n_rescued > 0)
+      tags$button(type = "button", class = "kf-toggle-rescued", hidden = NA,
+                  `aria-pressed` = "false", "Show whitelist-rescued SVs"),
     tags$span(class = "kf-count")),
   tags$p(class = "kf-custom-note table-footnote", hidden = NA,
     "A Custom… list matches by gene symbol among the findings of the embedded gene lists and ",
@@ -141,7 +152,10 @@ table_details(
   "A deletion/duplication/insertion that VEP annotated without an exon effect is tier 3, one with no annotation at all, ",
   "or that Padfoot rated below HIGH, tier 2. Within ", fmt_bp(SV_PANEL_WINDOW_BND), " of a breakend (",
   fmt_bp(SV_PANEL_WINDOW_OTHER), " of other events) the gene is listed as “near” at tier 3, at most ",
-  KF_MAX_PROXIMITY_PER_GENE, " rows per gene. Events of locus size inside IG/TR loci are V(D)J recombination: tier 3.",
+  KF_MAX_PROXIMITY_PER_GENE, " rows per gene. Events of locus size inside IG/TR loci are V(D)J recombination: tier 3. ",
+  "An SV Severus kept only because of its whitelist (", tags$code("INFO/WL_RESCUE"), ") is tier “Rescued” and hidden ",
+  "until “Show whitelist-rescued SVs” is pressed, with its read support and any filter it failed; one that would be tier 3 ",
+  "is not listed, and one that the other caller also made is not rescued.",
   tags$br(),
   tags$strong("Copy number"), " (gene-level calls of the Copy number section): amplification or homozygous deletion. ",
   "Calls in a pseudoautosomal region (", if (!is.null(params$reference)) params$reference else "", ") and in IG/TR loci are tier 3. ",

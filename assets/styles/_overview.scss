@@ -68,6 +68,7 @@
   &.kf-tier-1 { border-left: 4px solid var(--kf-tier-1); }
   &.kf-tier-2 { border-left: 4px dashed var(--kf-tier-2); }
   &.kf-tier-3 { border-left: 3px dotted var(--kf-tier-3); }
+  &.kf-tier-rescued { border-left: 3px dashed var(--kf-tier-3); font-style: italic; }
 }
 
 .kf-need-list {
@@ -154,6 +155,9 @@
   &.kf-tier-2 td.kf-tier { border-left: 4px dashed var(--kf-tier-2); }
   &.kf-tier-3 td.kf-tier { border-left: 3px dotted var(--kf-tier-3); }
   &.kf-tier-3 { color: var(--color-text-muted); }
+  // Whitelist-rescued SV: below tier 3, shown on request
+  &.kf-tier-rescued td.kf-tier { border-left: 3px dashed var(--kf-tier-3); }
+  &.kf-tier-rescued { color: var(--color-text-muted); font-style: italic; }
 
   // A gene's further alterations: tier label, gene and lists are printed by the head line only
   // (the per-line tier stripe stays, so a tier-3 line under a tier-1 gene still reads as such)
@@ -207,7 +211,8 @@
   margin: 0.5rem 0 0;
 }
 
-.kf-toggle-low {
+.kf-toggle-low,
+.kf-toggle-rescued {
   padding: 4px 11px;
   border-radius: 6px;
   border: 1px solid var(--color-border);

@@ -412,6 +412,59 @@ test_that("purity names its source, shows the others and flags disagreement", {
   expect_equal(b$purity$detail, "ASCAT")
 })
 
+test_that("a whitelist-rescued SV is its own tier, with its read support, below tier 3", {
+  sv = kf_sv(id = c("pass", "resc"), svclass = c("DEL", "translocation"),
+             svtype = c("DEL", "BND"), chrom_a = c("chr8", "chr22"),
+             pos_a = c(127600000L, 29280000L), chrom_b = c("chr8", "chr2"),
+             pos_b = c(127900000L, 5e6), impact = c("HIGH", NA),
+             consequence = c("transcript_ablation", NA), support = c(12L, 1L),
+             filter = c("PASS", "FAIL_MAP_CONS"), wl_rescue = c(NA, "WHITELIST"))
+  o = build_overview(NULL, list(sv = list(table = sv)), kf_panels(), NULL, NULL, list(),
+                     list(reference = "hg38"))
+  f = o$findings
+  expect_equal(f$gene, c("MYC", "EWSR1"))
+  expect_equal(f$tier, c(1L, KF_TIER_RESCUED))
+  expect_equal(f$ev_tier, c(1L, 1L))
+  expect_equal(f$rescued, c(FALSE, TRUE))
+  expect_match(f$evidence[2], "^whitelist-rescued \\(WHITELIST\\), failed FAIL_MAP_CONS · 1 supporting read · breakpoint in EWSR1")
+  # Not counted for the empty-state hints, which describe the default (non-rescued) view
+  expect_equal(o$per_panel_n, c(a = 1L, b = 0L))
+  # Labelled on the circos only as a rescued row, at its evidence tier
+  lab = circos_driver_rows(f)
+  expect_equal(lab$label, c("MYC", "EWSR1"))
+  expect_equal(lab$tier, c(1L, 1L))
+  expect_equal(lab$rescued, c(0L, 1L))
+})
+
+test_that("a rescued call that another caller also made is not rescued; tier-3 rescued rows go", {
+  # Severus' rescued call and SAVANA's PASS call are one event: it stands with SAVANA's
+  sv = kf_sv(id = c("sev", "sav"), caller = c("severus", "savana"),
+             svclass = "translocation", chrom_a = c("chr22", "chr22"),
+             pos_a = c(29280000L, 29280003L), chrom_b = "chr2", pos_b = c(5e6, 5e6 + 5),
+             wl_rescue = c("WHITELIST", NA))
+  f = kf_run(sd = list(sv = list(table = sv)))
+  expect_equal(nrow(f), 1L)
+  expect_false(f$rescued)
+  expect_equal(f$tier, 1L)
+  # A rescued call only near a gene (tier 3 on its evidence) is not listed at all
+  near = kf_sv(svclass = "translocation", chrom_a = "chr8", pos_a = 127742951 + 50000,
+               chrom_b = "chr3", pos_b = 1e6, wl_rescue = "WHITELIST")
+  expect_equal(nrow(kf_run(sd = list(sv = list(table = near)))), 0L)
+  expect_equal(kf_tier("SV", c("direct+rescued", "proximity+rescued", "rescued"), ""),
+               c(KF_TIER_RESCUED, KF_TIER_RESCUED, NA_integer_))
+})
+
+test_that("the SV biomarker counts whitelist-rescued rows apart", {
+  sv = list(n_by_caller = c(severus = 9711L, savana = 57L),
+            n_rescued_by_caller = c(severus = 9388L, savana = 0L),
+            table = kf_sv(caller = c("severus", "severus", "savana"),
+                          svclass = "translocation", chrom_a = "chr1", pos_a = 1L,
+                          chrom_b = "chr2", pos_b = 1L, wl_rescue = c("WHITELIST", NA, NA)))
+  b = build_biomarkers(list(sv = sv), NULL, NULL, list())
+  expect_equal(b$sv$value, "Severus 323 (+9,388 whitelist-rescued) · SAVANA 57")
+  expect_match(b$sv$detail, "translocations: Severus 1, SAVANA 1", fixed = TRUE)
+})
+
 test_that("SVs are counted per caller, never summed", {
   sv = list(n_by_caller = c(severus = 120L, savana = 64L),
             table = kf_sv(caller = c("severus", "savana", "savana"),

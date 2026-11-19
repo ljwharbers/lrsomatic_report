@@ -1055,6 +1055,7 @@ svg.circos-drivers {
   pointer-events: auto;
   cursor: default;
   &.tier-1 { fill: #1b1e22; font-weight: 600; }
+  &.is-rescued { font-style: italic; font-weight: 400; fill: #9a9080; }
 }
 .circos-driver-line {
   fill: none;
@@ -1063,6 +1064,14 @@ svg.circos-drivers {
   &.tier-1 { stroke: #1b1e22; stroke-width: 0.6; }
 }
 .circos-drivers-hint { text-align: center; margin: 0.4rem 0 0; font-style: italic; }
+// SV table: the whitelist-rescued rows' show/hide box (templates/sections/_sv.qmd)
+.sv-rescue-toggle {
+  font-size: 0.85rem;
+  margin: 0.4rem 0;
+  label { font-weight: 600; margin-right: 0.5rem; cursor: pointer; }
+  input { margin-right: 0.35rem; }
+}
+.sv-rescue-toggle__note { color: var(--color-text-muted); }
 
 // ReConPlot per-chromosome figures (templates/sections/_reconplot.qmd): two up when the page
 // is wide enough for each to stay readable (1800 px source, text drawn for ~900 px)
