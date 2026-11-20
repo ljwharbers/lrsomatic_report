@@ -762,6 +762,13 @@ test_that("the notice names every caller, the spread, the headline source and th
   expect_match(html, "Verdict) depends on purity too", fixed = TRUE)
   html = as.character(purity_disagreement_notice(pc, list(status = "not_run"), tumour_only = TRUE))
   expect_false(grepl("Verdict", html, fixed = TRUE))
+  html = as.character(purity_disagreement_notice(pc, list(status = "skipped", purity = 0.48, purity_source = "ascat"),
+                                                 tumour_only = TRUE))
+  expect_match(html, "Verdict) was skipped for this sample (ASCAT's purity, 0.48).", fixed = TRUE)
+  expect_false(grepl("used ASCAT", html, fixed = TRUE))
+  html = as.character(purity_disagreement_notice(pc, list(status = "skipped", purity = NA_real_, purity_source = "none"),
+                                                 tumour_only = TRUE))
+  expect_match(html, "Verdict) was skipped for this sample.", fixed = TRUE)
   # Similar ploidies: no WGD sentence
   pc2 = purity_disagreement(pbs_dt(c("wakhan", "ascat"), c(0.50, 0.82), c(2.1, 1.985)), used = "wakhan")
   expect_false(grepl("whole-genome", as.character(purity_disagreement_notice(pc2)), fixed = TRUE))

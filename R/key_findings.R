@@ -1028,8 +1028,12 @@ purity_disagreement_notice = function(pc, verdict = NULL, tumour_only = FALSE) {
   v_src = if (!is.null(verdict$purity_source) && !is.na(verdict$purity_source)) verdict$purity_source
           else NA_character_
   v_pur = if (!is.null(verdict$purity)) verdict$purity else NA_real_
+  v_known = !is.na(v_src) && v_src %in% names(PURITY_SOURCE_LABELS) && !is.na(v_pur)
   verdict_txt = if (!isTRUE(tumour_only) || identical(verdict$status, "not_run")) NULL
-    else if (!is.na(v_src) && v_src %in% names(PURITY_SOURCE_LABELS) && !is.na(v_pur))
+    else if (identical(verdict$status, "skipped"))
+      paste0(" ClairS-TO germline tagging (Verdict) was skipped for this sample",
+             if (v_known) paste0(" (", lab(v_src), "'s purity, ", kf_num(v_pur), ")") else "", ".")
+    else if (identical(verdict$status, "applied") && v_known)
       paste0(" ClairS-TO germline tagging (Verdict) used ", lab(v_src), "'s purity, ", kf_num(v_pur), ".")
     else " In a tumour-only run, ClairS-TO germline tagging (Verdict) depends on purity too."
   tags$div(class = "purity-alert", role = "note",
@@ -1047,8 +1051,8 @@ purity_disagreement_notice = function(pc, verdict = NULL, tumour_only = FALSE) {
                   if (!is.null(used) && nrow(used))
                     paste0("; this report uses ", lab(used$source), "'s (", kf_num(used$purity),
                            " / ", kf_num(used$ploidy), ").") else ".",
-                  if (!is.null(verdict_txt)) verdict_txt else "",
-                  " Check the copy-number profile before relying on them.")))
+                  " Check the copy-number profile before relying on them.",
+                  if (!is.null(verdict_txt)) verdict_txt else "")))
 }
 
 build_biomarkers = function(section_data, ascat_pp, tmb_info, counts, purity_check = NULL) {
