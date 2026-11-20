@@ -274,6 +274,10 @@ key findings) is computed from the full table in either mode.
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 `wakhan/*_heatmap_ploidy_purity.html`; the report names them.
 
+> **Changed in 2.1.1:** the ecDNA section's "N more CoRAL plots not embedded" footnote names
+> the plot folder relative to `--sample-dir`, like every other provenance line, instead of the
+> absolute (pipeline work-directory) path.
+
 > **Changed in 2.1.0:**
 > - New `--run-mode paired|tumour_only` states the run mode instead of inferring it from
 >   normal-side QC files (the pipeline passes it; without it the report infers as before).
@@ -575,7 +579,7 @@ Auto-detection reads `##contig` lines from the VEP somatic VCF.
 ### Container (recommended)
 
 Every release is published as a container, so nothing needs installing (`<version>` is the
-content of `VERSION`, e.g. `2.1.0`):
+content of `VERSION`, e.g. `2.1.1`):
 
 ```bash
 # Docker / Podman
