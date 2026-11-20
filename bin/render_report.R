@@ -46,6 +46,15 @@ option_list = list(
                            "(default: slim — HIGH/MODERATE impact, ClinVar pathogenic and",
                            "panel-gene rows). The full table is always written next to the",
                            "report as <sample-id>_small_variants.tsv.gz.")),
+  make_option("--embed-full-table", type = "character", default = "yes",
+              help = paste("Also embed that full table in the HTML (gzipped, about the file's",
+                           "size), behind a download button and a 'show all' action: yes | no",
+                           "(default: yes; skipped above --embed-full-table-max-mb).")),
+  make_option("--embed-full-table-max-mb", type = "character",
+              default = as.character(FULL_TABLE_EMBED_MAX_MB),
+              help = paste("Largest full table (MB, gzipped) --embed-full-table embeds; a larger",
+                           "one stays only next to the report. The HTML grows by ~4/3 of it",
+                           "(default: %default).")),
   make_option("--run-mode",    type = "character", default = NULL,
               help = paste("Run mode: paired | tumour_only. Overrides the mode inferred from",
                            "normal-side QC files (default: inferred).")),
@@ -81,6 +90,14 @@ sex         = switch(sex, xy = "male", xx = "female", sex)  # normalise XY/XX
 embed       = tolower(trimws(opt[["embed"]]))
 if (!embed %in% c("slim", "full"))
   abort(paste0("--embed must be 'slim' or 'full' (got '", opt[["embed"]], "')"))
+
+embed_full_table = parse_yes_no(opt[["embed-full-table"]])
+if (is.na(embed_full_table))
+  abort(paste0("--embed-full-table must be 'yes' or 'no' (got '", opt[["embed-full-table"]], "')"))
+embed_full_table_max_mb = parse_positive_mb(opt[["embed-full-table-max-mb"]])
+if (is.na(embed_full_table_max_mb))
+  abort(paste0("--embed-full-table-max-mb must be a number above 0 (got '",
+               opt[["embed-full-table-max-mb"]], "')"))
 
 purity_spread_warn = opt[["purity-spread-warn"]]
 if (!is.null(purity_spread_warn)) {
@@ -189,6 +206,8 @@ quarto::quarto_render(
     repo_dir      = repo_dir,
     outputs       = outputs,
     embed         = embed,
+    embed_full_table = embed_full_table,
+    embed_full_table_max_mb = embed_full_table_max_mb,
     purity_spread_warn = purity_spread_warn
   ),
   quiet = FALSE

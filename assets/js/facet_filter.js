@@ -303,7 +303,8 @@
            '</div>';
   }
 
-  function menuMarkup(name, def) {
+  // `sel` re-ticks what was ticked before a reload (facetFilterReload)
+  function menuMarkup(name, def, sel) {
     var withFind = def.values.length > SEARCH_THRESHOLD;
     var opts = def.values.map(function (v) {
       var tok = v[0], n = v[1];
@@ -312,7 +313,8 @@
       return '<label class="facet__opt' + (isNone ? " facet__opt--none" : "") + '"' +
              ' title="' + esc(label) + '">' +
              '<input type="checkbox"' +
-             (isNone ? ' data-none="1"' : ' data-tok="' + esc(tok) + '"') + '>' +
+             (isNone ? ' data-none="1"' : ' data-tok="' + esc(tok) + '"') +
+             (sel && sel.has(tok) ? ' checked' : '') + '>' +
              '<span class="facet__v">' + esc(label) + '</span>' +
              '<span class="facet__n">' + Number(n).toLocaleString() + '</span>' +
              '</label>';
@@ -437,7 +439,7 @@
 
     var $container = $(buttonMarkup(name));
     $wrap.append($container);                      // inside $wrap, see note 1 at the top
-    var $menu = $(menuMarkup(name, def)).appendTo(document.body);
+    var $menu = $(menuMarkup(name, def, STATE[t.key][name])).appendTo(document.body);
 
     // What clips the button, so an open menu can tell its column scrolled away
     var $cont = $(api.table().container());
@@ -603,7 +605,7 @@
     }
 
     // DataTables fires `search` right after the pass that filled the counts
-    $(node).on("search.dt", function (e) {
+    $(node).on("search.dt.facetfilter", function (e) {
       if (e.target !== node) return;
       if (!TOUCHED[t.key]) resetCounts(t.key);
       TOUCHED[t.key] = false;
@@ -612,7 +614,46 @@
 
     // R's counts are the unfiltered baseline and --gene-panel can pre-filter, so force one pass now
     api.draw(false);
+    return true;
   }
+
+  // Undo attach() for one table, keeping its ticked values (STATE); DT's own text box comes back
+  function detach(t) {
+    if (OPEN && OPEN.key === t.key) closeOpen();
+    WIDGETS = WIDGETS.filter(function (w) {
+      if (w.key !== t.key) return true;
+      var $wrap = w.$container.parent();
+      w.$container.remove();
+      w.$menu.remove();
+      $wrap.children("input").show().removeAttr("tabindex aria-hidden");
+      $wrap.children("span.glyphicon").show();
+      return false;
+    });
+    var node = t.elem();
+    if (node) $(node).off("search.dt.facetfilter");
+    dropCaches(t.key);
+    ATTACHED[t.key] = false;
+  }
+
+  function dropCaches(key) {
+    delete FCOLS[key]; delete VOCAB[key]; delete CIDX[key];
+    delete COUNTS[key]; delete TOUCHED[key];
+  }
+
+  // Rebuild one table's dropdowns after its rows changed (assets/js/full_table.js): `swap` replaces the rows and the *_FACETS global; ticks survive for columns still offered
+  window.facetFilterReload = function (key, swap) {
+    var t = TABLES.filter(function (x) { return x.key === key; })[0];
+    if (!t) return;
+    detach(t);
+    if (swap) swap();
+    // A draw inside swap (DT's slider `set` handler fires on a noUiSlider rebuild) may have cached the old rows/facets
+    dropCaches(key);
+    var defs = t.facets() || {};
+    Object.keys(STATE[key]).forEach(function (c) { if (!(c in defs)) delete STATE[key][c]; });
+    var node = t.elem();
+    if (!attach(t) && node && $.fn.dataTable.isDataTable(node)) $(node).DataTable().draw(false);
+    syncClearButton();
+  };
 
   // Defer a tick so DT's own filter-row handlers exist; the load sweep covers tables initialised before this script
   $(document).on("init.dt", function (e, settings) {

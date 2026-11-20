@@ -243,6 +243,104 @@ runAt(svNode, ["SV2", "DEL"], 1);
 check("SV counts are the SV table's", countOf("sv", "svclass", "translocation"), 1);
 check("SNV counts untouched by an SV pass", countOf("snv", "impact", "HIGH"), 1);
 
+// facetFilterReload (full_table.js "show all"): swap runs once, ticks survive for columns the
+// new payload still offers, and the predicate counts against the new vocabulary
+clear();
+tick("snv", "impact", ["HIGH"]);
+tick("snv", "callers", ["clairs"]);
+let swapped = 0;
+sandbox.window.facetFilterReload("snv", () => {
+  swapped++;
+  sandbox.window.SNV_FACETS = {
+    consequence: { sep: ",", values: [["intron_variant", 9]] },
+    impact:      { sep: null, values: [["HIGH", 1], ["MODIFIER", 9]] }
+  };
+});
+check("reload ran swap once", swapped, 1);
+check("reload keeps a still-offered tick", STATE.snv.impact && STATE.snv.impact.has("HIGH"), true);
+check("reload drops a tick on a column no longer offered", "callers" in STATE.snv, false);
+check("reloaded predicate filters", run(snvNode, snvRow("intron_variant", "MODIFIER", "")), false);
+runAt(snvNode, ["TP53", "intron_variant", "HIGH", ""], 0);
+check("reloaded vocabulary counts", countOf("snv", "consequence", "intron_variant"), 1);
+clear();
+
+// A draw inside swap: widening a range slider rebuilds its noUiSlider, which fires DT's `set`
+// handler and so table.draw(). That pass must already count against SNV_FACETS_FULL, and the
+// re-attach must not reuse caches built during it from the old facets: a column only the full
+// set offers would have no vocabulary, and build() would throw on it.
+const ft = require(path.join(__dirname, "..", "..", "assets", "js", "full_table.js"));
+const SLIM_FACETS = { impact: { sep: null, values: [["HIGH", 1]] } };
+const FULL_FACETS = {
+  impact:      { sep: null, values: [["HIGH", 1], ["MODIFIER", 2]] },
+  consequence: { sep: ",", values: [["intron_variant", 2], ["stop_gained", 1]] }
+};
+const FULL_ROWS = [
+  snvRow("stop_gained", "HIGH", ""),
+  snvRow("intron_variant", "MODIFIER", ""),
+  snvRow("intron_variant", "MODIFIER", "")
+];
+// The slim page as loaded: one pass over its single row has built caches from SLIM_FACETS
+function loadSlim() {
+  clear();
+  sandbox.window.SNV_FACETS = SLIM_FACETS;
+  sandbox.window.SNV_FACETS_FULL = FULL_FACETS;
+  sandbox.window.facetFilterReload("snv", null);
+  runAt(snvNode, snvRow("stop_gained", "HIGH", ""), 0);
+}
+function stubTable() {
+  const dt = { rows: { data: [], add(r) { dt.rows.data = r; } }, clear() { dt.rows.data = []; } };
+  return dt;
+}
+const drawOver = (rows) => rows.forEach((row, j) => runAt(snvNode, row, j));
+function fullVocabChecks(label) {
+  const counts = sandbox.window.facetFilterCounts().snv;
+  check(label + ": every full facet column is counted",
+        JSON.stringify(Object.keys(counts).sort()), JSON.stringify(Object.keys(FULL_FACETS).sort()));
+  check(label + ": vocabulary seeded in R's order",
+        JSON.stringify((counts.consequence || []).map((p) => p[0])),
+        JSON.stringify(["intron_variant", "stop_gained"]));
+  check(label + ": count of a value only the full rows hold", countOf("snv", "impact", "MODIFIER"), 2);
+  check(label + ": count on a column only the full set offers",
+        countOf("snv", "consequence", "intron_variant"), 2);
+}
+
+// makeSwap(): the draw fired from the slider widening already sees the full facets
+loadSlim();
+{
+  const dt = stubTable();
+  let inner = null, threw = null;
+  try {
+    sandbox.window.facetFilterReload("snv", ft.makeSwap(dt, FULL_ROWS, sandbox.window, () => {
+      drawOver(dt.rows.data);
+      inner = sandbox.window.facetFilterCounts().snv;
+    }));
+  } catch (e) { threw = e; }
+  check("swap with an inner draw does not throw", threw === null ? null : String(threw), null);
+  check("inner draw counts against the full facets",
+        JSON.stringify(Object.keys(inner || {}).sort()), JSON.stringify(Object.keys(FULL_FACETS).sort()));
+  check("swap switched SNV_FACETS", sandbox.window.SNV_FACETS === FULL_FACETS, true);
+  check("swap replaced the rows", dt.rows.data.length, 3);
+  drawOver(FULL_ROWS);                       // attach()'s own draw
+  fullVocabChecks("makeSwap");
+}
+
+// facetFilterReload() on its own: a swap that draws BEFORE switching the facets still re-attaches
+// against the new set, because the caches built inside it are dropped
+loadSlim();
+{
+  let threw = null;
+  try {
+    sandbox.window.facetFilterReload("snv", () => {
+      drawOver(FULL_ROWS);
+      sandbox.window.SNV_FACETS = FULL_FACETS;
+    });
+  } catch (e) { threw = e; }
+  check("late facet switch does not throw", threw === null ? null : String(threw), null);
+  drawOver(FULL_ROWS);
+  fullVocabChecks("late switch");
+}
+clear();
+
 if (failed > 0) {
   console.error(failed + " check(s) failed");
   process.exit(1);

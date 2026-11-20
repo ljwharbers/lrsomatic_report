@@ -424,6 +424,26 @@ extract_repeated_option = function(args, flag) {
   list(values = vals, rest = rest)
 }
 
+# Default --embed-full-table-max-mb: the largest sidecar (MiB, gzipped) embedded in the HTML.
+# At ~17-20 bytes per variant it holds ~250-300k variants and adds up to ~6.7 MB of base64
+FULL_TABLE_EMBED_MAX_MB = 5
+
+# A positive size in MB from the CLI; NA when not a finite number above 0
+parse_positive_mb = function(x) {
+  if (is.null(x) || length(x) != 1 || is.na(x)) return(NA_real_)
+  v = suppressWarnings(as.numeric(trimws(as.character(x))))
+  if (is.na(v) || !is.finite(v) || v <= 0) NA_real_ else v
+}
+
+# A yes/no CLI value (yes|no, true|false, 1|0; case-insensitive) as TRUE/FALSE; NA when unrecognised
+parse_yes_no = function(x) {
+  if (is.null(x) || length(x) != 1 || is.na(x)) return(NA)
+  v = tolower(trimws(as.character(x)))
+  if (v %in% c("yes", "true", "1")) return(TRUE)
+  if (v %in% c("no", "false", "0")) return(FALSE)
+  NA
+}
+
 # ---- Small JS serialisation helpers: the R table and the JS indexing it are generated from the same object ----
 
 js_quote = function(x) paste0('"', gsub('"', '\\\\"', as.character(x)), '"')
