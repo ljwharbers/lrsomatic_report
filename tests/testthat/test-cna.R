@@ -315,3 +315,20 @@ test_that("the ASCAT tab says 'skipped' without claiming a failure", {
   expect_match(ascat_missing_note(list(ascat_segments = "x.segments_raw.txt"), "ascat"),
                "^ASCAT ran .* plots were not found\\.$")
 })
+
+test_that("purity disagreement compares each caller's top solution only", {
+  # Fixtures: Wakhan rank 1 0.57 (rank 2 is 0.99), ASCAT 0.81, SAVANA rank 1 0.47 (row 1 is 0.52)
+  x = cna_parse(cna_locate(make_sample_dir("staged"), "S1"), list(), cna_ctx())
+  o = build_overview(NULL, list(cna = x), list(), NULL, NULL, list(), list())
+  pc = o$purity_check
+  expect_equal(pc$sources$source, c("wakhan", "ascat", "savana"))
+  expect_equal(pc$sources$purity, c(0.57, 0.81, 0.47))
+  expect_equal(pc$spread, 0.34)
+  expect_true(pc$flag)
+  expect_equal(pc$used, "wakhan")
+  expect_equal(o$biomarkers$purity$status, "warn")
+  # SAVANA and ASCAT skipped: one caller, no check
+  x = cna_parse(cna_locate(make_sample_dir("staged", ascat = FALSE, savana = FALSE), "S1"),
+                list(), cna_ctx())
+  expect_null(build_overview(NULL, list(cna = x), list(), NULL, NULL, list(), list())$purity_check)
+})

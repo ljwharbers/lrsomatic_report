@@ -68,6 +68,12 @@
     .kf-tier-3 { border-left: 3px dotted #888 !important; }
   }
   .kf-caveat { font-size: 0.72rem; border-left-color: #555; padding: 0.2rem 0.6rem; }
+  .purity-alert {
+    font-size: 0.72rem; padding: 0.25rem 0.6rem; margin-bottom: 0.5rem; background: none !important;
+    border-color: #555 !important; border-left: 4px solid #000 !important; break-inside: avoid;
+  }
+  .purity-alert__title { font-size: 0.78rem; }
+  .purity-alert__values { font-size: 0.7rem; }
 
   .bm-list {
     display: grid;

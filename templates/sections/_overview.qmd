@@ -16,6 +16,11 @@ ov_num = function(x, digits = 2) ifelse(is.na(x), "", formatC(as.numeric(x), for
 
 ::: {.overview}
 
+```{r purity-alert}
+# The callers' purity estimates disagree: shown above everything else in the overview
+htmltools::tagList(purity_disagreement_notice(ov$purity_check, ov$verdict, ov$tumour_only))
+```
+
 ::: {.overview-grid}
 
 ::: {.kf-panel}

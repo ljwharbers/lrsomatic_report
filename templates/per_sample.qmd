@@ -26,6 +26,7 @@ params:
   repo_dir:      "."
   outputs:       NULL   # named list from locate_outputs()
   embed:         "slim" # --embed: "slim" embeds the relevant small-variant rows, "full" all
+  purity_spread_warn: NULL # --purity-spread-warn; NULL = PURITY_SPREAD_WARN (R/key_findings.R)
 ---
 
 ```{r setup, include=FALSE}
@@ -82,7 +83,9 @@ ctx = list(
   cytobands   = cytobands,
   embed       = embed,
   repo_dir    = repo_dir,
-  outputs     = outputs
+  outputs     = outputs,
+  purity_spread_warn = if (!is.null(params$purity_spread_warn))
+                         as.numeric(params$purity_spread_warn) else PURITY_SPREAD_WARN
 )
 
 # Section-module contract: each section owns locate() and parse(); see CLAUDE.md

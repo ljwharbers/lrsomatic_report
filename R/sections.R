@@ -15,6 +15,7 @@
 #   repo_dir               repository root, for assets/
 #   outputs                locate_outputs() list; prefer the section's own locate() for
 #                          anything it owns, this is for shared inputs (e.g. ASCAT files)
+#   purity_spread_warn     numeric (--purity-spread-warn), read by build_overview()
 #
 # Registration order = parse order, and later sections read earlier ones through
 # `section_data`. Files under R/sections/ are therefore sourced in SECTION_ORDER, not

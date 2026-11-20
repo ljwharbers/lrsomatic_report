@@ -49,6 +49,10 @@ option_list = list(
   make_option("--run-mode",    type = "character", default = NULL,
               help = paste("Run mode: paired | tumour_only. Overrides the mode inferred from",
                            "normal-side QC files (default: inferred).")),
+  make_option("--purity-spread-warn", type = "character", default = NULL,
+              help = paste("Warn prominently when the purity estimates of ASCAT, Wakhan and SAVANA",
+                           "(top solution of each) differ by at least this much (default: 0.2).",
+                           "A value above 1 never warns.")),
   make_option("--version",     action = "store_true", default = FALSE,
               help = "Print the tool version and exit"),
   make_option("--output",      type = "character", default = NULL,
@@ -77,6 +81,14 @@ sex         = switch(sex, xy = "male", xx = "female", sex)  # normalise XY/XX
 embed       = tolower(trimws(opt[["embed"]]))
 if (!embed %in% c("slim", "full"))
   abort(paste0("--embed must be 'slim' or 'full' (got '", opt[["embed"]], "')"))
+
+purity_spread_warn = opt[["purity-spread-warn"]]
+if (!is.null(purity_spread_warn)) {
+  v = suppressWarnings(as.numeric(purity_spread_warn))
+  if (length(v) != 1 || is.na(v) || v <= 0)
+    abort(paste0("--purity-spread-warn must be a positive number (got '", purity_spread_warn, "')"))
+  purity_spread_warn = v
+}
 
 run_mode   = opt[["run-mode"]]
 if (!is.null(run_mode) && !tolower(trimws(run_mode)) %in% names(RUN_MODES))
@@ -176,7 +188,8 @@ quarto::quarto_render(
     title         = title,
     repo_dir      = repo_dir,
     outputs       = outputs,
-    embed         = embed
+    embed         = embed,
+    purity_spread_warn = purity_spread_warn
   ),
   quiet = FALSE
 )
