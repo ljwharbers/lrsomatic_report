@@ -104,3 +104,20 @@ test_that("every R source file parses", {
     expect_no_error(parse(f))
   }
 })
+
+test_that("--purity-spread-warn is documented with the report's default and validated", {
+  out = suppressWarnings(system2("Rscript", c(render_report, "--help"), stdout = TRUE, stderr = TRUE))
+  help = paste(out, collapse = " ")
+  expect_true(grepl("--purity-spread-warn", help, fixed = TRUE))
+  expect_true(grepl(paste0("(default: ", PURITY_SPREAD_WARN, ")"), help, fixed = TRUE))
+  d = tempfile("sample")
+  dir.create(d)
+  for (bad in c("abc", "0", "-0.1")) {
+    out = suppressWarnings(system2("Rscript",
+      c(render_report, "--sample-dir", d, "--sex", "male", "--purity-spread-warn", shQuote(bad)),
+      stdout = TRUE, stderr = TRUE))
+    expect_equal(attr(out, "status"), 1L, info = bad)
+    expect_true(any(grepl("--purity-spread-warn must be a positive number", out, fixed = TRUE)), info = bad)
+  }
+  expect_false(dir.exists(file.path(getwd(), "._render")))
+})

@@ -649,3 +649,131 @@ test_that("a deep deletion is a copy-number finding of the homozygous-deletion t
   expect_equal(r["CDKN2A"]$tier, 1L)
   expect_equal(r["IGH"]$tier, 3L)
 })
+
+# ---- purity disagreement --------------------------------------------------------------------
+
+pbs_dt = function(source, purity, ploidy = 2, used = FALSE) {
+  data.table(source = source, purity = purity, ploidy = ploidy,
+             used = rep_len(used, length(source)))
+}
+
+test_that("purity disagreement compares two or three callers by max - min", {
+  # B CLL4: SAVANA found no fit, so two callers
+  pc = purity_disagreement(pbs_dt(c("wakhan", "ascat"), c(0.50, 0.82), c(4.00, 1.985)), used = "wakhan")
+  expect_equal(pc$spread, 0.32)
+  expect_true(pc$flag)
+  expect_equal(pc$sources$source, c("wakhan", "ascat"))
+  expect_equal(pc$used, "wakhan")
+  # G1 DLBCL7_ucram: three callers, the headline source listed first whatever the input order
+  pc = purity_disagreement(pbs_dt(c("ascat", "savana", "wakhan"), c(0.48, 0.37, 0.63),
+                                  c(4.017, 5.00, 1.92)), used = "wakhan")
+  expect_equal(pc$spread, 0.26)
+  expect_true(pc$flag)
+  expect_equal(pc$sources$source, c("wakhan", "ascat", "savana"))
+  # A1 CCS15-PB: agreeing callers do not warn
+  pc = purity_disagreement(pbs_dt(c("wakhan", "ascat", "savana"), c(0.73, 0.80, 0.76)))
+  expect_equal(pc$spread, 0.07)
+  expect_false(pc$flag)
+})
+
+test_that("a caller without a purity drops out; fewer than two callers never warn", {
+  expect_null(purity_disagreement(NULL))
+  expect_null(purity_disagreement(pbs_dt(character(0), numeric(0))))
+  expect_null(purity_disagreement(pbs_dt("wakhan", 0.6)))
+  # ASCAT failed (NA purity): one caller left
+  expect_null(purity_disagreement(pbs_dt(c("wakhan", "ascat"), c(0.6, NA))))
+  pc = purity_disagreement(pbs_dt(c("wakhan", "ascat", "savana"), c(0.9, NA, 0.5)))
+  expect_equal(pc$sources$source, c("wakhan", "savana"))
+  expect_equal(pc$spread, 0.4)
+  # A non-numeric purity is a missing one, not an error
+  expect_null(purity_disagreement(data.table(source = c("wakhan", "ascat"), purity = c("0.6", "NA"))))
+  # A used source that has no purity is not named as used
+  expect_true(is.na(purity_disagreement(pbs_dt(c("wakhan", "ascat", "savana"), c(NA, 0.5, 0.9)),
+                                        used = "wakhan")$used))
+})
+
+test_that("the threshold is inclusive at the printed precision and can be changed", {
+  # 0.85 - 0.65 is 0.19999999999999996 in floating point
+  expect_true(purity_disagreement(pbs_dt(c("wakhan", "ascat"), c(0.65, 0.85)))$flag)
+  expect_false(purity_disagreement(pbs_dt(c("wakhan", "ascat"), c(0.66, 0.85)))$flag)
+  # ASCAT's 3-decimal purity: the spread is compared as printed (0.195 -> 0.2 or 0.19, never between)
+  pc = purity_disagreement(pbs_dt(c("wakhan", "ascat"), c(0.6, 0.795)))
+  expect_equal(pc$flag, pc$spread >= 0.2)
+  expect_equal(PURITY_SPREAD_WARN, 0.2)
+  expect_true(purity_disagreement(pbs_dt(c("a", "b"), c(0.6, 0.76)), threshold = 0.15)$flag)
+  expect_false(purity_disagreement(pbs_dt(c("a", "b"), c(0.5, 0.82)), threshold = 0.5)$flag)
+  # NULL / NA threshold falls back to the default
+  expect_equal(purity_disagreement(pbs_dt(c("a", "b"), c(0.5, 0.82)), threshold = NULL)$threshold, 0.2)
+  expect_equal(purity_disagreement(pbs_dt(c("a", "b"), c(0.5, 0.82)), threshold = NA)$threshold, 0.2)
+})
+
+test_that("a two-fold ploidy difference is a whole-genome-doubling disagreement", {
+  pc = purity_disagreement(pbs_dt(c("wakhan", "ascat", "savana"), c(0.63, 0.48, 0.37),
+                                  c(1.92, 4.017, 5.00)))
+  expect_true(pc$wgd_mismatch)
+  expect_equal(pc$ploidy_range, c(1.92, 5.00))
+  # C CLL4: SAVANA 2.95 vs 2.00 is not a doubling
+  pc = purity_disagreement(pbs_dt(c("wakhan", "ascat", "savana"), c(0.62, 0.75, 0.59),
+                                  c(2.00, 1.999, 2.95)))
+  expect_false(pc$wgd_mismatch)
+  pc = purity_disagreement(pbs_dt(c("wakhan", "ascat"), c(0.62, 0.75), c(NA, 2)))
+  expect_true(is.na(pc$ploidy_ratio))
+  expect_false(pc$wgd_mismatch)
+})
+
+test_that("build_overview carries the check and the purity card follows its threshold", {
+  cna = list(source = "wakhan", purity = 0.62, ploidy = 2,
+             purity_by_source = pbs_dt(c("wakhan", "ascat", "savana"), c(0.62, 0.78, 0.59),
+                                       c(2, 2, 2.95), c(TRUE, FALSE, FALSE)))
+  sd = list(cna = cna)
+  o = build_overview(NULL, sd, list(), NULL, NULL, list(), list())
+  expect_equal(o$purity_check$spread, 0.19)
+  expect_false(o$purity_check$flag)
+  expect_equal(o$biomarkers$purity$status, "ok")
+  expect_false(grepl("differ", o$biomarkers$purity$detail))
+  o = build_overview(NULL, sd, list(), NULL, NULL, list(), list(purity_spread_warn = 0.15))
+  expect_true(o$purity_check$flag)
+  expect_equal(o$biomarkers$purity$status, "warn")
+  expect_match(o$biomarkers$purity$detail, "purity estimates differ by 0.19")
+  # No CN section: nothing to compare
+  o = build_overview(NULL, list(), list(), list(purity = 0.8, ploidy = 3), NULL, list(), list())
+  expect_null(o$purity_check)
+  expect_equal(o$biomarkers$purity$status, "ok")
+})
+
+test_that("the notice names every caller, the spread, the headline source and the consequence", {
+  pc = purity_disagreement(pbs_dt(c("wakhan", "ascat", "savana"), c(0.63, 0.48, 0.37),
+                                  c(1.92, 4.017, 5.00)), used = "wakhan")
+  html = as.character(purity_disagreement_notice(pc))
+  expect_match(html, 'class="purity-alert"', fixed = TRUE)
+  expect_match(html, "Purity estimates disagree by 0.26", fixed = TRUE)
+  expect_match(html, "Wakhan 0.63 (ploidy 1.92) · ASCAT 0.48 (ploidy 4.02) · SAVANA 0.37 (ploidy 5.00)",
+               fixed = TRUE)
+  expect_match(html, "difference of 0.20 or more", fixed = TRUE)
+  expect_match(html, "ploidies differ 2.6-fold (1.92 to 5.00)", fixed = TRUE)
+  expect_match(html, "whole-genome doubling", fixed = TRUE)
+  expect_match(html, "this report uses Wakhan's (0.63 / 1.92)", fixed = TRUE)
+  expect_false(grepl("Verdict", html, fixed = TRUE))   # matched run
+  # Tumour-only: the Verdict purity is named when the status file gives it
+  v = list(status = "applied", purity = 0.48, ploidy = 4.02, purity_source = "ascat")
+  html = as.character(purity_disagreement_notice(pc, v, tumour_only = TRUE))
+  expect_match(html, "Verdict) used ASCAT's purity, 0.48", fixed = TRUE)
+  html = as.character(purity_disagreement_notice(pc, NULL, tumour_only = TRUE))
+  expect_match(html, "Verdict) depends on purity too", fixed = TRUE)
+  html = as.character(purity_disagreement_notice(pc, list(status = "not_run"), tumour_only = TRUE))
+  expect_false(grepl("Verdict", html, fixed = TRUE))
+  html = as.character(purity_disagreement_notice(pc, list(status = "skipped", purity = 0.48, purity_source = "ascat"),
+                                                 tumour_only = TRUE))
+  expect_match(html, "Verdict) was skipped for this sample (ASCAT's purity, 0.48).", fixed = TRUE)
+  expect_false(grepl("used ASCAT", html, fixed = TRUE))
+  html = as.character(purity_disagreement_notice(pc, list(status = "skipped", purity = NA_real_, purity_source = "none"),
+                                                 tumour_only = TRUE))
+  expect_match(html, "Verdict) was skipped for this sample.", fixed = TRUE)
+  # Similar ploidies: no WGD sentence
+  pc2 = purity_disagreement(pbs_dt(c("wakhan", "ascat"), c(0.50, 0.82), c(2.1, 1.985)), used = "wakhan")
+  expect_false(grepl("whole-genome", as.character(purity_disagreement_notice(pc2)), fixed = TRUE))
+  # Not flagged, or nothing to compare: no notice at all
+  expect_null(purity_disagreement_notice(purity_disagreement(pbs_dt(c("a", "b"), c(0.7, 0.75)))))
+  expect_null(purity_disagreement_notice(NULL))
+  expect_equal(as.character(htmltools::tagList(purity_disagreement_notice(NULL))), "")
+})

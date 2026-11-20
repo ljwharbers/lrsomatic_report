@@ -12,6 +12,10 @@ cna_solutions  = if (!is.null(cna) && nrow(cna$solutions) > 0) cna$solutions els
 embed_full     = identical(embed, "full")
 ```
 
+```{r cn-purity-alert}
+htmltools::tagList(purity_disagreement_notice(OVERVIEW$purity_check, OVERVIEW$verdict, OVERVIEW$tumour_only))
+```
+
 ```{r cn-outer-tabset-open, results='asis'}
 cat("::: {.panel-tabset}\n\n")
 cat("### ASCAT\n\n")

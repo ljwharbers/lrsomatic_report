@@ -93,6 +93,9 @@ from the sample directory, and so is the run mode unless `--run-mode` states it.
 --run-mode        paired | tumour_only  (default: inferred — matched when any normal-side QC
                   file is found). Sets the header badge and the tumour-only caveat; the
                   pipeline passes it, since a pair whose QC was skipped has no normal-side file
+--purity-spread-warn  Purity difference (max − min over the top solution of ASCAT, Wakhan
+                  and SAVANA) at which the report warns that the callers disagree
+                  (default: 0.2; a value above 1 never warns). See Copy-number calls.
 --output          Output HTML path  (default: <sample-id>_report.html in current dir).
                   The small-variant TSV is written to the same directory.
 --title           Report title
@@ -198,8 +201,21 @@ genes on an embedded list.
 Segments come from Wakhan's rank-1 `integer_profile.bed` (haplotype-resolved), else ASCAT's
 `segments_raw.txt`. The purity and ploidy used are those of the same source, so the thresholds
 and the segments share one ploidy scale; every source found (Wakhan cell purity, ASCAT, SAVANA)
-is listed, because they can disagree — the purity biomarker is flagged when they differ by
-0.15 or more.
+is listed, because they can disagree.
+
+**Purity disagreement warning.** Only each caller's top solution is compared — Wakhan's rank 1
+(`solutions_ranks.tsv`, cell purity), ASCAT's fit (`purityploidy.txt`) and SAVANA's rank 1
+(`*_fitted_purity_ploidy.tsv`); a caller that was skipped, failed or wrote no purity drops out,
+and with fewer than two left there is nothing to compare. When the highest and lowest purity
+differ by **0.2 or more** (`--purity-spread-warn`), a warning box opens the overview and the
+copy-number section, naming every caller's purity and ploidy, and the purity biomarker is
+marked "check". When the ploidies also differ **1.6-fold or more** (e.g. 1.92 vs 4.02), it adds
+that the callers disagree about whole-genome doubling; a ploidy difference alone does not warn
+(the whole-genome duplication biomarker already flags an ASCAT/segment disagreement). The 0.2
+default comes from the 22 renders with two or more estimates in the November 2026 test
+campaign: callers on the same sample routinely differ by 0.07–0.18, and the five at 0.21–0.32
+were the samples whose solutions genuinely conflict (e.g. CLL4: Wakhan 0.50 tetraploid vs ASCAT
+0.82 diploid).
 
 Calls follow the COSMIC Cancer Gene Census CNA definition, on the total copy number of the
 segments overlapping each gene:
@@ -294,6 +310,11 @@ The sidecar is always written either way.
 **Wakhan's interactive Plotly plots are no longer embedded.** They remain in the pipeline's
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 `wakhan/*_heatmap_ploidy_purity.html`; the report names them.
+
+> **Unreleased:** a **purity disagreement warning** opens the overview and the copy-number
+> section when the callers' top-solution purities differ by `--purity-spread-warn` (default
+> 0.2) or more, naming each caller's purity and ploidy; the purity biomarker's "check" now uses
+> the same threshold (it was a fixed 0.15, which flagged 14 of 22 campaign renders).
 
 > **Changed in 2.1.1:** the ecDNA section's "N more CoRAL plots not embedded" footnote names
 > the plot folder relative to `--sample-dir`, like every other provenance line, instead of the

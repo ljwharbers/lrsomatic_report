@@ -28,6 +28,7 @@ params:
   embed:         "slim" # --embed: "slim" embeds the relevant small-variant rows, "full" all
   embed_full_table: true # --embed-full-table: the sidecar's bytes go into the HTML too
   embed_full_table_max_mb: NULL # --embed-full-table-max-mb (NULL: FULL_TABLE_EMBED_MAX_MB)
+  purity_spread_warn: NULL # --purity-spread-warn; NULL = PURITY_SPREAD_WARN (R/key_findings.R)
 ---
 
 ```{r setup, include=FALSE}
@@ -84,7 +85,9 @@ ctx = list(
   cytobands   = cytobands,
   embed       = embed,
   repo_dir    = repo_dir,
-  outputs     = outputs
+  outputs     = outputs,
+  purity_spread_warn = if (!is.null(params$purity_spread_warn))
+                         as.numeric(params$purity_spread_warn) else PURITY_SPREAD_WARN
 )
 
 # Section-module contract: each section owns locate() and parse(); see CLAUDE.md
