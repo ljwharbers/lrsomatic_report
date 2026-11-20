@@ -842,6 +842,14 @@ snv_display_table = function(vt) {
   out
 }
 
+# Multi-caller `callers` values for the DT tint (styleEqual() matches whole cells). Pass the
+# full table when "Show all" can swap it in: its rows carry combinations the slim rows lack
+snv_multi_caller_values = function(display, full = NULL) {
+  if (is.null(display) || !"callers" %in% names(display)) return(character(0))
+  src = if (!is.null(full) && "callers" %in% names(full)) full else display
+  unique(grep(",", src$callers, fixed = TRUE, value = TRUE))
+}
+
 # How full_table.js rebuilds a display row from a sidecar row: one [display name, sidecar
 # column, type, scale, digits] per display column, in display order; type is "number",
 # "logical" or "string" (strings are HTML-escaped there, as DT escapes them)

@@ -105,6 +105,20 @@ test_that("the display table and its column spec agree with what the DT shows", 
   expect_true(startsWith(spec, '[["symbol"'))
 })
 
+test_that("the multi-caller tint covers the full table's combinations when Show all is offered", {
+  full = data.table(callers = c("clairs", "clairs,deepsomatic", "clairs,deepsomatic", NA,
+                                "deepsomatic,severus", ""), vaf = 0.2)
+  slim = snv_display_table(full[1:3])
+  expect_equal(snv_multi_caller_values(slim), "clairs,deepsomatic")
+  expect_equal(snv_multi_caller_values(slim, full),
+               c("clairs,deepsomatic", "deepsomatic,severus"))
+  # same column under the display transform, so the values match the swapped-in cells
+  expect_equal(snv_multi_caller_values(slim, snv_display_table(full)),
+               snv_multi_caller_values(slim, full))
+  expect_equal(snv_multi_caller_values(slim[, !"callers"], full), character(0))
+  expect_equal(snv_multi_caller_values(NULL, full), character(0))
+})
+
 test_that("parse_yes_no reads the --embed-full-table values", {
   expect_true(parse_yes_no("yes"))
   expect_true(parse_yes_no(" TRUE "))

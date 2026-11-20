@@ -64,10 +64,8 @@ if (is.null(variant_table) || n_full_sv == 0) {
   slim_note
 } else {
 
-  # Flag cells whose VAF/DP/GT/PS came from a consensus winner; styleEqual() needs literal values
-  mc_vals = if ("callers" %in% names(dt_display))
-              unique(grep(",", dt_display$callers, fixed = TRUE, value = TRUE)) else
-              character(0)
+  # Flag cells whose VAF/DP/GT/PS came from a consensus winner; over every row "Show all" can add
+  mc_vals = snv_multi_caller_values(dt_display, if (snv_show_all) variant_table)
 
   # Plugin columns present in this run (see VEP_ANNOTATION_FIELDS in R/parse_smallvariants.R). clinvar is the one multi-token class column, so it is tinted per token below rather than by styleEqual(), which matches whole cells
   class_cols = intersect(c("sift", "polyphen", "am_class", "clinvar", "eve_class"), names(dt_display))
