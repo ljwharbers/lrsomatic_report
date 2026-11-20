@@ -311,10 +311,15 @@ The sidecar is always written either way.
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 `wakhan/*_heatmap_ploidy_purity.html`; the report names them.
 
-> **Unreleased:** a **purity disagreement warning** opens the overview and the copy-number
-> section when the callers' top-solution purities differ by `--purity-spread-warn` (default
-> 0.2) or more, naming each caller's purity and ploidy; the purity biomarker's "check" now uses
-> the same threshold (it was a fixed 0.15, which flagged 14 of 22 campaign renders).
+> **Changed in 2.2.0:**
+> - A **purity disagreement warning** opens the overview and the copy-number section when the
+>   callers' top-solution purities differ by `--purity-spread-warn` (default 0.2) or more,
+>   naming each caller's purity and ploidy; the purity biomarker's "check" now uses the same
+>   threshold (it was a fixed 0.15, which flagged 14 of 22 campaign renders).
+> - The **complete small-variant table is embedded** in the report by default
+>   (`--embed-full-table yes`, capped by `--embed-full-table-max-mb`, default 5 MB gzipped):
+>   the slim table's notice offers **Download full table** and **Show all variants in the
+>   table**, so a report shared on its own still holds every row.
 
 > **Changed in 2.1.1:** the ecDNA section's "N more CoRAL plots not embedded" footnote names
 > the plot folder relative to `--sample-dir`, like every other provenance line, instead of the
@@ -621,7 +626,7 @@ Auto-detection reads `##contig` lines from the VEP somatic VCF.
 ### Container (recommended)
 
 Every release is published as a container, so nothing needs installing (`<version>` is the
-content of `VERSION`, e.g. `2.1.1`):
+content of `VERSION`, e.g. `2.2.0`):
 
 ```bash
 # Docker / Podman
