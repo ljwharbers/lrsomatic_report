@@ -199,6 +199,19 @@ test_that("CoRAL without a classifier is unclassified, with CoRAL's amplicons", 
   expect_match(ecdna_verdict(x), "not classified")
 })
 
+test_that("the not-embedded CoRAL plots footnote names the folder relative to --sample-dir", {
+  sd = symlink_tree(file.path(instab_fx, "ec_detected"))
+  x = run_section("ecdna", sd)
+  note = as.character(ecdna_more_plots_note(x$plots, 1L, sd))
+  expect_match(note, "1 more CoRAL plot not embedded", fixed = TRUE)
+  plot_dir = sample_rel_path(dirname(x$plots[2]), sd)
+  expect_false(startsWith(plot_dir, "/"))
+  expect_match(note, paste0("<code>", plot_dir, "</code>"), fixed = TRUE)
+  expect_false(grepl(sd, note, fixed = TRUE))
+  expect_null(ecdna_more_plots_note(x$plots, 2L, sd))
+  expect_null(ecdna_more_plots_note(character(0), 0L, sd))
+})
+
 test_that("ecDNA is found through individually symlinked files", {
   x = run_section("ecdna", symlink_tree(file.path(instab_fx, "ec_detected")))
   expect_identical(x$status, "detected")
