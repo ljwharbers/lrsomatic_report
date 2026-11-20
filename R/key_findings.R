@@ -979,26 +979,95 @@ kf_pct = function(x, digits = 1) {
   paste0(formatC(100 * as.numeric(x), format = "f", digits = digits), "%")
 }
 
-build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
+# Purity disagreement between the callers' top solutions (README "Copy-number calls")
+PURITY_SPREAD_WARN      = 0.2   # --purity-spread-warn default: max - min purity
+PURITY_WGD_PLOIDY_RATIO = 1.6   # max / min ploidy at which the callers disagree about WGD
+PURITY_SOURCE_LABELS    = c(wakhan = "Wakhan", ascat = "ASCAT", savana = "SAVANA")
+
+# `pbs` is cna$purity_by_source, already one top solution per caller (Wakhan rank 1, ASCAT's
+# fit, SAVANA rank 1). A caller without a purity drops out; NULL with fewer than two left.
+purity_disagreement = function(pbs, threshold = PURITY_SPREAD_WARN, used = NA_character_) {
+  if (is.null(pbs) || !is.data.frame(pbs) || nrow(pbs) == 0 ||
+      !all(c("source", "purity") %in% names(pbs))) return(NULL)
+  if (is.null(threshold) || length(threshold) == 0 || is.na(threshold)) threshold = PURITY_SPREAD_WARN
+  num = function(x) suppressWarnings(as.numeric(x))
+  d = data.table(source = as.character(pbs$source), purity = num(pbs$purity),
+                 ploidy = if ("ploidy" %in% names(pbs)) num(pbs$ploidy) else NA_real_)
+  d = d[!is.na(purity) & !duplicated(source)]
+  if (nrow(d) < 2) return(NULL)
+  used = if (length(used) == 1 && !is.na(used) && used %in% d$source) used else NA_character_
+  if (!is.na(used)) d = d[order(source != used)]
+  spread = round(max(d$purity) - min(d$purity), 2)
+  pl = d$ploidy[!is.na(d$ploidy) & d$ploidy > 0]
+  ratio = if (length(pl) > 1) max(pl) / min(pl) else NA_real_
+  list(sources = d, spread = spread, threshold = as.numeric(threshold),
+       flag = spread >= threshold - 1e-9,
+       ploidy_range = if (length(pl) > 1) range(pl) else c(NA_real_, NA_real_),
+       ploidy_ratio = ratio,
+       wgd_mismatch = !is.na(ratio) && ratio >= PURITY_WGD_PLOIDY_RATIO,
+       used = used)
+}
+
+# The source whose purity/ploidy the CN calls use: the segment source, else the `used` row
+purity_used_source = function(cna) {
+  if (!is.null(cna$source) && length(cna$source) == 1 && !is.na(cna$source)) return(cna$source)
+  pbs = cna$purity_by_source
+  if (is.null(pbs) || nrow(pbs) == 0 || !"used" %in% names(pbs)) return(NA_character_)
+  u = pbs$source[pbs$used %in% TRUE]
+  if (length(u)) u[1] else NA_character_
+}
+
+# The callout naming every caller's purity and ploidy; NULL unless `pc$flag`
+purity_disagreement_notice = function(pc, verdict = NULL, tumour_only = FALSE) {
+  if (is.null(pc) || !isTRUE(pc$flag)) return(NULL)
+  lab = function(x) ifelse(x %in% names(PURITY_SOURCE_LABELS), PURITY_SOURCE_LABELS[x], x)
+  s = pc$sources
+  each = paste0(lab(s$source), " ", vapply(s$purity, kf_num, ""), " (ploidy ",
+                vapply(s$ploidy, kf_num, ""), ")")
+  used = if (!is.na(pc$used)) s[source == pc$used] else NULL
+  v_src = if (!is.null(verdict$purity_source) && !is.na(verdict$purity_source)) verdict$purity_source
+          else NA_character_
+  v_pur = if (!is.null(verdict$purity)) verdict$purity else NA_real_
+  verdict_txt = if (!isTRUE(tumour_only) || identical(verdict$status, "not_run")) NULL
+    else if (!is.na(v_src) && v_src %in% names(PURITY_SOURCE_LABELS) && !is.na(v_pur))
+      paste0(" ClairS-TO germline tagging (Verdict) used ", lab(v_src), "'s purity, ", kf_num(v_pur), ".")
+    else " In a tumour-only run, ClairS-TO germline tagging (Verdict) depends on purity too."
+  tags$div(class = "purity-alert", role = "note",
+    tags$p(class = "purity-alert__title",
+           tags$span(class = "purity-alert__icon", `aria-hidden` = "true", "⚠"),
+           paste0("Purity estimates disagree by ", kf_num(pc$spread))),
+    tags$p(class = "purity-alert__values", paste(each, collapse = " · "),
+           paste0(" — top solution of each; this warning shows at a difference of ",
+                  kf_num(pc$threshold), " or more.")),
+    if (isTRUE(pc$wgd_mismatch))
+      tags$p(paste0("Their ploidies differ ", formatC(pc$ploidy_ratio, format = "f", digits = 1),
+                    "-fold (", kf_num(pc$ploidy_range[1]), " to ", kf_num(pc$ploidy_range[2]),
+                    "), so the callers also disagree about whole-genome doubling.")),
+    tags$p(paste0("Copy-number calls and the copy-number key findings depend on purity and ploidy",
+                  if (!is.null(used) && nrow(used))
+                    paste0("; this report uses ", lab(used$source), "'s (", kf_num(used$purity),
+                           " / ", kf_num(used$ploidy), ").") else ".",
+                  if (!is.null(verdict_txt)) verdict_txt else "",
+                  " Check the copy-number profile before relying on them.")))
+}
+
+build_biomarkers = function(section_data, ascat_pp, tmb_info, counts, purity_check = NULL) {
   src_lab = c(wakhan = "Wakhan", ascat = "ASCAT", savana = "SAVANA")
   lab = function(x) { l = src_lab[x]; ifelse(is.na(l), x, l) }
   cna = section_data$cna
   out = list()
 
   # Purity & ploidy: the source the CN calls use, named; the others small
-  pur = NA_real_; plo = NA_real_; src = NA_character_; others = character(0); spread = NA_real_
+  pur = NA_real_; plo = NA_real_; src = NA_character_; others = character(0)
   if (!is.null(cna) && (!is.null(cna$purity) || !is.null(cna$ploidy))) {
     pur = as.numeric(cna$purity %||kf% NA); plo = as.numeric(cna$ploidy %||kf% NA)
     pbs = cna$purity_by_source
-    used = if (!is.null(pbs) && nrow(pbs) > 0 && "used" %in% names(pbs)) pbs[used %in% TRUE] else NULL
-    src = if (!is.null(cna$source) && !is.na(cna$source)) cna$source
-          else if (!is.null(used) && nrow(used)) used$source[1] else NA_character_
+    src = purity_used_source(cna)
     if (!is.null(pbs) && nrow(pbs) > 0) {
       o = pbs[!(source %in% src)]
       others = sprintf("%s %s / %s", lab(o$source), vapply(o$purity, kf_num, ""),
                        vapply(o$ploidy, kf_num, ""))
-      p = suppressWarnings(as.numeric(pbs$purity)); p = p[!is.na(p)]
-      if (length(p) > 1) spread = max(p) - min(p)
+      if (is.null(purity_check)) purity_check = purity_disagreement(pbs, used = src)
     }
   }
   if (is.na(pur) && is.na(plo) && !is.null(ascat_pp)) {
@@ -1009,12 +1078,13 @@ build_biomarkers = function(section_data, ascat_pp, tmb_info, counts) {
     out$purity = kf_bm("purity", "Purity / ploidy", "not run",
                        "no ASCAT, Wakhan or SAVANA estimate found", "not_run")
   } else {
-    disagree = !is.na(spread) && spread >= 0.15
+    disagree = isTRUE(purity_check$flag)
     out$purity = kf_bm("purity", "Purity / ploidy",
                        paste0(kf_num(pur), " / ", kf_num(plo)),
                        c(if (!is.na(src)) lab(src) else "",
                          if (length(others)) paste0("also ", paste(others, collapse = "; ")) else "",
-                         if (disagree) sprintf("purity estimates differ by %.2f", spread) else ""),
+                         if (disagree) paste0("purity estimates differ by ", kf_num(purity_check$spread))
+                         else ""),
                        if (disagree) "warn" else "ok")
   }
 
@@ -1188,8 +1258,12 @@ build_overview = function(variant_table, section_data, all_panels, ascat_pp, tmb
   ref = if (!is.null(ctx$reference)) ctx$reference else NA_character_
   f = build_findings(variant_table, section_data, all_panels, ref)
   mode = if (!is.null(ctx$outputs) && !is.null(ctx$outputs$mode)) ctx$outputs$mode else NA_character_
+  cna = section_data$cna
+  pc = if (!is.null(cna)) purity_disagreement(cna$purity_by_source, ctx$purity_spread_warn,
+                                              purity_used_source(cna))
   list(findings    = f$findings,
-       biomarkers  = build_biomarkers(section_data, ascat_pp, tmb_info, counts),
+       biomarkers  = build_biomarkers(section_data, ascat_pp, tmb_info, counts, pc),
+       purity_check = pc,
        per_panel_n = f$per_panel_n,
        tumour_only = identical(as.character(mode), "tumour-only"),
        verdict     = if (!is.null(ctx$outputs)) parse_verdict_status(ctx$outputs$verdict_status) else NULL,

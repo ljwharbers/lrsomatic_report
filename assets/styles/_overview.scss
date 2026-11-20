@@ -47,6 +47,26 @@
 }
 .kf-caveat--strong { border-left-color: var(--color-danger); font-weight: 500; }
 
+// The callers' purity estimates disagree (purity_disagreement_notice()): overview and CN section
+.purity-alert {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
+  border-left: 4px solid var(--color-warning);
+  border-radius: 0 var(--card-radius) var(--card-radius) 0;
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface));
+  color: var(--color-text);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  max-width: 96ch;
+
+  p { margin: 0 0 0.3rem; }
+  p:last-child { margin-bottom: 0; }
+}
+.purity-alert__title { font-weight: 600; font-size: 0.95rem; }
+.purity-alert__icon { color: var(--color-warning); margin-right: 0.4rem; }
+.purity-alert__values { font-family: var(--font-mono); font-size: 0.82rem; font-feature-settings: "tnum" 1; }
+
 .kf-legend {
   list-style: none;
   margin: 0 0 0.8rem;
