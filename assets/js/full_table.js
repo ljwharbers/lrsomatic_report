@@ -129,9 +129,19 @@
     return blob;
   }
 
+  // The `swap` for facetFilterReload(): facets switch first, because widening a range slider fires DT's `set` handler, which draws
+  function makeSwap(dt, rows, win, widen) {
+    return function () {
+      if (win.SNV_FACETS_FULL) win.SNV_FACETS = win.SNV_FACETS_FULL;
+      dt.clear();
+      dt.rows.add(rows);
+      if (widen) widen();
+    };
+  }
+
   var api = { b64ToBytes: b64ToBytes, roundR: roundR, canDecompress: canDecompress, gunzipToText: gunzipToText,
               parseTsv: parseTsv, toTableRows: toTableRows, numericRange: numericRange,
-              downloadBytes: downloadBytes };
+              downloadBytes: downloadBytes, makeSwap: makeSwap };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (typeof document === "undefined") return;
 
@@ -212,12 +222,7 @@
       gunzipToText(payload()).then(function (text) {
         var rows = toTableRows(parseTsv(text), spec, cols);
         var dt = $(node).DataTable();
-        var swap = function () {
-          dt.clear();
-          dt.rows.add(rows);
-          widenSliders(dt, rows, spec, cols);
-          if (window.SNV_FACETS_FULL) window.SNV_FACETS = window.SNV_FACETS_FULL;
-        };
+        var swap = makeSwap(dt, rows, window, function () { widenSliders(dt, rows, spec, cols); });
         if (window.facetFilterReload) window.facetFilterReload("snv", swap);
         else { swap(); dt.draw(false); }
         var scope = box.parentNode && box.parentNode.querySelector(".full-table__scope");

@@ -631,17 +631,23 @@
     });
     var node = t.elem();
     if (node) $(node).off("search.dt.facetfilter");
-    delete FCOLS[t.key]; delete VOCAB[t.key]; delete CIDX[t.key];
-    delete COUNTS[t.key]; delete TOUCHED[t.key];
+    dropCaches(t.key);
     ATTACHED[t.key] = false;
   }
 
-  // Rebuild one table's dropdowns after its rows changed (assets/js/full_table.js): `swap` replaces the rows and the *_FACETS global without drawing; ticks survive for columns still offered
+  function dropCaches(key) {
+    delete FCOLS[key]; delete VOCAB[key]; delete CIDX[key];
+    delete COUNTS[key]; delete TOUCHED[key];
+  }
+
+  // Rebuild one table's dropdowns after its rows changed (assets/js/full_table.js): `swap` replaces the rows and the *_FACETS global; ticks survive for columns still offered
   window.facetFilterReload = function (key, swap) {
     var t = TABLES.filter(function (x) { return x.key === key; })[0];
     if (!t) return;
     detach(t);
     if (swap) swap();
+    // A draw inside swap (DT's slider `set` handler fires on a noUiSlider rebuild) may have cached the old rows/facets
+    dropCaches(key);
     var defs = t.facets() || {};
     Object.keys(STATE[key]).forEach(function (c) { if (!(c in defs)) delete STATE[key][c]; });
     var node = t.elem();
