@@ -61,6 +61,25 @@ test_that("--embed-full-table is documented and rejects anything but yes or no",
   expect_false(dir.exists(file.path(getwd(), "._render")))
 })
 
+test_that("--embed-full-table-max-mb is documented with its default and rejects a non-positive size", {
+  out = suppressWarnings(system2("Rscript", c(render_report, "--help"),
+                                 stdout = TRUE, stderr = TRUE))
+  help = paste(out, collapse = " ")
+  expect_true(grepl("--embed-full-table-max-mb", help, fixed = TRUE))
+  expect_true(grepl("(default: 5)", gsub("\\s+", " ", help), fixed = TRUE))
+
+  d = tempfile("sample")
+  dir.create(d)
+  for (bad in c("0", "lots")) {
+    out = suppressWarnings(system2("Rscript",
+      c(render_report, "--sample-dir", d, "--sex", "male", "--embed-full-table-max-mb", bad),
+      stdout = TRUE, stderr = TRUE))
+    expect_equal(attr(out, "status"), 1L)
+    expect_true(any(grepl("--embed-full-table-max-mb must be a number above 0", out, fixed = TRUE)))
+  }
+  expect_false(dir.exists(file.path(getwd(), "._render")))
+})
+
 test_that("--run-mode rejects anything but paired or tumour_only, before any rendering", {
   d = tempfile("sample")
   dir.create(d)

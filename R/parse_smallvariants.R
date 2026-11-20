@@ -806,8 +806,8 @@ write_full_variant_table = function(vt, path) {
 }
 
 # Largest sidecar (gzipped bytes, before base64) embedded in the HTML; above it the report
-# only points at the file next to it
-FULL_TABLE_EMBED_MAX_BYTES = 20 * 1024^2
+# only points at the file next to it (--embed-full-table-max-mb)
+FULL_TABLE_EMBED_MAX_BYTES = FULL_TABLE_EMBED_MAX_MB * 1024^2
 FULL_TABLE_DATA_ID = "snv-full-table-data"
 
 # The sidecar's exact bytes, base64-encoded, for the report's download / show-all controls.
@@ -895,7 +895,7 @@ full_table_where = function(payload, sidecar) {
                    tags$code(sidecar), "next to it."))
   if (identical(st, "too_large"))
     return(tagList("The complete table is in", tags$code(sidecar), "next to this report;",
-                   sprintf("at %.1f MB compressed it is above the %.0f MB limit for embedding it here.",
+                   sprintf("at %.1f MB compressed it is above the %g MB limit for embedding it here.",
                            payload$bytes / 1024^2, payload$max_bytes / 1024^2)))
   tagList("The complete table is in", tags$code(sidecar), "next to this report.")
 }

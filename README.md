@@ -87,7 +87,9 @@ from the sample directory, and so is the run mode unless `--run-mode` states it.
                   secondary figures are embedded in the HTML; see Report size.
 --embed-full-table yes | no  (default: yes). Also embed the complete small-variant table
                   (the sidecar's gzipped bytes) behind a download button; skipped above
-                  20 MB compressed. See Report size.
+                  --embed-full-table-max-mb. See Report size.
+--embed-full-table-max-mb  Largest sidecar, in MB gzipped, that --embed-full-table embeds
+                  (default: 5). See Report size.
 --run-mode        paired | tumour_only  (default: inferred — matched when any normal-side QC
                   file is found). Sets the header badge and the tumour-only caveat; the
                   pipeline passes it, since a pair whose QC was skipped has no normal-side file
@@ -283,8 +285,10 @@ Chrome, Edge, Firefox and Safari; the button is not offered where it is missing)
 every row into the table, gene-list chips and column filters included. With `--embed full` the
 rows are already in the table, so only the download is offered. The payload costs about 4/3 of
 the sidecar's size: measured +0.13 MB on a matched sample with 4,473 variants (88 KB sidecar),
-+1.2 MB with 51,692 (865 KB) and +2.2 MB with 94,738 (1.6 MB). Above 20 MB compressed it is not
-embedded and the notice points at the file next to the report, as with `--embed-full-table no`.
++1.2 MB with 51,692 (865 KB) and +2.2 MB with 94,738 (1.6 MB). The sidecar takes 17-20 bytes per
+variant, so the default 5 MB cap (`--embed-full-table-max-mb`) holds roughly 250,000-300,000
+variants and adds at most about 6.7 MB to the report. Above the cap the table is not embedded and
+the notice points at the file next to the report, as with `--embed-full-table no`.
 The sidecar is always written either way.
 
 **Wakhan's interactive Plotly plots are no longer embedded.** They remain in the pipeline's

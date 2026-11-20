@@ -27,6 +27,7 @@ params:
   outputs:       NULL   # named list from locate_outputs()
   embed:         "slim" # --embed: "slim" embeds the relevant small-variant rows, "full" all
   embed_full_table: true # --embed-full-table: the sidecar's bytes go into the HTML too
+  embed_full_table_max_mb: NULL # --embed-full-table-max-mb (NULL: FULL_TABLE_EMBED_MAX_MB)
 ---
 
 ```{r setup, include=FALSE}
@@ -136,8 +137,11 @@ if (!is.null(variant_table)) write_full_variant_table(variant_table, small_varia
 # The same bytes embedded for the download / show-all controls, unless off or over the size cap
 embed_full_table = if (is.null(params$embed_full_table)) TRUE else
                      isTRUE(as.logical(unlist(params$embed_full_table)))
+full_table_max_mb = if (is.null(params$embed_full_table_max_mb)) FULL_TABLE_EMBED_MAX_MB else
+                      as.numeric(unlist(params$embed_full_table_max_mb))
 full_table = full_table_payload(small_variants_tsv,
-                                enabled = embed_full_table && !is.null(variant_table))
+                                enabled = embed_full_table && !is.null(variant_table),
+                                max_bytes = full_table_max_mb * 1024^2)
 
 # Join coverage: a silently failing variant_key() shows up here as a near-zero count
 n_vaf = if (!is.null(variant_table) && "vaf" %in% names(variant_table))

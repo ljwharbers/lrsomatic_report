@@ -53,7 +53,7 @@ test_that("the size cap and the option switch embedding off", {
   expect_null(off$b64)
   expect_equal(full_table_payload(file.path(tempdir(), "nope.tsv.gz"))$status, "missing")
   expect_equal(full_table_payload(NULL)$status, "missing")
-  expect_equal(FULL_TABLE_EMBED_MAX_BYTES, 20 * 1024^2)
+  expect_equal(FULL_TABLE_EMBED_MAX_BYTES, 5 * 1024^2)
 })
 
 test_that("controls carry the payload inertly, and only when it was embedded", {
@@ -84,7 +84,11 @@ test_that("the notice names the sidecar in every case, and says why it was not e
                fixed = TRUE)
   big = txt(full_table_payload(f, max_bytes = 1))
   expect_match(big, "<code>S_small_variants.tsv.gz</code>", fixed = TRUE)
-  expect_match(big, "above the 0 MB limit", fixed = TRUE)
+  expect_match(big, "above the", fixed = TRUE)
+  over = list(status = "too_large", bytes = 6.3 * 1024^2, max_bytes = FULL_TABLE_EMBED_MAX_BYTES)
+  expect_match(txt(over), "at 6.3 MB compressed it is above the 5 MB limit", fixed = TRUE)
+  expect_match(txt(modifyList(over, list(max_bytes = 2.5 * 1024^2))), "above the 2.5 MB limit",
+               fixed = TRUE)
 })
 
 test_that("the display table and its column spec agree with what the DT shows", {
@@ -117,6 +121,16 @@ test_that("the multi-caller tint covers the full table's combinations when Show 
                snv_multi_caller_values(slim, full))
   expect_equal(snv_multi_caller_values(slim[, !"callers"], full), character(0))
   expect_equal(snv_multi_caller_values(NULL, full), character(0))
+})
+
+test_that("parse_positive_mb reads --embed-full-table-max-mb", {
+  expect_equal(parse_positive_mb("5"), 5)
+  expect_equal(parse_positive_mb(" 2.5 "), 2.5)
+  expect_true(is.na(parse_positive_mb("0")))
+  expect_true(is.na(parse_positive_mb("-1")))
+  expect_true(is.na(parse_positive_mb("five")))
+  expect_true(is.na(parse_positive_mb("Inf")))
+  expect_true(is.na(parse_positive_mb(NULL)))
 })
 
 test_that("parse_yes_no reads the --embed-full-table values", {
