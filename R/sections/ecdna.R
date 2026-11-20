@@ -289,6 +289,16 @@ ecdna_verdict = function(x) {
   )
 }
 
+# Footnote naming the folder(s) of the CoRAL plots past the embed cap, relative to --sample-dir
+ecdna_more_plots_note = function(plots, cap, sample_dir) {
+  rest = utils::tail(plots, max(0L, length(plots) - cap))
+  if (length(rest) == 0) return(NULL)
+  htmltools::tags$p(class = "table-footnote",
+    sprintf("%d more CoRAL plot%s not embedded (--embed slim); see ", length(rest),
+            if (length(rest) == 1) "" else "s"),
+    htmltools::tags$code(paste(unique(sample_rel_path(dirname(rest), sample_dir)), collapse = ", ")), ".")
+}
+
 register_section(list(
   id     = "ecdna",
   title  = "ecDNA",

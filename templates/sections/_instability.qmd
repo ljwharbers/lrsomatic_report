@@ -237,11 +237,7 @@ plot_caption = function(p) {
 inst_html(htmltools::tagList(
   tags$div(class = "instability-plots",
     lapply(shown, function(p) embed_png(p, max_width = "100%", caption = plot_caption(p)))),
-  if (length(ec_plots) > ec_cap)
-    tags$p(class = "table-footnote",
-           sprintf("%d more CoRAL plot%s not embedded (--embed slim); see ", length(ec_plots) - ec_cap,
-                   if (length(ec_plots) - ec_cap == 1) "" else "s"),
-           tags$code(paste(unique(dirname(ec_plots[-seq_len(ec_cap)])), collapse = ", ")), ".")
+  ecdna_more_plots_note(ec_plots, ec_cap, sample_dir)
 ))
 ```
 
