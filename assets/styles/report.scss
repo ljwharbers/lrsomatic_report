@@ -522,7 +522,7 @@ blockquote {
 }
 
 // Shared by #panel-clear and #facet-clear (the latter hidden until a facet is set)
-.panel-controls__clear {
+.panel-controls__clear, .full-table__btn {
   padding: 5px 11px;
   border-radius: 6px;
   border: 1px solid var(--color-border);
@@ -542,6 +542,24 @@ blockquote {
     outline: none;
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
   }
+}
+
+// Download / show-all controls of the embedded full small-variant table
+.full-table {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 0.8rem;
+
+  .section-notice > & { margin: 0.5rem 0 0; }
+}
+
+.full-table__btn:disabled { opacity: 0.6; cursor: progress; }
+
+.full-table__status {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
 }
 
 .panel-controls__count {
@@ -1414,7 +1432,7 @@ $content-max: 2000px;
 // ============================================================
 @media print {
   #TOC, .sidebar-navigation, .quarto-sidebar,
-  .dt-buttons, div.dt-buttons, .panel-controls,
+  .dt-buttons, div.dt-buttons, .panel-controls, .full-table,
   // .facet__menu is a child of <body>, so it has to be hidden separately from .facet
   #custom-gene-panel, .facet, .facet__menu, .dataTables_filter, .dataTables_length,
   .dataTables_paginate, .dataTables_info { display: none !important; }

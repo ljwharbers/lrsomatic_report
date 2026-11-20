@@ -804,3 +804,90 @@ write_full_variant_table = function(vt, path) {
   data.table::fwrite(vt, path, sep = "\t", compress = "gzip")
   invisible(path)
 }
+
+# Largest sidecar (gzipped bytes, before base64) embedded in the HTML; above it the report
+# only points at the file next to it
+FULL_TABLE_EMBED_MAX_BYTES = 20 * 1024^2
+FULL_TABLE_DATA_ID = "snv-full-table-data"
+
+# The sidecar's exact bytes, base64-encoded, for the report's download / show-all controls.
+# Returns list(status, path, bytes, max_bytes, b64); status is "embedded" (b64 set), "off"
+# (`enabled` not TRUE), "missing" (no file) or "too_large" (file above `max_bytes`).
+full_table_payload = function(path, enabled = TRUE, max_bytes = FULL_TABLE_EMBED_MAX_BYTES) {
+  out = list(status = "off", path = path, bytes = NA_real_, max_bytes = max_bytes, b64 = NULL)
+  if (!isTRUE(enabled)) return(out)
+  if (is.null(path) || length(path) != 1 || is.na(path) || !file.exists(path)) {
+    out$status = "missing"
+    return(out)
+  }
+  out$bytes = file.size(path)
+  if (out$bytes > max_bytes) {
+    out$status = "too_large"
+    return(out)
+  }
+  out$status = "embedded"
+  out$b64 = base64enc::base64encode(path)
+  out
+}
+
+# The small-variant table as the DT shows it: VAF as a rounded percentage under "VAF%".
+# Never modifies `vt`. assets/js/full_table.js repeats the transform (snv_column_spec())
+snv_display_table = function(vt) {
+  if (is.null(vt)) return(NULL)
+  out = copy(as.data.table(vt))
+  if ("vaf" %in% names(out)) {
+    out[, vaf := round(vaf * 100, 1)]
+    setnames(out, "vaf", "VAF%")
+  }
+  out
+}
+
+# How full_table.js rebuilds a display row from a sidecar row: one [display name, sidecar
+# column, type, scale, digits] per display column, in display order; type is "number",
+# "logical" or "string" (strings are HTML-escaped there, as DT escapes them)
+snv_column_spec = function(display) {
+  if (is.null(display) || ncol(display) == 0) return("[]")
+  ents = vapply(names(display), function(nm) {
+    x = display[[nm]]
+    type = if (is.numeric(x)) "number" else if (is.logical(x)) "logical" else "string"
+    if (identical(nm, "VAF%")) {
+      src = "vaf"; scale = "100"; digits = "1"
+    } else {
+      src = nm; scale = "1"; digits = "null"
+    }
+    sprintf("[%s,%s,%s,%s,%s]", js_quote(nm), js_quote(src), js_quote(type), scale, digits)
+  }, character(1))
+  paste0("[", paste(ents, collapse = ","), "]")
+}
+
+# Download (and, when `show_all`, show-all) controls carrying the embedded payload in an
+# inert <script type="application/octet-stream">; NULL unless the payload was embedded
+full_table_controls = function(payload, n_full, show_all = FALSE) {
+  if (is.null(payload) || !identical(payload$status, "embedded")) return(NULL)
+  n_txt = formatC(n_full, format = "d", big.mark = ",")
+  tags$div(
+    class = "full-table",
+    tags$script(type = "application/octet-stream", id = FULL_TABLE_DATA_ID,
+                `data-filename` = basename(payload$path), `data-rows` = n_full,
+                HTML(payload$b64)),
+    tags$button(type = "button", class = "full-table__btn full-table__download",
+                sprintf("Download full table (%s variants, TSV)", n_txt)),
+    if (show_all) tags$button(type = "button", class = "full-table__btn full-table__show",
+                              hidden = NA,
+                              sprintf("Show all %s variants in the table", n_txt)),
+    tags$span(class = "full-table__status", role = "status", `aria-live` = "polite")
+  )
+}
+
+# The notice's sentence on where the complete table is, by payload status
+full_table_where = function(payload, sidecar) {
+  st = if (is.null(payload)) "off" else payload$status
+  if (identical(st, "embedded"))
+    return(tagList("The complete table is embedded in this report (below) and is also in",
+                   tags$code(sidecar), "next to it."))
+  if (identical(st, "too_large"))
+    return(tagList("The complete table is in", tags$code(sidecar), "next to this report;",
+                   sprintf("at %.1f MB compressed it is above the %.0f MB limit for embedding it here.",
+                           payload$bytes / 1024^2, payload$max_bytes / 1024^2)))
+  tagList("The complete table is in", tags$code(sidecar), "next to this report.")
+}

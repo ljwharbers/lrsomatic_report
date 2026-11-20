@@ -44,6 +44,23 @@ test_that("--embed rejects anything but slim or full, before any rendering", {
   expect_false(dir.exists(file.path(getwd(), "._render")))
 })
 
+test_that("--embed-full-table is documented and rejects anything but yes or no", {
+  out = suppressWarnings(system2("Rscript", c(render_report, "--help"),
+                                 stdout = TRUE, stderr = TRUE))
+  help = paste(out, collapse = "\n")
+  expect_true(grepl("--embed-full-table", help, fixed = TRUE))
+  expect_true(grepl("yes | no", help, fixed = TRUE))
+
+  d = tempfile("sample")
+  dir.create(d)
+  out = suppressWarnings(system2("Rscript",
+    c(render_report, "--sample-dir", d, "--sex", "male", "--embed-full-table", "maybe"),
+    stdout = TRUE, stderr = TRUE))
+  expect_equal(attr(out, "status"), 1L)
+  expect_true(any(grepl("--embed-full-table must be 'yes' or 'no'", out, fixed = TRUE)))
+  expect_false(dir.exists(file.path(getwd(), "._render")))
+})
+
 test_that("--run-mode rejects anything but paired or tumour_only, before any rendering", {
   d = tempfile("sample")
   dir.create(d)

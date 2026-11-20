@@ -3,13 +3,14 @@
 ```{r small-variant-prepare, results='asis'}
 # The DT and its JS globals come from variant_embed (the rows embedded under --embed); counts
 # and footnotes below still read the full variant_table
+n_full_sv     = if (!is.null(variant_table)) nrow(variant_table) else 0L
+n_embedded_sv = if (!is.null(variant_embed)) nrow(variant_embed) else 0L
+# "Show all" swaps the embedded full table into the DT (assets/js/full_table.js)
+snv_show_all  = identical(full_table$status, "embedded") &&
+                n_embedded_sv > 0 && n_embedded_sv < n_full_sv
 if (!is.null(variant_embed) && nrow(variant_embed) > 0) {
-  # Format the VAF as a percentage
-  dt_display = copy(variant_embed)
-  if ("vaf" %in% names(dt_display)) {
-    dt_display[, vaf := round(vaf * 100, 1)]
-    setnames(dt_display, "vaf", "VAF%")
-  }
+  # VAF as a percentage
+  dt_display = snv_display_table(variant_embed)
   # The panel filter reads the symbol column by name, not by a hard-coded position.
   cat("<script>window.SNV_COLS = ", js_col_index_map(names(dt_display)), ";</script>\n",
       sep = "")
@@ -21,12 +22,21 @@ if (!is.null(variant_embed) && nrow(variant_embed) > 0) {
 
   # The clinvar cell tint tests tokens, not the whole cell, so the class list has to reach the browser
   cat("<script>window.PATHOGENIC_CLASSES = ", js_vec(PATHOGENIC_CLASSES), ";</script>\n", sep = "")
+  snv_facet_seps   = c(consequence = ",", callers = ",", clinvar = ",")
+  snv_facet_levels = list(impact = IMPACT_LEVELS)
   cat("<script>window.SNV_FACETS = ",
-      js_facet_defs(dt_display,
-                    cols   = snv_facet_cols,
-                    seps   = c(consequence = ",", callers = ",", clinvar = ","),
-                    levels = list(impact = IMPACT_LEVELS)),
+      js_facet_defs(dt_display, cols = snv_facet_cols, seps = snv_facet_seps,
+                    levels = snv_facet_levels),
       ";</script>\n", sep = "")
+
+  # Show all: how to rebuild display rows from the sidecar, and the dropdown values of every row
+  if (snv_show_all) {
+    cat("<script>window.SNV_COL_SPEC = ", snv_column_spec(dt_display), ";</script>\n", sep = "")
+    cat("<script>window.SNV_FACETS_FULL = ",
+        js_facet_defs(snv_display_table(variant_table), cols = snv_facet_cols,
+                      seps = snv_facet_seps, levels = snv_facet_levels),
+        ";</script>\n", sep = "")
+  }
 }
 ```
 
@@ -36,16 +46,17 @@ section_notice(verdict_note(OVERVIEW$verdict), warn = identical(OVERVIEW$verdict
 ```
 
 ```{r small-variant-table}
-# Rows left out under --embed slim: say so above the table, and where the rest are
-n_full_sv     = if (!is.null(variant_table)) nrow(variant_table) else 0L
-n_embedded_sv = if (!is.null(variant_embed)) nrow(variant_embed) else 0L
+# Rows left out under --embed slim: say so above the table, and where the rest are (embedded
+# behind a download button unless --embed-full-table no or over the size cap)
 slim_note = if (n_embedded_sv < n_full_sv) section_notice(tagList(
-  sprintf(paste("Showing %s of %s small variants: protein-affecting (HIGH/MODERATE impact),",
-                "ClinVar pathogenic/likely pathogenic, and all variants in gene-list genes."),
-          formatC(n_embedded_sv, format = "d", big.mark = ","),
-          formatC(n_full_sv, format = "d", big.mark = ",")),
-  "The complete table is in", tags$code(small_variants_tsv), "next to this report."
-)) else NULL
+  tags$span(class = "full-table__scope",
+    sprintf(paste("Showing %s of %s small variants: protein-affecting (HIGH/MODERATE impact),",
+                  "ClinVar pathogenic/likely pathogenic, and all variants in gene-list genes."),
+            formatC(n_embedded_sv, format = "d", big.mark = ","),
+            formatC(n_full_sv, format = "d", big.mark = ","))),
+  full_table_where(full_table, small_variants_tsv),
+  full_table_controls(full_table, n_full_sv, show_all = snv_show_all)
+)) else full_table_controls(full_table, n_full_sv)
 
 if (is.null(variant_table) || n_full_sv == 0) {
   section_notice("No somatic small-variant annotation (VEP) output was found for this sample.")

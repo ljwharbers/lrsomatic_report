@@ -26,6 +26,7 @@ params:
   repo_dir:      "."
   outputs:       NULL   # named list from locate_outputs()
   embed:         "slim" # --embed: "slim" embeds the relevant small-variant rows, "full" all
+  embed_full_table: true # --embed-full-table: the sidecar's bytes go into the HTML too
 ---
 
 ```{r setup, include=FALSE}
@@ -132,6 +133,11 @@ variant_embed = slim_variant_table(variant_table, all_panels, embed)
 # bin/render_report.R moves it next to the output HTML
 small_variants_tsv = paste0(sample_id, "_small_variants.tsv.gz")
 if (!is.null(variant_table)) write_full_variant_table(variant_table, small_variants_tsv)
+# The same bytes embedded for the download / show-all controls, unless off or over the size cap
+embed_full_table = if (is.null(params$embed_full_table)) TRUE else
+                     isTRUE(as.logical(unlist(params$embed_full_table)))
+full_table = full_table_payload(small_variants_tsv,
+                                enabled = embed_full_table && !is.null(variant_table))
 
 # Join coverage: a silently failing variant_key() shows up here as a near-zero count
 n_vaf = if (!is.null(variant_table) && "vaf" %in% names(variant_table))
@@ -546,6 +552,13 @@ cat("\n</script>\n")
 # Overview interactivity, inlined from key_findings.js the same way; registers through window.registerPanelListener (panel-js-data chunk)
 cat("<script>\n")
 cat(readLines(file.path(params$repo_dir, "assets/js/key_findings.js")), sep = "\n")
+cat("\n</script>\n")
+```
+
+```{r full-table-js, results='asis'}
+# Download / show-all for the embedded full small-variant table; after facet_filter.js, whose reload hook it calls
+cat("<script>\n")
+cat(readLines(file.path(params$repo_dir, "assets/js/full_table.js")), sep = "\n")
 cat("\n</script>\n")
 ```
 

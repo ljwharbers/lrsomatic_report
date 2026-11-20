@@ -243,6 +243,27 @@ runAt(svNode, ["SV2", "DEL"], 1);
 check("SV counts are the SV table's", countOf("sv", "svclass", "translocation"), 1);
 check("SNV counts untouched by an SV pass", countOf("snv", "impact", "HIGH"), 1);
 
+// facetFilterReload (full_table.js "show all"): swap runs once, ticks survive for columns the
+// new payload still offers, and the predicate counts against the new vocabulary
+clear();
+tick("snv", "impact", ["HIGH"]);
+tick("snv", "callers", ["clairs"]);
+let swapped = 0;
+sandbox.window.facetFilterReload("snv", () => {
+  swapped++;
+  sandbox.window.SNV_FACETS = {
+    consequence: { sep: ",", values: [["intron_variant", 9]] },
+    impact:      { sep: null, values: [["HIGH", 1], ["MODIFIER", 9]] }
+  };
+});
+check("reload ran swap once", swapped, 1);
+check("reload keeps a still-offered tick", STATE.snv.impact && STATE.snv.impact.has("HIGH"), true);
+check("reload drops a tick on a column no longer offered", "callers" in STATE.snv, false);
+check("reloaded predicate filters", run(snvNode, snvRow("intron_variant", "MODIFIER", "")), false);
+runAt(snvNode, ["TP53", "intron_variant", "HIGH", ""], 0);
+check("reloaded vocabulary counts", countOf("snv", "consequence", "intron_variant"), 1);
+clear();
+
 if (failed > 0) {
   console.error(failed + " check(s) failed");
   process.exit(1);

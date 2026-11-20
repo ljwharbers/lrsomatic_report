@@ -46,6 +46,10 @@ option_list = list(
                            "(default: slim — HIGH/MODERATE impact, ClinVar pathogenic and",
                            "panel-gene rows). The full table is always written next to the",
                            "report as <sample-id>_small_variants.tsv.gz.")),
+  make_option("--embed-full-table", type = "character", default = "yes",
+              help = paste("Also embed that full table in the HTML (gzipped, about the file's",
+                           "size), behind a download button and a 'show all' action: yes | no",
+                           "(default: yes; skipped above 20 MB compressed).")),
   make_option("--run-mode",    type = "character", default = NULL,
               help = paste("Run mode: paired | tumour_only. Overrides the mode inferred from",
                            "normal-side QC files (default: inferred).")),
@@ -77,6 +81,10 @@ sex         = switch(sex, xy = "male", xx = "female", sex)  # normalise XY/XX
 embed       = tolower(trimws(opt[["embed"]]))
 if (!embed %in% c("slim", "full"))
   abort(paste0("--embed must be 'slim' or 'full' (got '", opt[["embed"]], "')"))
+
+embed_full_table = parse_yes_no(opt[["embed-full-table"]])
+if (is.na(embed_full_table))
+  abort(paste0("--embed-full-table must be 'yes' or 'no' (got '", opt[["embed-full-table"]], "')"))
 
 run_mode   = opt[["run-mode"]]
 if (!is.null(run_mode) && !tolower(trimws(run_mode)) %in% names(RUN_MODES))
@@ -176,7 +184,8 @@ quarto::quarto_render(
     title         = title,
     repo_dir      = repo_dir,
     outputs       = outputs,
-    embed         = embed
+    embed         = embed,
+    embed_full_table = embed_full_table
   ),
   quiet = FALSE
 )

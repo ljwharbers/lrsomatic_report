@@ -44,8 +44,9 @@ In page order:
   [Mutational signatures](#mutational-signatures)).
 - **Small variants** — the VEP-annotated somatic table (VAF, depth, phasing, plugin scores,
   ClinVar), with tickbox column filters and the gene-list filter. By default only the relevant
-  rows are embedded (see [Report size](#report-size-and---embed)); the full table is always
-  written next to the report as `<sample-id>_small_variants.tsv.gz`.
+  rows are shown (see [Report size](#report-size-and---embed)); the full table is always
+  written next to the report as `<sample-id>_small_variants.tsv.gz`, and by default also
+  embedded in the HTML, so a report shared on its own still holds every row.
 - **Structural variants** — one row per rearrangement from **Severus** and, where it ran,
   **SAVANA** (listed side by side, never merged), with VEP breakend genes, **Padfoot**
   annotations, a breakend circos that follows the table filter, and **ReConPlot** figures.
@@ -84,6 +85,9 @@ from the sample directory, and so is the run mode unless `--run-mode` states it.
                   assets/gene_lists (default: the bundled set). See Gene panels.
 --embed           slim | full  (default: slim). Which small-variant rows and which
                   secondary figures are embedded in the HTML; see Report size.
+--embed-full-table yes | no  (default: yes). Also embed the complete small-variant table
+                  (the sidecar's gzipped bytes) behind a download button; skipped above
+                  20 MB compressed. See Report size.
 --run-mode        paired | tumour_only  (default: inferred — matched when any normal-side QC
                   file is found). Sets the header badge and the tumour-only caveat; the
                   pipeline passes it, since a pair whose QC was skipped has no normal-side file
@@ -269,6 +273,19 @@ one of them. Slim mode embeds:
 
 `--embed full` embeds all of the above. Every count in the report (TMB, small-variant counts,
 key findings) is computed from the full table in either mode.
+
+**The complete small-variant table travels inside the report too** (`--embed-full-table yes`,
+the default): the exact bytes of `<sample-id>_small_variants.tsv.gz`, base64-encoded in an
+inert element that nothing reads on load. The notice above a slim table offers **Download full
+table** — which saves that file, offline and from `file://`, with no decompression — and **Show
+all variants in the table**, which unpacks it in the browser (`DecompressionStream`, in current
+Chrome, Edge, Firefox and Safari; the button is not offered where it is missing) and loads
+every row into the table, gene-list chips and column filters included. With `--embed full` the
+rows are already in the table, so only the download is offered. The payload costs about 4/3 of
+the sidecar's size: measured +0.13 MB on a matched sample with 4,473 variants (88 KB sidecar),
++1.2 MB with 51,692 (865 KB) and +2.2 MB with 94,738 (1.6 MB). Above 20 MB compressed it is not
+embedded and the notice points at the file next to the report, as with `--embed-full-table no`.
+The sidecar is always written either way.
 
 **Wakhan's interactive Plotly plots are no longer embedded.** They remain in the pipeline's
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and

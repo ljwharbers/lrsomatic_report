@@ -424,6 +424,15 @@ extract_repeated_option = function(args, flag) {
   list(values = vals, rest = rest)
 }
 
+# A yes/no CLI value (yes|no, true|false, 1|0; case-insensitive) as TRUE/FALSE; NA when unrecognised
+parse_yes_no = function(x) {
+  if (is.null(x) || length(x) != 1 || is.na(x)) return(NA)
+  v = tolower(trimws(as.character(x)))
+  if (v %in% c("yes", "true", "1")) return(TRUE)
+  if (v %in% c("no", "false", "0")) return(FALSE)
+  NA
+}
+
 # ---- Small JS serialisation helpers: the R table and the JS indexing it are generated from the same object ----
 
 js_quote = function(x) paste0('"', gsub('"', '\\\\"', as.character(x)), '"')
