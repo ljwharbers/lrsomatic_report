@@ -1,0 +1,178 @@
+```{r hmf-heading, results='asis', eval=!is.null(HMF)}
+# Reads HMF (build_hmf(), R/hmf.R), NULL unless --hmf-driver-panel was given; then nothing
+# below renders, not even the heading
+cat("## HMF driver annotation {#hmf-drivers}\n\n")
+```
+
+```{r hmf-prep, eval=!is.null(HMF)}
+hmf_fmt = function(x, digits = 3) ifelse(is.na(x), "–", trimws(formatC(x, format = "fg", digits = digits)))
+hmf_bp  = function(x) formatC(x, format = "d", big.mark = ",")
+hmf_yes = function(x) if (isTRUE(x)) "yes" else ""
+# A plain HTML table, styled as the gene-level CN table (same short-table pattern)
+hmf_table = function(header, rows) {
+  tags$div(class = "cna-genes__scroll hmf-table",
+    tags$table(class = "cna-genes__table", `data-quarto-disable-processing` = "true",
+      tags$thead(tags$tr(lapply(header, tags$th))),
+      tags$tbody(rows)))
+}
+hmf_status = function(reported, label = if (reported) "reported" else "not reported")
+  tags$span(class = paste0("hmf-status hmf-status--", if (reported) "on" else "off"), label)
+hmf_err = HMF$error
+```
+
+```{r hmf-error, eval=!is.null(HMF) && !is.null(HMF$error)}
+section_notice(paste0("The HMF resources could not be read, so no HMF annotation was made: ", hmf_err), warn = TRUE)
+```
+
+```{r hmf-tabset-open, results='asis', eval=!is.null(HMF) && is.null(HMF$error)}
+cat("::: {.panel-tabset}\n\n### Small variants\n\n")
+```
+
+```{r hmf-small, eval=!is.null(HMF) && is.null(HMF$error)}
+sm = HMF$small
+if (is.null(sm) || nrow(sm) == 0) {
+  section_notice("No somatic small variant falls on a coding effect of an HMF driver gene's canonical transcript, or on a known hotspot.")
+} else {
+  n_rep = sum(sm$reported)
+  trs = lapply(seq_len(nrow(sm)), function(i) {
+    r = sm[i]
+    tags$tr(
+      tags$td(class = "cna-genes__gene", r$gene),
+      tags$td(class = "cna-genes__locus", paste0(r$chrom, ":", hmf_bp(r$pos), " ", r$ref, ">", r$alt)),
+      tags$td(if (is.na(r$hgvsp)) "" else r$hgvsp),
+      tags$td(if (is.na(r$effect)) gsub(",", ", ", r$consequence, fixed = TRUE) else r$effect),
+      tags$td(if (nzchar(r$hotspot)) r$hotspot else ""),
+      tags$td(if (is.na(r$role)) "" else r$role),
+      tags$td(class = "cna-genes__num", hmf_fmt(r$vaf, 2)),
+      tags$td(if (isTRUE(r$in_panel_region)) "yes" else ""),
+      tags$td(hmf_status(r$reported), tags$span(class = "cna-genes__span-from", r$reason))
+    )
+  })
+  tagList(
+    tags$p(class = "hmf-count", paste0(n_rep, " reportable of ", nrow(sm), " candidate variant",
+                                       if (nrow(sm) == 1) "" else "s", ".")),
+    hmf_table(c("Gene", "Variant", "Protein", "HMF effect", "Hotspot", "Role", "VAF",
+                "Panel region", "Status"), trs)
+  )
+}
+```
+
+```{r hmf-cn-open, results='asis', eval=!is.null(HMF) && is.null(HMF$error)}
+cat("\n\n### Copy number\n\n")
+```
+
+```{r hmf-cn, eval=!is.null(HMF) && is.null(HMF$error)}
+cn = HMF$cn
+cn_sources = attr(cn, "sources")
+if (length(cn_sources) == 0 && (is.null(cn) || nrow(cn) == 0)) {
+  section_notice("No copy-number segments (ASCAT or Wakhan) and no SV-caller deletion over an HMF driver gene, so there are no HMF amplification or deletion calls.")
+} else if (is.null(cn) || nrow(cn) == 0) {
+  section_notice(paste0("No HMF driver gene flagged for amplification or deletion is amplified or deleted (",
+                        paste(cn_sources, collapse = ", "), "; SV-caller deletions)."))
+} else {
+  trs = lapply(seq_len(nrow(cn)), function(i) {
+    r = cn[i]
+    tags$tr(
+      `data-gene` = toupper(r$gene),
+      tags$td(class = "cna-genes__gene", r$gene),
+      tags$td(class = "cna-genes__locus", paste0(r$chrom, ":", hmf_bp(r$start), "–", hmf_bp(r$end))),
+      tags$td(tags$span(class = paste0("cna-call cna-call--", if (r$call == "DEL") "homozygous-deletion" else "amplification"), r$call)),
+      tags$td(class = "cna-genes__source", r$source),
+      tags$td(class = "cna-genes__num", if (is.na(r$min_cn)) "–" else if (r$min_cn == r$max_cn) hmf_fmt(r$min_cn) else paste0(hmf_fmt(r$min_cn), "–", hmf_fmt(r$max_cn))),
+      tags$td(class = "cna-genes__num", hmf_fmt(r$threshold)),
+      tags$td(r$support),
+      tags$td(if (is.na(r$role)) "" else r$role),
+      tags$td(class = "cna-genes__source", r$note)
+    )
+  })
+  hmf_table(c("Gene", "Exons", "Call", "Source", "Total CN", "AMP threshold", "Called by", "Role", "Note"), trs)
+}
+```
+
+```{r hmf-fusion-open, results='asis', eval=!is.null(HMF) && is.null(HMF$error)}
+cat("\n\n### Fusions\n\n")
+```
+
+```{r hmf-fusions, eval=!is.null(HMF) && is.null(HMF$error)}
+fu = HMF$fusions
+if (is.null(HMF$files$known_fusions)) {
+  section_notice("No known-fusion file was given (--hmf-known-fusions), so SVs were not matched against HMF's known fusions.")
+} else if (is.null(SECTION_DATA$sv) || is.null(SECTION_DATA$sv$table) || nrow(SECTION_DATA$sv$table) == 0) {
+  section_notice("No structural variants were found, so there are no fusions to match.")
+} else if (is.null(fu) || nrow(fu) == 0) {
+  section_notice("No structural variant matches an HMF known fusion pair, promiscuous partner, exon deletion/duplication or enhancer region.")
+} else {
+  trs = lapply(seq_len(nrow(fu)), function(i) {
+    r = fu[i]
+    tags$tr(
+      tags$td(class = "cna-genes__gene", paste0(ifelse(is.na(r$five_gene), "?", r$five_gene), " – ",
+                                                ifelse(is.na(r$three_gene), "?", r$three_gene))),
+      tags$td(r$type, if (isTRUE(r$high_impact)) tags$span(class = "cna-genes__span-from", "high-impact partner")),
+      tags$td(if (is.na(r$five_exon)) "" else r$five_exon),
+      tags$td(if (is.na(r$three_exon)) "" else r$three_exon),
+      tags$td(r$frame),
+      tags$td(r$likelihood),
+      tags$td(class = "cna-genes__locus", r$locus, tags$span(class = "cna-genes__span-from", paste0(r$svtype, " · ", r$sv_id))),
+      tags$td(class = "cna-genes__source", if (is.na(r$caller)) "" else r$caller),
+      tags$td(hmf_status(r$reported), if (nzchar(r$note)) tags$span(class = "cna-genes__span-from", r$note))
+    )
+  })
+  hmf_table(c("Fusion (5′ – 3′)", "Type", "5′ breakend", "3′ breakend", "Frame", "Likelihood",
+              "Breakends", "Caller", "Status"), trs)
+}
+```
+
+```{r hmf-tabset-close, results='asis', eval=!is.null(HMF) && is.null(HMF$error)}
+cat("\n\n:::\n\n")
+```
+
+```{r hmf-details, eval=!is.null(HMF) && is.null(HMF$error)}
+f = HMF$files
+given = function(x, what) if (is.null(x)) paste0(what, ": not given") else paste0(what, ": ", basename(x))
+cn_txt = if (length(attr(HMF$cn, "sources"))) paste(unname(attr(HMF$cn, "sources")), collapse = " and ") else "no copy-number segments"
+unc = attr(HMF$cn, "uncovered")
+table_details(
+  tags$p("Resources: ", paste(c(
+    paste0(given(f$driver_panel, "driver panel"), " (", HMF$n_genes, " genes, ", HMF$n_panel_columns, " columns)"),
+    paste0("Ensembl data cache: ", basename(f$ensembl_data_dir)),
+    if (!is.null(f$known_fusions)) paste0(given(f$known_fusions, "known fusions"), " (format ", HMF$fusion_format, ")")
+      else given(NULL, "known fusions"),
+    if (!is.null(f$hotspots)) paste0(given(f$hotspots, "hotspots"), " (", formatC(HMF$n_hotspots, big.mark = ","), " alleles)")
+      else given(NULL, "hotspots"),
+    if (!is.null(f$actionable_bed)) paste0(given(f$actionable_bed, "actionable coding panel"), " (", formatC(HMF$n_bed, big.mark = ","), " regions)")
+      else given(NULL, "actionable coding panel")), collapse = "; "), "."),
+  tags$p("Small variants: somatic calls on the HMF canonical transcript of a DriverGenePanel gene, classified as ",
+         "MISSENSE (missense, inframe indel), NONSENSE_OR_FRAMESHIFT (stop gained/lost, start lost, frameshift) or SPLICE ",
+         "(splice donor/acceptor, donor +5), and reported when the gene's reportMissense / reportNonsense / reportSplice flag is ",
+         "true, or when the variant is a known hotspot (exact alleles, or the same protein change) and reportSomaticHotspot is true. ",
+         "Hotspots in genes outside the panel are listed but not reported. “Panel region” = inside ActionableCodingPanel, ",
+         "which HMF uses only as a more sensitive calling region: it is not an actionability call."),
+  tags$p("Copy number: ASCAT and Wakhan are called separately, each on its own segments and ploidy (", cn_txt,
+         "). Over the canonical exons, DEL = minimum total CN < ", HMF_DEL_MAX_CN,
+         "; AMP = minimum total CN > amplificationRatio (default ", HMF_AMP_RATIO_DEFAULT, ") × ploidy, halved on chrX in a male; ",
+         "PARTIAL_AMP = only the maximum exceeds it. Gated by reportDeletion / reportAmplification. Wakhan segments with no reads ",
+         "on either haplotype are treated as uncovered, not as CN 0. In addition, every deletion called by an SV caller (Severus DEL, ",
+         "SAVANA +− pair) that removes canonical exons of a reportDeletion gene is listed, whatever the copy number says; such a ",
+         "deletion may be heterozygous. “Called by” lists every source making the same call for the gene. ",
+         paste(unlist(lapply(names(unc), function(s) if (length(unc[[s]]))
+           paste0(c(wakhan = "Wakhan", ascat = "ASCAT")[s], ": ", length(unc[[s]]), " flagged gene", if (length(unc[[s]]) == 1) "" else "s",
+                  " without segment coverage (", paste(utils::head(unc[[s]], 10), collapse = ", "),
+                  if (length(unc[[s]]) > 10) ", …" else "", "). ")), use.names = FALSE), collapse = ""),
+         "An ASCAT gap can hide a homozygous deletion."),
+  tags$p("Fusions: each SV (Severus and SAVANA separately) is placed on canonical transcripts using the breakend orientation; ",
+         "a gene is the 5′ partner when its strand equals the orientation. KNOWN_PAIR, EXON_DEL_DUP (both fused exons within the ",
+         "listed ranges), PROMISCUOUS_5/3 (exon ranges and high-impact flags as listed), IG/enhancer known pairs (breakend in the ",
+         "enhancer range, partner gene within ", fmt_bp(HMF_UPSTREAM_ENHANCER), ") and enhancer targets. A 3′ breakend may lie up to ",
+         fmt_bp(HMF_UPSTREAM_KNOWN), " upstream of a known-pair or high-impact gene, ", fmt_bp(HMF_UPSTREAM_DEFAULT),
+         " otherwise. Promiscuous fusions are reported only in frame."),
+  tags$p(tags$strong("Approximations: "), "no dNdS driver likelihood, biallelic or germline calls; single-SV fusions only ",
+         "(LINX chains SVs); no protein-domain or NMD checks; exonic breakends are not phase-checked; VEP's splice ",
+         "consequences stand in for PURPLE's splice definition; under VEP --per_gene, effects seen only on a non-canonical ",
+         "transcript (e.g. CDKN2A p14ARF) are not classified; copy number comes from long-read segments, not PURPLE's ",
+         "purity-adjusted fit, and segmental-duplication genes can be called falsely deleted."),
+  if (length(HMF$missing_genes))
+    tags$p(length(HMF$missing_genes), " panel gene(s) are not in the Ensembl data cache and are skipped: ",
+           paste(utils::head(HMF$missing_genes, 10), collapse = ", "), "."),
+  summary = "Rules, sources and approximations"
+)
+```

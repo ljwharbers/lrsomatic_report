@@ -121,3 +121,32 @@ test_that("--purity-spread-warn is documented with the report's default and vali
   }
   expect_false(dir.exists(file.path(getwd(), "._render")))
 })
+
+test_that("the --hmf-* flags are documented and validated before any rendering", {
+  out = suppressWarnings(system2("Rscript", c(render_report, "--help"), stdout = TRUE, stderr = TRUE))
+  help = paste(out, collapse = "\n")
+  for (flag in c("--hmf-driver-panel", "--hmf-ensembl-data-dir", "--hmf-known-fusions",
+                 "--hmf-hotspots", "--hmf-actionable-bed"))
+    expect_true(grepl(flag, help, fixed = TRUE), info = flag)
+
+  fx = file.path(repo_root, "tests", "fixtures", "hmf")
+  d = tempfile("sample"); dir.create(d)
+  run = function(...) suppressWarnings(system2("Rscript",
+    c(render_report, "--sample-dir", d, "--sex", "male", ...), stdout = TRUE, stderr = TRUE))
+  # A resource without the panel
+  out = run("--hmf-known-fusions", file.path(fx, "known_fusion_data.38.csv"))
+  expect_equal(attr(out, "status"), 1L)
+  expect_true(any(grepl("needs --hmf-driver-panel", out, fixed = TRUE)))
+  # The panel without the Ensembl cache
+  out = run("--hmf-driver-panel", file.path(fx, "DriverGenePanel.38.tsv"))
+  expect_true(any(grepl("needs --hmf-ensembl-data-dir", out, fixed = TRUE)))
+  # A file that is not a driver panel
+  out = run("--hmf-driver-panel", file.path(fx, "known_fusion_data.38.csv"),
+            "--hmf-ensembl-data-dir", file.path(fx, "ensembl_data"))
+  expect_true(any(grepl("does not look like an HMF DriverGenePanel", out, fixed = TRUE)))
+  # A missing path
+  out = run("--hmf-driver-panel", file.path(fx, "DriverGenePanel.38.tsv"),
+            "--hmf-ensembl-data-dir", file.path(fx, "ensembl_data"), "--hmf-hotspots", tempfile())
+  expect_true(any(grepl("--hmf-hotspots not found", out, fixed = TRUE)))
+  expect_false(dir.exists(file.path(getwd(), "._render")))
+})

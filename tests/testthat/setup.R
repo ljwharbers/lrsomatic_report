@@ -26,4 +26,5 @@ source(file.path(repo_root, "R/sections.R"))
 # after R/sections.R); same helper as the setup chunk of templates/per_sample.qmd
 for (f in section_files(file.path(repo_root, "R/sections"))) source(f)
 source(file.path(repo_root, "R/key_findings.R"))
+source(file.path(repo_root, "R/hmf.R"))
 source(file.path(repo_root, "R/circos_bnd.R"))

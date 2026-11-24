@@ -331,7 +331,8 @@ test_that("build_sv_table maps the gene-annotated TSV onto the shared schema", {
 
 SV_OUT_COLS = c("id", "svclass", "svtype", "chrom_a", "pos_a", "gene_a",
                 "chrom_b", "pos_b", "gene_b", "sv_len", "vaf",
-                "consequence", "impact", "support", "svtype_raw", "filter", "wl_rescue")
+                "consequence", "impact", "support", "svtype_raw", "filter", "wl_rescue",
+                "orient_a", "orient_b")
 
 test_that("the column contract is the one SV_TABLE_COLS declares", {
   expect_equal(SV_TABLE_COLS, SV_OUT_COLS)

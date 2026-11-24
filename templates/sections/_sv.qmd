@@ -177,7 +177,7 @@ if (!is.null(sv_table) && nrow(sv_table) > 0) {
   # Hidden, not dropped: the JS by-name lookups and the CSV export read these columns
   # svtype_raw too: it differs from svtype only for a SAVANA pair typed from BP_NOTATION (footnote)
   hidden = intersect(c("chrom_a", "pos_a", "chrom_b", "pos_b", "gene_a", "gene_b",
-                       "sv_len", "size_bp", "locus_sort", "svtype_raw",
+                       "sv_len", "size_bp", "locus_sort", "svtype_raw", "orient_a", "orient_b",
                        # FILTER / WL_RESCUE say something only when a row was rescued
                        if (n_sv_rescued == 0) c("filter", "wl_rescue")), names(sv_display))
 

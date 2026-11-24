@@ -199,11 +199,15 @@ parse_vep_text = function(vep_file) {
   available = union(declared, observed)
 
   # Parse the VEP Extra key=value field in one pass
-  ex = extract_extra_keys(dt$Extra, unique(c("SYMBOL", "IMPACT", "HGVSp",
+  ex = extract_extra_keys(dt$Extra, unique(c("SYMBOL", "IMPACT", "HGVSp", "CANONICAL",
                                              intersect(cands, available))))
   dt[, symbol := ex$SYMBOL]
   dt[, impact := ex$IMPACT]
   dt[, hgvsp  := ex$HGVSp]
+  # Transcript identity, for the HMF section's canonical-transcript rule (R/hmf.R); Feature is a column of the text format, CANONICAL an Extra key
+  dt[, feature   := if ("Feature" %in% names(dt)) as.character(Feature) else NA_character_]
+  dt[feature %in% c("", "-"), feature := NA_character_]
+  dt[, canonical := ex$CANONICAL]
 
   # Existing_variation is a column of the text format, never an Extra key; reading it from Extra left it - and so dbsnp/cosmic - empty on every text report
   dt[, existing := if ("Existing_variation" %in% names(dt)) as.character(Existing_variation)
@@ -297,7 +301,7 @@ parse_vep_vcf = function(vep_file) {
   # Split each entry on "|", keeping the fields used below plus whichever annotation fields this header declares. `need` is not in CSQ order - a real GRCh38 header puts ClinVar_CLNSIG after CADD_PHRED - and names(parts) relies on tstrsplit() returning `keep` in the order asked for, not sorted
   resolved = resolve_vep_fields(csq_format)
   need = unique(c("Consequence", "IMPACT", "SYMBOL", "Gene", "HGVSp", "Existing_variation",
-                  resolved[!is.na(resolved)]))
+                  "Feature", "CANONICAL", resolved[!is.na(resolved)]))
   keep_idx = match(need, csq_format)
   ok = !is.na(keep_idx)
   parts = tstrsplit(dt_long$csq_entry, "|", fixed = TRUE, fill = NA_character_,
@@ -314,9 +318,13 @@ parse_vep_vcf = function(vep_file) {
   dt_long[, gene_id     := get_field("Gene")]
   dt_long[, hgvsp       := get_field("HGVSp")]
   dt_long[, existing    := get_field("Existing_variation")]
+  # Transcript identity, for the HMF section's canonical-transcript rule (R/hmf.R)
+  dt_long[, feature     := get_field("Feature")]
+  dt_long[, canonical   := get_field("CANONICAL")]
 
   # Blank CSQ fields are "", not NA; normalise for parity with parse_vep_text()
-  for (col in c("symbol", "impact", "hgvsp", "existing", "gene_id", "caller")) {
+  for (col in c("symbol", "impact", "hgvsp", "existing", "gene_id", "caller", "feature",
+                "canonical")) {
     dt_long[get(col) == "", (col) := NA_character_]
   }
 
@@ -334,7 +342,7 @@ parse_vep_vcf = function(vep_file) {
 
   keep = c("chrom", "pos", "ref", "alt", "id", "symbol", "gene_id", "consequence", "impact",
            "hgvsp", "existing", "dbsnp", "cosmic", names(VEP_ANNOTATION_FIELDS),
-           "caller", "coord_space")
+           "caller", "coord_space", "feature", "canonical")
   out = dt_long[, intersect(keep, names(dt_long)), with = FALSE]
   setattr(out, "vep_fields", attr(dt_long, "vep_fields"))
   out

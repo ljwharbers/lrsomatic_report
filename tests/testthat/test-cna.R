@@ -332,3 +332,31 @@ test_that("purity disagreement compares each caller's top solution only", {
                 list(), cna_ctx())
   expect_null(build_overview(NULL, list(cna = x), list(), NULL, NULL, list(), list())$purity_check)
 })
+
+test_that("Wakhan builds without integer_profile.bed are read from bed_output/ HP_1 + HP_2", {
+  d = cna_tempdir("S2")
+  bo = file.path(d, "wakhan", "solution_1", "bed_output")
+  dir.create(bo, recursive = TRUE)
+  writeLines(c("repository_name\tdna_purity\tcell_purity\tploidy\tconfidence\tsolution_rank",
+               "2.1_0.8_0.9\t0.85\t0.8\t2.1\t0.9\t1"), file.path(d, "wakhan", "solutions_ranks.tsv"))
+  hp = function(n, states, cov) {
+    f = file.path(bo, paste0("S2_2.1_0.8_0.9_copynumbers_segments_HP_", n, ".bed"))
+    writeLines(c("#chr: chromosome number",
+                 "#chr\tstart\tend\tcoverage\tcopynumber_state\tconfidence\tsvs_breakpoints_ids",
+                 sprintf("chr1\t%d\t%d\t%s\t%s\t0.9\t[]", c(0L, 1001L), c(1000L, 5000L), cov, states)), f)
+  }
+  hp(1, c(1, 0), c("10.5", "0.0"))
+  hp(2, c(2, 0), c("11.0", "0.0"))
+  # A subclonal file beside them must not be picked
+  file.copy(file.path(bo, "S2_2.1_0.8_0.9_copynumbers_segments_HP_1.bed"),
+            file.path(bo, "S2_2.1_0.8_0.9_copynumbers_subclonal_segments_HP_1.bed"))
+
+  inputs = cna_locate(d, "S2")
+  expect_length(inputs$wakhan$profiles, 1L)
+  expect_match(inputs$wakhan$profiles[[1]]$bed_hp2, "_copynumbers_segments_HP_2\\.bed$")
+  res = cna_parse(inputs, list(), list(sex = "female"))
+  expect_equal(res$source, "wakhan")
+  expect_equal(res$ploidy, 2.1)
+  expect_equal(res$segments$total, c(3, 0))
+  expect_equal(res$segments$zero_coverage, c(FALSE, TRUE))
+})

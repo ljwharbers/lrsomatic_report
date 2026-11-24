@@ -1,0 +1,744 @@
+# HMF (Hartwig Medical Foundation / WiGiTS) driver, fusion and hotspot annotation: an
+# optional section, on only when bin/render_report.R is given --hmf-driver-panel (and
+# --hmf-ensembl-data-dir). Reads the user's own copy of the oncoanalyser resource bundle
+# (v2.x or v3.x), GRCh38 only; nothing from it is bundled here.
+#
+# What it reproduces, and what it does not (the README's "HMF driver annotation" section
+# says the same in plain language — a constant changed here must be changed there too):
+#   - Small variants: PURPLE's reportable rule, flag-based. A variant in a DriverGenePanel
+#     gene is classified on the gene's HMF canonical transcript (MISSENSE incl. inframe
+#     indels, NONSENSE_OR_FRAMESHIFT, SPLICE) and reported when the panel flag for that
+#     class is true, or when it is a known hotspot and reportSomaticHotspot is true. No dNdS
+#     driver likelihood, no biallelic status, no germline reporting.
+#   - Copy number: PURPLE's AMP / PARTIAL_AMP / DEL on the gene's canonical exons, gated by
+#     reportAmplification / reportDeletion, using the report's own CN segments and ploidy.
+#   - Fusions: LINX's known-fusion classification (KNOWN_PAIR, EXON_DEL_DUP, PROMISCUOUS_5/3,
+#     IG/ENHANCER, PROMISCUOUS_ENHANCER_TARGET) and exon ranges on canonical transcripts,
+#     for single SVs only (no chaining), with a phase check on the fused exons.
+#   - ActionableCodingPanel.38.bed is a region flag only: HMF uses it for SAGE's PANEL
+#     calling tier, it carries no actionability.
+
+suppressPackageStartupMessages({
+  library(data.table)
+})
+
+# ---- Constants -------------------------------------------------------------------------
+HMF_DEL_MAX_CN          = 0.5     # DEL: gene minimum exonic CN below this
+HMF_AMP_RATIO_DEFAULT   = 3       # AMP: gene minimum exonic CN above ratio x ploidy
+HMF_UPSTREAM_DEFAULT    = 10000   # 3' breakend upstream of the gene: promiscuous partners
+HMF_UPSTREAM_KNOWN      = 100000  # ... known pairs and high-impact promiscuous partners
+HMF_UPSTREAM_ENHANCER   = 1000000 # 3' gene distance from an IG/enhancer-range breakend
+HMF_SPLICE_CONSEQUENCES = c("splice_donor_variant", "splice_acceptor_variant",
+                            "splice_donor_5th_base_variant")
+
+# VEP consequence -> HMF coding effect; the first class a variant's consequences hit wins,
+# in HMF's own severity order
+HMF_CODING_EFFECTS = list(
+  NONSENSE_OR_FRAMESHIFT = c("frameshift_variant", "stop_gained", "stop_lost", "start_lost"),
+  SPLICE                 = HMF_SPLICE_CONSEQUENCES,
+  MISSENSE               = c("missense_variant", "inframe_insertion", "inframe_deletion",
+                             "protein_altering_variant")
+)
+
+# DriverGenePanel columns read, by header name; any absent column reads as false (v2.x has
+# 15 columns, v3.x 22, a targeted panel may drop one)
+HMF_PANEL_FLAGS = c(report_missense = "reportMissense", report_nonsense = "reportNonsense",
+                    report_splice = "reportSplice", report_deletion = "reportDeletion",
+                    report_disruption = "reportDisruption",
+                    report_amplification = "reportAmplification",
+                    report_hotspot = "reportSomaticHotspot")
+
+# Which panel flag gates each coding effect
+HMF_EFFECT_FLAG = c(MISSENSE = "report_missense", NONSENSE_OR_FRAMESHIFT = "report_nonsense",
+                    SPLICE = "report_splice")
+
+# Fusion types after normalising v2's IG_* names to v3's ENHANCER_*
+HMF_ENHANCER_TYPES = c("ENHANCER_KNOWN_PAIR", "ENHANCER_PROMISCUOUS")
+
+# ---- Loaders ---------------------------------------------------------------------------
+
+hmf_bool = function(x) tolower(trimws(as.character(x))) %in% c("true", "t", "1", "yes")
+
+# DriverGenePanel.38.tsv: one row per gene with role and report flags
+hmf_read_panel = function(path) {
+  dt = fread(path, sep = "\t", colClasses = "character", na.strings = c("", "NA"))
+  if (!"gene" %in% names(dt)) stop("HMF driver panel ", path, " has no 'gene' column")
+  out = data.table(gene = trimws(dt$gene))
+  for (nm in names(HMF_PANEL_FLAGS)) {
+    col = HMF_PANEL_FLAGS[[nm]]
+    out[, (nm) := if (col %in% names(dt)) hmf_bool(dt[[col]]) else FALSE]
+  }
+  lt = if ("likelihoodType" %in% names(dt)) toupper(trimws(dt$likelihoodType)) else NA_character_
+  out[, likelihood_type := lt]
+  out[, role := fcase(likelihood_type == "ONCO", "oncogene", likelihood_type == "TSG", "tsg",
+                      default = NA_character_)]
+  ratio = if ("amplificationRatio" %in% names(dt)) suppressWarnings(as.numeric(dt$amplificationRatio))
+          else NA_real_
+  out[, amp_ratio := fifelse(is.na(ratio), HMF_AMP_RATIO_DEFAULT, ratio)]
+  out = out[nzchar(gene) & !is.na(gene)]
+  out = unique(out, by = "gene")
+  setattr(out, "n_columns", ncol(dt))
+  out
+}
+
+# known_fusion_data.38.csv. Overrides is space-separated KEY=a;b;c; IG_RANGE (v2) and
+# ENHANCER_RANGE (v3) are the same thing, as are the IG_* and ENHANCER_* types
+hmf_read_fusions = function(path) {
+  dt = fread(path, sep = ",", colClasses = "character", na.strings = c("", "NA"))
+  need = c("Type", "FiveGene", "ThreeGene")
+  if (!all(need %in% names(dt)))
+    stop("HMF known fusion file ", path, " lacks column(s) ",
+         paste(setdiff(need, names(dt)), collapse = ", "))
+  col = function(nm) if (nm %in% names(dt)) as.character(dt[[nm]]) else rep(NA_character_, nrow(dt))
+  raw_type = trimws(dt$Type)
+  range_of = function(x, i) suppressWarnings(as.integer(vapply(strsplit(ifelse(is.na(x), "", x), ";", fixed = TRUE),
+                                                               function(p) if (length(p) >= i) p[i] else NA_character_,
+                                                               character(1))))
+  up = col("KnownExonUpRange"); down = col("KnownExonDownRange")
+  out = data.table(
+    type        = sub("^IG_", "ENHANCER_", raw_type),
+    five_gene   = trimws(col("FiveGene")),
+    three_gene  = trimws(col("ThreeGene")),
+    transcript  = sub("\\..*$", "", trimws(col("KnownExonTranscript"))),
+    up_min = range_of(up, 1), up_max = range_of(up, 2),
+    down_min = range_of(down, 1), down_max = range_of(down, 2),
+    high_impact = hmf_bool(col("HighImpactPromiscuous")),
+    cancer_types = col("CancerTypes")
+  )
+  out[five_gene == "", five_gene := NA_character_]
+  out[three_gene == "", three_gene := NA_character_]
+
+  # Overrides: the region keys parse to orient/chrom/start/end
+  ov = col("Overrides")
+  ov_val = function(keys) {
+    vapply(ifelse(is.na(ov), "", ov), function(s) {
+      kv = strsplit(s, "\\s+")[[1]]
+      for (k in keys) {
+        hit = kv[startsWith(kv, paste0(k, "="))]
+        if (length(hit)) return(sub("^[^=]+=", "", hit[1]))
+      }
+      NA_character_
+    }, character(1), USE.NAMES = FALSE)
+  }
+  region = function(v) {
+    p = strsplit(ifelse(is.na(v), "", v), ";", fixed = TRUE)
+    get = function(i) vapply(p, function(x) if (length(x) >= i) x[i] else NA_character_, character(1))
+    list(orient = suppressWarnings(as.integer(get(1))),
+         chrom  = ifelse(is.na(get(2)), NA_character_, ensure_chr_prefix(get(2))),
+         start  = suppressWarnings(as.integer(get(3))),
+         end    = suppressWarnings(as.integer(get(4))))
+  }
+  enh = region(ov_val(c("ENHANCER_RANGE", "IG_RANGE")))
+  tp  = region(ov_val("THREE_PRIME_RANGE"))
+  out[, `:=`(enh_orient = enh$orient, enh_chrom = enh$chrom, enh_start = enh$start, enh_end = enh$end,
+             tp_orient = tp$orient, tp_chrom = tp$chrom, tp_start = tp$start, tp_end = tp$end,
+             down_distance = suppressWarnings(as.integer(ov_val("DOWN_GENE_DOWNSTREAM_DISTANCE"))))]
+  setattr(out, "format", if (any(startsWith(raw_type, "IG_"))) "v2 (IG_*)" else
+                         if (any(startsWith(raw_type, "ENHANCER_"))) "v3 (ENHANCER_*)" else "unknown")
+  out
+}
+
+# HMF Ensembl data cache: gene spans and the canonical transcript's exons, for every gene
+# (a promiscuous fusion's partner can be any gene) or only `genes`. The exon file is ~200 MB;
+# only the columns used are read, and only canonical rows kept (~250k)
+hmf_read_ensembl = function(dir, genes = NULL) {
+  gene_file = file.path(dir, "ensembl_gene_data.csv")
+  exon_file = file.path(dir, "ensembl_trans_exon_data.csv")
+  for (f in c(gene_file, exon_file))
+    if (!file.exists(f)) stop("HMF Ensembl data cache file not found: ", f)
+
+  g = fread(gene_file, sep = ",", colClasses = "character",
+            select = c("GeneId", "GeneName", "Chromosome", "Strand", "GeneStart", "GeneEnd"))
+  if (!is.null(genes)) g = g[GeneName %in% genes]
+  g = g[, .(gene_id = GeneId, gene = GeneName, chrom = ensure_chr_prefix(Chromosome),
+            strand = as.integer(Strand), start = as.integer(GeneStart), end = as.integer(GeneEnd))]
+  # A symbol on two contigs (PAR genes): keep the first, as HMF's own lookup does
+  g = unique(g, by = "gene")
+
+  ex = fread(exon_file, sep = ",", na.strings = c("NULL", ""),
+             select = c("GeneId", "CanonicalTranscriptId", "TransId", "TransName", "BioType",
+                        "TransStart", "TransEnd", "ExonRank", "ExonStart", "ExonEnd",
+                        "ExonPhase", "ExonEndPhase", "CodingStart", "CodingEnd"))
+  ex = ex[GeneId %in% g$gene_id & CanonicalTranscriptId == TransId]
+  ex = ex[, .(gene_id = GeneId, transcript = TransName, biotype = BioType,
+              trans_start = as.integer(TransStart), trans_end = as.integer(TransEnd),
+              rank = as.integer(ExonRank), start = as.integer(ExonStart), end = as.integer(ExonEnd),
+              phase = as.integer(ExonPhase), end_phase = as.integer(ExonEndPhase),
+              coding_start = as.integer(CodingStart), coding_end = as.integer(CodingEnd))]
+  setorder(ex, gene_id, rank)
+  ex = merge(ex, g[, .(gene_id, gene, chrom, strand)], by = "gene_id")
+  setorder(ex, gene, rank)
+
+  # Canonical transcript id and span per gene
+  tr = unique(ex[, .(gene_id, gene, chrom, strand, transcript, biotype, trans_start, trans_end,
+                     coding_start, coding_end)], by = "gene_id")
+  list(genes = g, exons = ex, transcripts = tr)
+}
+
+# KnownHotspots.somatic.38.vcf.gz (SERVE-derived): coordinates plus the protein change and
+# sources from INFO
+hmf_read_hotspots = function(path) {
+  con = if (grepl("\\.gz$", path)) gzfile(path, "rt") else file(path, "rt")
+  lines = readLines(con, warn = FALSE)
+  close(con)
+  body = lines[!startsWith(lines, "#")]
+  if (length(body) == 0) return(data.table(chrom = character(), pos = integer(), ref = character(),
+                                           alt = character(), hs_gene = character(),
+                                           hs_protein = character(), sources = character()))
+  f = tstrsplit(body, "\t", fixed = TRUE, keep = c(1L, 2L, 4L, 5L, 8L))
+  info = f[[5]]
+  info_val = function(key) {
+    m = regexpr(paste0("(?:^|;)", key, "=([^;]+)"), info, perl = TRUE)
+    out = rep(NA_character_, length(info))
+    out[m > 0] = sub("^;?[^=]+=", "", regmatches(info, m))
+    out
+  }
+  inp = strsplit(ifelse(is.na(info_val("input")), "", info_val("input")), "|", fixed = TRUE)
+  part = function(i) vapply(inp, function(x) if (length(x) >= i) x[i] else NA_character_, character(1))
+  dt = data.table(chrom = ensure_chr_prefix(f[[1]]), pos = as.integer(f[[2]]),
+                  ref = f[[3]], alt = f[[4]], hs_gene = part(1), hs_protein = part(3),
+                  sources = info_val("sources"))
+  # Multi-allelic records: one row per ALT
+  dt = dt[, .(alt = unlist(strsplit(alt, ",", fixed = TRUE))),
+          by = .(chrom, pos, ref, hs_gene, hs_protein, sources)]
+  dt[hs_protein %in% c("-", "null", ""), hs_protein := NA_character_]
+  dt[]
+}
+
+# ActionableCodingPanel.38.bed(.gz): 0-based BED, name GENE_exonRank
+hmf_read_bed = function(path) {
+  dt = fread(path, sep = "\t", header = FALSE, colClasses = "character")
+  if (ncol(dt) < 3) stop("HMF actionable coding BED ", path, " has fewer than 3 columns")
+  data.table(chrom = ensure_chr_prefix(dt[[1]]), start = as.integer(dt[[2]]) + 1L,
+             end = as.integer(dt[[3]]),
+             gene = if (ncol(dt) >= 4) sub("_[0-9]+$", "", dt[[4]]) else NA_character_)
+}
+
+# Every resource named in `files` (list of paths, NULL = not given). Panel and Ensembl
+# cache are required for anything at all; the others switch their part on
+hmf_load_resources = function(files) {
+  if (is.null(files$driver_panel) || is.null(files$ensembl_data_dir)) return(NULL)
+  panel = hmf_read_panel(files$driver_panel)
+  fusions = if (!is.null(files$known_fusions)) hmf_read_fusions(files$known_fusions) else NULL
+  # Every gene when fusions are matched (any gene can partner a promiscuous one), else the panel's
+  ens = hmf_read_ensembl(files$ensembl_data_dir, if (is.null(fusions)) panel$gene else NULL)
+  n_columns = attr(panel, "n_columns")   # merge() drops attributes
+  panel = merge(panel, ens$transcripts[, .(gene, gene_id, chrom, strand, transcript)],
+                by = "gene", all.x = TRUE)
+  setattr(panel, "n_columns", n_columns)
+  list(
+    files    = files,
+    panel    = panel,
+    ensembl  = ens,
+    fusions  = fusions,
+    hotspots = if (!is.null(files$hotspots)) hmf_read_hotspots(files$hotspots) else NULL,
+    bed      = if (!is.null(files$actionable_bed)) hmf_read_bed(files$actionable_bed) else NULL,
+    missing_genes = setdiff(panel$gene, ens$genes$gene)
+  )
+}
+
+# ---- Small variants --------------------------------------------------------------------
+
+# First HMF coding effect a comma-joined VEP consequence string hits; NA for none
+hmf_coding_effect = function(consequence) {
+  toks = strsplit(ifelse(is.na(consequence), "", consequence), "[,&]")
+  vapply(toks, function(t) {
+    for (eff in names(HMF_CODING_EFFECTS)) if (any(t %in% HMF_CODING_EFFECTS[[eff]])) return(eff)
+    NA_character_
+  }, character(1))
+}
+
+# Protein change without the ENSP prefix: "ENSP0001.2:p.Val600Glu" -> "p.Val600Glu"
+hmf_protein = function(hgvsp) {
+  x = sub("^[^:]*:", "", as.character(hgvsp))
+  x[is.na(hgvsp) | !startsWith(x, "p.")] = NA_character_
+  x
+}
+
+# Is each position inside any BED interval of the same contig?
+hmf_in_regions = function(chrom, pos, bed) {
+  out = rep(FALSE, length(chrom))
+  if (is.null(bed) || nrow(bed) == 0 || length(chrom) == 0) return(out)
+  q = data.table(i = seq_along(chrom), chrom = chrom, start = as.integer(pos), end = as.integer(pos))
+  b = bed[, .(chrom, start, end)]
+  setkey(b, chrom, start, end)
+  hit = foverlaps(q[!is.na(start)], b, by.x = c("chrom", "start", "end"), nomatch = NULL)
+  out[unique(hit$i)] = TRUE
+  out
+}
+
+# Driver small variants: every VEP row on a panel gene's HMF canonical transcript that has a
+# coding effect, plus every variant at a known hotspot. `vep_data` is parse_vep()'s output
+# (one row per variant x transcript annotation); `variant_table` supplies VAF
+hmf_small_variants = function(vep_data, variant_table, res) {
+  empty = data.table(gene = character(), chrom = character(), pos = integer(), ref = character(),
+                     alt = character(), hgvsp = character(), consequence = character(),
+                     effect = character(), hotspot = character(), role = character(),
+                     reported = logical(), reason = character(), in_panel_region = logical(),
+                     vaf = numeric(), in_panel = logical())
+  if (is.null(vep_data) || nrow(vep_data) == 0) return(empty)
+  panel = res$panel
+  space = if ("coord_space" %in% names(vep_data)) vep_data$coord_space[1] else "vep"
+  v = vep_data[, intersect(c("chrom", "pos", "ref", "alt", "symbol", "gene_id", "consequence",
+                             "hgvsp", "feature", "canonical"), names(vep_data)), with = FALSE]
+  if (!"feature" %in% names(v)) v[, feature := NA_character_]
+  if (!"canonical" %in% names(v)) v[, canonical := NA_character_]
+  v[, key := variant_key(chrom, pos, ref, alt, space = space)]
+
+  # Panel gene of each row: Ensembl gene id first (symbols drift between Ensembl releases),
+  # the symbol as fallback
+  gi = match(v$gene_id, panel$gene_id)
+  gs = match(v$symbol, panel$gene)
+  v[, pidx := fifelse(!is.na(gi), gi, gs)]
+
+  # Coding rows: the HMF canonical transcript, or VEP's CANONICAL flag where no transcript id
+  # was annotated
+  coding = v[!is.na(pidx)]
+  coding[, hmf_tx := panel$transcript[pidx]]
+  coding[, tx := sub("\\..*$", "", feature)]
+  coding = coding[(!is.na(tx) & !is.na(hmf_tx) & tx == hmf_tx) |
+                  (is.na(tx) & canonical %in% "YES")]
+  coding[, effect := hmf_coding_effect(consequence)]
+  coding = coding[!is.na(effect)]
+
+  # Hotspots, keyed in the same normalised space as the VEP rows
+  hs = res$hotspots
+  hot_exact = character(0)
+  if (!is.null(hs) && nrow(hs) > 0) {
+    hs[, key := variant_key(chrom, pos, ref, alt, space = "vcf")]
+    hot_exact = hs$key
+  }
+  v[, hot := key %in% hot_exact]
+
+  # Same protein change on the same gene as a hotspot whose alleles differ (an MNV hotspot
+  # called as separate SNVs, or a differently normalised indel)
+  hot_protein = if (!is.null(hs) && nrow(hs) > 0)
+    unique(paste(hs$hs_gene[!is.na(hs$hs_protein)], hs$hs_protein[!is.na(hs$hs_protein)]))
+    else character(0)
+
+  rows = rbindlist(list(
+    coding[, .(key, chrom, pos, ref, alt, gene = panel$gene[pidx], pidx, hgvsp, consequence, effect)],
+    # Hotspot hits on any row: a panel gene, a non-panel gene or none (TERT promoter)
+    v[hot == TRUE, .(key, chrom, pos, ref, alt,
+                     gene = fifelse(!is.na(pidx), panel$gene[pidx], symbol), pidx,
+                     hgvsp, consequence, effect = NA_character_)]
+  ), use.names = TRUE)
+  if (nrow(rows) == 0) return(empty)
+  # One row per variant and gene: the coding row (it carries the effect) over a hotspot-only one
+  setorder(rows, key, gene, effect, na.last = TRUE)
+  rows = unique(rows, by = c("key", "gene"))
+
+  rows[, hs_match := fcase(key %in% hot_exact, "exact",
+                           paste(gene, hmf_protein(hgvsp)) %in% hot_protein, "protein",
+                           default = "")]
+  rows[, in_panel := !is.na(pidx)]
+  # A hotspot outside the panel is one row per variant, named by the hotspot file's own gene,
+  # and none at all where a panel row already carries it (TERT promoter: TERT plus intergenic)
+  if (!is.null(hs) && nrow(hs) > 0) {
+    off = !rows$in_panel
+    rows[off, gene := hs$hs_gene[match(key, hs$key)]]
+    rows = rows[in_panel | !key %in% rows[in_panel == TRUE, key]]
+    rows = rbind(rows[in_panel == TRUE], unique(rows[in_panel == FALSE], by = "key"))
+  }
+  flag = function(nm) { x = panel[[nm]][rows$pidx]; !is.na(x) & x }
+  rows[, flag_effect := FALSE]
+  for (eff in names(HMF_EFFECT_FLAG)) {
+    idx = which(rows$effect %in% eff)
+    if (length(idx)) set(rows, idx, "flag_effect", flag(HMF_EFFECT_FLAG[[eff]])[idx])
+  }
+  rows[, flag_hotspot := flag("report_hotspot")]
+  rows[, hotspot := nzchar(hs_match)]
+  rows[, reported := in_panel & (flag_effect | (hotspot & flag_hotspot))]
+  rows[, reason := fcase(
+    reported & hotspot & flag_hotspot, "hotspot",
+    reported,                         paste0(tolower(sub("_OR_", " or ", effect)), " reportable"),
+    !in_panel & hotspot,              "hotspot; gene not in driver panel",
+    in_panel & hotspot,               "hotspot; reportSomaticHotspot is false",
+    default = paste0("report", c(MISSENSE = "Missense", NONSENSE_OR_FRAMESHIFT = "Nonsense",
+                                 SPLICE = "Splice")[effect], " is false"))]
+  rows[reported & hs_match == "protein", reason := "hotspot (same protein change)"]
+  rows[, role := panel$role[pidx]]
+  rows[, in_panel_region := hmf_in_regions(chrom, pos, res$bed)]
+
+  # VAF from the display table (same normalised key, by gene)
+  rows[, vaf := NA_real_]
+  if (!is.null(variant_table) && nrow(variant_table) > 0 && "vaf" %in% names(variant_table)) {
+    vt = variant_table[, .(key = variant_key(chrom, pos, ref, alt, space = space), vaf)]
+    vt = unique(vt[!is.na(vaf)], by = "key")
+    rows[, vaf := vt$vaf[match(key, vt$key)]]
+  }
+  out = rows[, .(gene, chrom, pos, ref, alt, hgvsp = hmf_protein(hgvsp), consequence, effect,
+                 hotspot = hs_match, role, reported, reason, in_panel_region, vaf, in_panel)]
+  setorder(out, -reported, -in_panel, gene, pos)
+  out[]
+}
+
+# ---- Copy number -----------------------------------------------------------------------
+
+# PURPLE's gene calls from one segment set: min/max total CN over the canonical exons of every
+# panel gene flagged for amplification or deletion. Segments with no reads on either haplotype
+# (Wakhan `zero_coverage`) carry no information and are left out, so a gene inside an
+# unmappable gap reads as uncovered rather than deleted
+hmf_cn_calls = function(segments, ploidy, label, res, sex = "female") {
+  panel = res$panel[(report_amplification | report_deletion) & !is.na(gene_id)]
+  ex = res$ensembl$exons[gene %in% panel$gene]
+  if (is.null(segments) || nrow(segments) == 0 || nrow(ex) == 0) return(NULL)
+  seg = copy(segments)
+  if ("zero_coverage" %in% names(seg)) seg = seg[!(zero_coverage %in% TRUE)]
+  seg = seg[!is.na(total), .(chrom = ensure_chr_prefix(chrom), start = as.integer(start),
+                            end = as.integer(end), total = as.numeric(total))]
+  setkey(seg, chrom, start, end)
+  e = ex[, .(gene, chrom, start, end)]
+  hit = foverlaps(e, seg, by.x = c("chrom", "start", "end"), nomatch = NULL)
+  hit[, ov := pmin(end, i.end) - pmax(start, i.start) + 1L]
+
+  span = ex[, .(chrom = chrom[1], start = min(start), end = max(end),
+                exonic_bp = sum(end - start + 1L)), by = gene]
+  agg = if (nrow(hit) > 0) hit[, .(min_cn = min(total), max_cn = max(total), covered_bp = sum(ov)), by = gene]
+        else data.table(gene = character(), min_cn = numeric(), max_cn = numeric(), covered_bp = integer())
+  g = merge(span, agg, by = "gene", all.x = TRUE)
+  g[, coverage := fifelse(is.na(covered_bp), 0, pmin(1, covered_bp / exonic_bp))]
+  g = merge(g, panel[, .(gene, report_amplification, report_deletion, amp_ratio, role)], by = "gene")
+
+  male = tolower(as.character(sex)) %in% c("male", "xy", "m")
+  ploidy = suppressWarnings(as.numeric(ploidy))
+  # chrX in a male: PURPLE halves the amplification threshold
+  g[, threshold := amp_ratio * ploidy * fifelse(male & chrom == "chrX", 0.5, 1)]
+  g[, call := fcase(
+    report_deletion & !is.na(min_cn) & min_cn < HMF_DEL_MAX_CN,                         "DEL",
+    report_amplification & !is.na(threshold) & !is.na(min_cn) & min_cn > threshold,  "AMP",
+    report_amplification & !is.na(threshold) & !is.na(max_cn) & max_cn > threshold,  "PARTIAL_AMP",
+    default = NA_character_)]
+  g[, `:=`(source = label, ploidy = ploidy)]
+  g[]
+}
+
+# Panel genes flagged by reportDeletion whose canonical exons a deletion called by an SV caller
+# removes (Severus DEL records, SAVANA +- pairs typed DEL), whatever the copy number says
+hmf_sv_deletions = function(sv_table, res) {
+  if (is.null(sv_table) || nrow(sv_table) == 0 || !"svtype" %in% names(sv_table)) return(NULL)
+  d = sv_table[svtype == "DEL" & !is.na(chrom_a) & !is.na(pos_a) & !is.na(pos_b) &
+               (is.na(chrom_b) | chrom_b == chrom_a)]
+  if (nrow(d) == 0) return(NULL)
+  panel = res$panel[report_deletion == TRUE]
+  ex = res$ensembl$exons[gene %in% panel$gene, .(gene, chrom, start, end, rank)]
+  if (nrow(ex) == 0) return(NULL)
+  q = d[, .(sv_id = id, caller = if ("caller" %in% names(d)) caller else NA_character_,
+            chrom = chrom_a, start = as.integer(pmin(pos_a, pos_b)),
+            end = as.integer(pmax(pos_a, pos_b)), vaf = vaf,
+            filter = if ("filter" %in% names(d)) filter else NA_character_)]
+  setkey(q, chrom, start, end)
+  hit = foverlaps(ex, q, by.x = c("chrom", "start", "end"), nomatch = NULL)
+  if (nrow(hit) == 0) return(NULL)
+  n_ex = ex[, .(n_exons = .N, g_start = min(start), g_end = max(end)), by = gene]
+  out = hit[, .(chrom = chrom[1], first = min(rank), last = max(rank), n_hit = .N,
+                sv_start = start[1], sv_end = end[1], vaf = vaf[1], filter = filter[1]),
+            by = .(gene, caller, sv_id)]
+  out = merge(out, n_ex, by = "gene")
+  out = merge(out, panel[, .(gene, role)], by = "gene")
+  out[, `:=`(start = g_start, end = g_end, call = "DEL",
+             source = paste0(fcase(caller %in% "severus", "Severus", caller %in% "savana", "SAVANA",
+                                   is.na(caller), "SV", default = caller), " SV"),
+             note = paste0(if_else_exons(first, last, n_hit, n_exons), " · ", fmt_bp(sv_end - sv_start + 1L),
+                           " deletion", fifelse(!is.na(filter) & !filter %in% c("PASS", "."),
+                                                paste0(" · FILTER ", filter), "")))]
+  out[]
+}
+if_else_exons = function(first, last, n_hit, n_exons)
+  fifelse(n_hit == n_exons, paste0("all ", n_exons, " exons"),
+          fifelse(first == last, paste0("exon ", first, " of ", n_exons),
+                  paste0("exons ", first, "–", last, " of ", n_exons)))
+
+# Copy-number driver calls: ASCAT and Wakhan each called on their own segments and ploidy,
+# plus deletions called by the SV callers. One row per gene x source with a call; `support`
+# lists every source calling the same type for the gene. `cna` is SECTION_DATA$cna
+hmf_copy_number = function(cna, sv_table, res, sex = "female") {
+  empty = data.table(gene = character(), chrom = character(), start = integer(), end = integer(),
+                     source = character(), call = character(), min_cn = numeric(),
+                     max_cn = numeric(), threshold = numeric(), coverage = numeric(),
+                     note = character(), role = character(), support = character())
+  per = list()
+  if (!is.null(cna)) {
+    wk = if (length(cna$profiles) > 0) cna$profiles[[1]] else NULL
+    wk_ploidy = if (!is.null(wk) && !is.na(wk$ploidy)) wk$ploidy else
+                if (identical(cna$source, "wakhan")) cna$ploidy else NA_real_
+    if (!is.null(wk)) per$wakhan = hmf_cn_calls(wk$segments, wk_ploidy, "Wakhan", res, sex)
+    as_seg = if (!is.null(cna$ascat_segments)) cna$ascat_segments else
+             if (identical(cna$source, "ascat")) cna$segments else NULL
+    as_ploidy = if (!is.null(cna$ascat_ploidy) && !is.na(cna$ascat_ploidy)) cna$ascat_ploidy else
+                if (identical(cna$source, "ascat")) cna$ploidy else NA_real_
+    per$ascat = hmf_cn_calls(as_seg, as_ploidy, "ASCAT", res, sex)
+  }
+  per = Filter(Negate(is.null), per)
+  rows = rbindlist(lapply(per, function(g) g[!is.na(call), .(gene, chrom, start, end, source, call,
+    min_cn, max_cn, threshold, coverage,
+    note = fifelse(coverage < 1, paste0(round(100 * coverage), "% of exonic bp covered"), ""),
+    role)]), fill = TRUE)
+  svd = hmf_sv_deletions(sv_table, res)
+  if (!is.null(svd))
+    rows = rbind(rows, svd[, .(gene, chrom, start, end, source, call, min_cn = NA_real_,
+                               max_cn = NA_real_, threshold = NA_real_, coverage = NA_real_,
+                               note, role)], fill = TRUE)
+  out = if (nrow(rows) > 0) rows else empty
+  if (nrow(out) > 0) {
+    # PARTIAL_AMP and AMP agree on direction; DEL stands alone
+    out[, dir := fifelse(call == "DEL", "DEL", "AMP")]
+    out[, support := paste(unique(source), collapse = ", "), by = .(gene, dir)]
+    out[, dir := NULL]
+    src_rank = function(x) fifelse(x == "Wakhan", 1L, fifelse(x == "ASCAT", 2L, 3L))
+    setorder(out, chrom, start, gene)
+    out = out[order(call != "DEL", match(chrom, paste0("chr", c(1:22, "X", "Y"))), start, gene, src_rank(source))]
+  }
+  # Genes no segment covers, per source (an ASCAT gap can hide a homozygous deletion)
+  setattr(out, "uncovered", lapply(per, function(g) g[coverage == 0, gene]))
+  setattr(out, "sources", vapply(per, function(g) paste0(g$source[1], " (ploidy ",
+                                  trimws(formatC(g$ploidy[1], format = "fg", digits = 3)), ")"), character(1)))
+  out[]
+}
+
+# ---- Fusions ---------------------------------------------------------------------------
+
+# Every canonical transcript a breakend can belong to, as 5' or 3' partner. Region: exon k,
+# intron k (after exon k), or upstream of the gene (3' partner only). The fused exon is the
+# last exon kept for a 5' partner (k; for an exonic breakend the exon itself) and the first
+# exon kept for a 3' partner (k + 1 after intron k, exon 1 when upstream)
+hmf_annotate_breakend = function(bk_chrom, pos, orient, res, upstream) {
+  tr = res$ensembl$transcripts
+  ex = res$ensembl$exons
+  if (is.na(bk_chrom) || is.na(pos) || is.na(orient)) return(NULL)
+  cand = tr[chrom == bk_chrom]
+  if (nrow(cand) == 0) return(NULL)
+  up = unname(upstream[cand$gene])
+  if (length(up) != nrow(cand)) up = rep(NA_real_, nrow(cand))
+  up[is.na(up)] = HMF_UPSTREAM_DEFAULT
+  lo = fifelse(cand$strand == 1L, cand$trans_start - up, cand$trans_start)
+  hi = fifelse(cand$strand == 1L, cand$trans_end, cand$trans_end + up)
+  cand = cand[pos >= lo & pos <= hi]
+  if (nrow(cand) == 0) return(NULL)
+
+  rbindlist(lapply(seq_len(nrow(cand)), function(i) {
+    t = cand[i]
+    e = ex[gene_id == t$gene_id]
+    is_5p = t$strand == orient
+    if (!is_5p && is.na(t$coding_start)) return(NULL)   # a 3' partner must be coding
+    inside = pos >= t$trans_start && pos <= t$trans_end
+    in_exon = which(e$start <= pos & e$end >= pos)
+    if (!inside) {
+      if (is_5p) return(NULL)   # a 5' partner keeps its own promoter: never upstream of it
+      region = "upstream"; k = 0L
+      dist = if (t$strand == 1L) t$trans_start - pos else pos - t$trans_end
+    } else if (length(in_exon)) {
+      region = "exonic"; k = e$rank[in_exon[1]]; dist = 0L
+    } else {
+      # Intron k: between exon k and k + 1 in transcript order
+      before = if (t$strand == 1L) e$end < pos else e$start > pos
+      if (!any(before)) return(NULL)
+      region = "intronic"; k = max(e$rank[before]); dist = 0L
+    }
+    fused = if (is_5p) k else if (region == "intronic") k + 1L else if (region == "upstream") 1L else k
+    fe = e[rank == fused]
+    phase = if (nrow(fe) == 0) NA_integer_ else if (is_5p) fe$end_phase else fe$phase
+    data.table(gene = t$gene, strand = t$strand, side = if (is_5p) "5p" else "3p",
+               region = region, exon = k, fused_exon = fused, phase = phase,
+               upstream_distance = as.integer(dist), n_exons = nrow(e))
+  }))
+}
+
+# Every 5' candidate against every 3' one, columns suffixed _5 / _3; NULL when either is empty
+hmf_cross = function(five, three) {
+  if (nrow(five) == 0 || nrow(three) == 0) return(NULL)
+  i = rep(seq_len(nrow(five)), each = nrow(three))
+  j = rep(seq_len(nrow(three)), times = nrow(five))
+  x = copy(five)[i]; y = copy(three)[j]
+  setnames(x, paste0(names(x), "_5")); setnames(y, paste0(names(y), "_3"))
+  cbind(x, y)
+}
+
+# Is pos within [lo, hi] of a region on the same contig, and the orientation as configured
+# (0 = not checked)?
+hmf_in_range = function(chrom, pos, orient, r_chrom, r_start, r_end, r_orient) {
+  !is.na(r_chrom) & !is.na(chrom) & chrom == r_chrom & pos >= r_start & pos <= r_end &
+    (is.na(r_orient) | r_orient == 0L | (!is.na(orient) & orient == r_orient))
+}
+
+# Known-fusion calls over the report's SV table (both callers, one row per rearrangement)
+hmf_fusions = function(sv_table, res) {
+  empty = data.table(caller = character(), sv_id = character(), svtype = character(),
+                     type = character(), five_gene = character(), three_gene = character(),
+                     five_exon = character(), three_exon = character(), frame = character(),
+                     likelihood = character(), reported = logical(), high_impact = logical(),
+                     note = character(), locus = character())
+  fu = res$fusions
+  if (is.null(fu) || is.null(sv_table) || nrow(sv_table) == 0) return(empty)
+  if (!all(c("orient_a", "orient_b") %in% names(sv_table))) return(empty)
+
+  known  = fu[type == "KNOWN_PAIR"]
+  p5     = fu[type == "PROMISCUOUS_5"]
+  p3     = fu[type == "PROMISCUOUS_3"]
+  deldup = fu[type == "EXON_DEL_DUP"]
+  enh    = fu[type %in% HMF_ENHANCER_TYPES & !is.na(enh_chrom)]
+  target = fu[type == "PROMISCUOUS_ENHANCER_TARGET" & !is.na(tp_chrom)]
+
+  # Upstream window per gene: wider for known pairs and high-impact partners
+  wide = unique(c(known$three_gene, fu[high_impact == TRUE, c(five_gene, three_gene)]))
+  genes = unique(na.omit(c(fu$five_gene, fu$three_gene)))
+  upstream = setNames(ifelse(genes %in% wide, HMF_UPSTREAM_KNOWN, HMF_UPSTREAM_DEFAULT), genes)
+
+  sv = sv_table[!is.na(chrom_a) & !is.na(pos_a)]
+  if (!"caller" %in% names(sv)) sv[, caller := NA_character_]
+  out = list()
+  for (i in seq_len(nrow(sv))) {
+    r = sv[i]
+    locus = paste0(r$chrom_a, ":", r$pos_a, if (!is.na(r$chrom_b)) paste0(" / ", r$chrom_b, ":", r$pos_b) else "")
+    base = list(caller = r$caller, sv_id = r$id, svtype = r$svtype, locus = locus)
+
+    # Enhancer-driven: one side in an IG/enhancer range, the other near the 3' gene
+    for (side in c("a", "b")) {
+      ch = r[[paste0("chrom_", side)]]; ps = r[[paste0("pos_", side)]]; or = r[[paste0("orient_", side)]]
+      oth = if (side == "a") "b" else "a"
+      och = r[[paste0("chrom_", oth)]]; ops = r[[paste0("pos_", oth)]]
+      if (is.na(ch) || is.na(ps)) next
+      for (j in which(hmf_in_range(ch, ps, or, enh$enh_chrom, enh$enh_start, enh$enh_end, enh$enh_orient))) {
+        e = enh[j]
+        partner = NA_character_; ok = TRUE
+        if (!is.na(e$three_gene)) {
+          g = res$ensembl$genes[gene == e$three_gene]
+          ok = nrow(g) == 1 && !is.na(och) && och == g$chrom && {
+            dd = if (is.na(e$down_distance)) 0L else e$down_distance
+            lo = if (g$strand == 1L) g$start - HMF_UPSTREAM_ENHANCER else g$start - dd
+            hi = if (g$strand == 1L) g$end + dd else g$end + HMF_UPSTREAM_ENHANCER
+            ops >= lo && ops <= hi
+          }
+          partner = e$three_gene
+        } else {
+          partner = r[[paste0("gene_", oth)]]
+        }
+        if (!ok) next
+        out[[length(out) + 1L]] = c(base, list(type = e$type, five_gene = e$five_gene,
+          three_gene = partner, five_exon = NA_character_, three_exon = NA_character_,
+          frame = "n/a", likelihood = if (e$type == "ENHANCER_KNOWN_PAIR") "HIGH" else "LOW",
+          reported = e$type == "ENHANCER_KNOWN_PAIR", high_impact = FALSE,
+          note = paste0(e$five_gene, " enhancer region")))
+      }
+      for (j in which(hmf_in_range(ch, ps, or, target$tp_chrom, target$tp_start, target$tp_end, target$tp_orient))) {
+        tg = target[j]
+        out[[length(out) + 1L]] = c(base, list(type = tg$type, five_gene = r[[paste0("gene_", oth)]],
+          three_gene = tg$three_gene, five_exon = NA_character_, three_exon = NA_character_,
+          frame = "n/a", likelihood = "LOW", reported = TRUE, high_impact = FALSE,
+          note = paste0("breakend in the ", tg$three_gene, " enhancer-target region")))
+      }
+    }
+
+    # Gene fusions: a 5' partner on one side and a 3' partner on the other (or the same gene)
+    if (is.na(r$chrom_b) || is.na(r$pos_b)) next
+    a = hmf_annotate_breakend(r$chrom_a, r$pos_a, r$orient_a, res, upstream)
+    b = hmf_annotate_breakend(r$chrom_b, r$pos_b, r$orient_b, res, upstream)
+    if (is.null(a) || is.null(b) || nrow(a) == 0 || nrow(b) == 0) next
+    pairs = rbind(hmf_cross(a[side == "5p"], b[side == "3p"]),
+                  hmf_cross(b[side == "5p"], a[side == "3p"]))
+    if (is.null(pairs) || nrow(pairs) == 0) next
+    for (k in seq_len(nrow(pairs))) {
+      p = pairs[k]
+      g5 = p$gene_5; g3 = p$gene_3
+      # EXON_DEL_DUP needs both breakends in one gene; any other same-gene pair is no fusion
+      if (g5 == g3) {
+        d = deldup[five_gene == g5 | three_gene == g5]
+        if (nrow(d) == 0 || p$region_5 == "upstream" || p$region_3 == "upstream") next
+        ok = any(p$fused_exon_5 >= d$up_min & p$fused_exon_5 <= d$up_max &
+                 p$fused_exon_3 >= d$down_min & p$fused_exon_3 <= d$down_max, na.rm = TRUE)
+        if (!ok) next
+        type = "EXON_DEL_DUP"; known_exons = TRUE; hi_imp = FALSE
+      } else if (nrow(known[five_gene == g5 & three_gene == g3]) > 0) {
+        type = "KNOWN_PAIR"; known_exons = FALSE; hi_imp = FALSE
+      } else {
+        r3 = p3[three_gene == g3]; r5 = p5[five_gene == g5]
+        if (nrow(r3) == 0 && nrow(r5) == 0) next
+        in3 = nrow(r3) > 0 && (is.na(r3$down_min[1]) ||
+                               (p$fused_exon_3 >= r3$down_min[1] && p$fused_exon_3 <= r3$down_max[1]))
+        in5 = nrow(r5) > 0 && (is.na(r5$up_min[1]) ||
+                               (p$fused_exon_5 >= r5$up_min[1] && p$fused_exon_5 <= r5$up_max[1]))
+        type = if (nrow(r3) > 0 && nrow(r5) > 0) "PROMISCUOUS_BOTH" else
+               if (nrow(r5) > 0) "PROMISCUOUS_5" else "PROMISCUOUS_3"
+        known_exons = (nrow(r3) > 0 && !is.na(r3$down_min[1]) && in3) ||
+                      (nrow(r5) > 0 && !is.na(r5$up_min[1]) && in5)
+        hi_imp = (nrow(r3) > 0 && isTRUE(r3$high_impact[1]) && in3) ||
+                 (nrow(r5) > 0 && isTRUE(r5$high_impact[1]) && in5)
+      }
+      # 3' breakend upstream of its gene: within the window this fusion type allows
+      max_up = if (type == "KNOWN_PAIR" || hi_imp) HMF_UPSTREAM_KNOWN else HMF_UPSTREAM_DEFAULT
+      if (p$region_3 == "upstream" && p$upstream_distance_3 > max_up) next
+
+      frame = if (p$region_5 == "exonic" || p$region_3 == "exonic") "exonic (unchecked)" else
+              if (is.na(p$phase_5) || is.na(p$phase_3) || p$phase_5 < 0 || p$phase_3 < 0) "non-coding" else
+              if (p$phase_5 == p$phase_3) "inframe" else "out-of-frame"
+      likelihood = if (type %in% c("KNOWN_PAIR", "EXON_DEL_DUP") || known_exons) "HIGH" else "LOW"
+      # LINX reports promiscuous fusions only in frame; a known pair even when unphased
+      reported = type %in% c("KNOWN_PAIR", "EXON_DEL_DUP") || frame %in% c("inframe", "exonic (unchecked)")
+      exon_lbl = function(region, exon, fused) switch(region,
+        upstream = "upstream", exonic = paste0("exon ", exon),
+        intronic = paste0("intron ", exon, " → exon ", fused))
+      out[[length(out) + 1L]] = c(base, list(type = type, five_gene = g5, three_gene = g3,
+        five_exon = exon_lbl(p$region_5, p$exon_5, p$fused_exon_5),
+        three_exon = exon_lbl(p$region_3, p$exon_3, p$fused_exon_3),
+        frame = frame, likelihood = likelihood, reported = reported, high_impact = hi_imp,
+        note = if (p$region_3 == "upstream") paste0("3' breakend ", fmt_bp(p$upstream_distance_3), " upstream") else ""))
+    }
+  }
+  if (length(out) == 0) return(empty)
+  res_dt = rbindlist(out, use.names = TRUE, fill = TRUE)
+  res_dt = unique(res_dt, by = c("caller", "sv_id", "type", "five_gene", "three_gene"))
+  setorder(res_dt, -reported, likelihood, five_gene, three_gene, caller)
+  res_dt[, names(empty), with = FALSE]
+}
+
+# ---- Entry point -----------------------------------------------------------------------
+
+# The whole HMF section's data, or NULL when it is off. `hmf_files` is params$hmf: a named
+# list of paths (driver_panel, ensembl_data_dir, known_fusions, hotspots, actionable_bed)
+build_hmf = function(hmf_files, vep_data, variant_table, section_data, ctx) {
+  files = lapply(hmf_files, function(x) { x = as.character(unlist(x)); if (length(x) && nzchar(x[1])) x[1] else NULL })
+  files = Filter(Negate(is.null), files)
+  if (is.null(files$driver_panel)) return(NULL)
+  res = tryCatch(hmf_load_resources(files), error = function(e) {
+    message("HMF annotation disabled: ", conditionMessage(e))
+    list(error = conditionMessage(e))
+  })
+  if (!is.null(res$error)) return(list(error = res$error, files = files))
+
+  sex = if (!is.null(ctx$sex)) as.character(unlist(ctx$sex))[1] else "female"
+  safely = function(expr, what) tryCatch(expr, error = function(e) {
+    message("HMF ", what, " failed: ", conditionMessage(e)); NULL })
+  list(
+    files     = files,
+    small     = safely(hmf_small_variants(vep_data, variant_table, res), "small-variant matching"),
+    cn        = safely(hmf_copy_number(section_data$cna, section_data$sv$table, res, sex), "copy-number calls"),
+    fusions   = if (!is.null(res$fusions)) safely(hmf_fusions(section_data$sv$table, res), "fusion matching"),
+    cn_source = if (!is.null(section_data$cna)) section_data$cna$source else NA_character_,
+    ploidy    = if (!is.null(section_data$cna)) section_data$cna$ploidy else NA_real_,
+    n_genes   = nrow(res$panel),
+    n_panel_columns = attr(res$panel, "n_columns"),
+    fusion_format = if (!is.null(res$fusions)) attr(res$fusions, "format") else NA_character_,
+    n_hotspots = if (!is.null(res$hotspots)) nrow(res$hotspots) else NA_integer_,
+    n_bed     = if (!is.null(res$bed)) nrow(res$bed) else NA_integer_,
+    missing_genes = res$missing_genes
+  )
+}
+
+# The driver panel as a report gene list (Key Findings chip): gene, canonical gene span from
+# the Ensembl cache, role from likelihoodType. Written as a TSV so load_gene_panel() — the one
+# loader every list goes through — reads it. Returns the path written
+hmf_gene_list_tsv = function(panel_path, ensembl_dir, out_path) {
+  panel = hmf_read_panel(panel_path)
+  g = fread(file.path(ensembl_dir, "ensembl_gene_data.csv"), sep = ",", colClasses = "character",
+            select = c("GeneName", "Chromosome", "GeneStart", "GeneEnd"))
+  g = unique(g[GeneName %in% panel$gene], by = "GeneName")
+  dt = merge(panel[, .(gene, role)], g, by.x = "gene", by.y = "GeneName", all.x = TRUE)
+  dt = dt[!is.na(Chromosome)]
+  out = dt[, .(gene, chrom = ensure_chr_prefix(Chromosome), start = GeneStart, end = GeneEnd,
+               role = fifelse(is.na(role), "", role))]
+  con = file(out_path, "w")
+  writeLines(c("# reference: hg38", "# HMF DriverGenePanel genes; spans from the HMF Ensembl data cache"), con)
+  close(con)
+  fwrite(out, out_path, sep = "\t", append = TRUE, col.names = TRUE)
+  out_path
+}

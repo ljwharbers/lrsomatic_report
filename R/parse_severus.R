@@ -14,7 +14,7 @@ SV_JUNCTION_CLASSES = c("translocation", "intra-chr breakend", "single breakend"
 SV_TABLE_COLS = c("id", "svclass", "svtype", "chrom_a", "pos_a", "gene_a",
                   "chrom_b", "pos_b", "gene_b", "sv_len", "vaf",
                   "consequence", "impact", "support", "svtype_raw",
-                  "filter", "wl_rescue")
+                  "filter", "wl_rescue", "orient_a", "orient_b")
 
 # FILTER values that mean the record passed (VCF "." = no filters applied)
 SV_PASS_FILTERS = c("PASS", ".")
@@ -83,6 +83,34 @@ SV_YPOS    = c(INS = 1.0,       DEL = 0.66,      INV = 0.33,      DUP = 0.05)
     pos   = ifelse(has, suppressWarnings(as.integer(sub(pat, "\\2", alt, perl = TRUE))),
                    NA_integer_)
   )
+}
+
+# Breakend orientation of each side, in the HMF/LINX convention: +1 when the retained
+# sequence lies left of (ends at) the breakend, -1 when it lies right of (starts at) it.
+# From the record's own ALT for a BND (VCF 4.2 bracket notation: `t[p[`/`t]p]` keep the
+# left side here, `]p]t`/`[p[t` the right; the partner keeps its left side under `]`, its
+# right under `[`) and for a single breakend (`t.` / `.t`); from the type for a symbolic
+# DEL (+1/-1) and DUP (-1/+1); from INFO/STRANDS for an INV, only when it states one
+# orientation for both sides (`++`/`--`). NA otherwise (INS, unknown ALT forms)
+.sv_orientation = function(alt, svtype, strands = NULL) {
+  alt = as.character(alt); n = length(alt)
+  own = rep(NA_integer_, n); partner = rep(NA_integer_, n)
+  bracket = grepl("[][]", alt)
+  own[bracket & grepl("^[^][]", alt)]  = 1L
+  own[bracket & grepl("[^][]$", alt)]  = -1L
+  partner[bracket & grepl("]", alt, fixed = TRUE)] = 1L
+  partner[bracket & grepl("[", alt, fixed = TRUE)] = -1L
+  single = !bracket & grepl("^\\.[A-Za-z]+$|^[A-Za-z]+\\.$", alt)
+  own[single & endsWith(alt, ".")]   = 1L
+  own[single & startsWith(alt, ".")] = -1L
+  sym = !bracket & !single
+  own[sym & svtype == "DEL"] = 1L;  partner[sym & svtype == "DEL"] = -1L
+  own[sym & svtype == "DUP"] = -1L; partner[sym & svtype == "DUP"] = 1L
+  if (!is.null(strands)) {
+    inv = sym & svtype == "INV" & strands %in% c("++", "--")
+    own[inv] = partner[inv] = ifelse(strands[inv] == "++", 1L, -1L)
+  }
+  list(own = own, partner = partner)
 }
 
 # Per-caller VCF dialect. Both callers write one record per breakend and link mates by an
@@ -170,6 +198,10 @@ parse_sv_vcf = function(vcf_file, caller = "severus") {
 
   dt[, mate_id := .info_val(INFO, d$mate_key)]
 
+  # Orientation of this record's side and its partner's (.sv_orientation())
+  ori = .sv_orientation(dt$ALT, dt$SVTYPE, .info_val(dt$INFO, "STRANDS"))
+  dt[, `:=`(orient_a = ori$own, orient_b = ori$partner)]
+
   # Group mates on the unordered {ID, MATE_ID} pair (fallback for a breakend: shared `_1`/`_2`
   # stem); non-pairs stay as singletons. The stem fallback is BND-only because SAVANA names its
   # unpaired INS records `ID_n_1` too.
@@ -221,7 +253,8 @@ parse_sv_vcf = function(vcf_file, caller = "severus") {
       # A span runs left to right (sv_display_columns() shows pos_b <= pos_a as a point);
       # the ids swap with the loci so each side keeps its own VEP record
       dt[typed == TRUE & pos_b < POS,
-         c("POS", "pos_b", "ID", "id_b") := .(pos_b, POS, id_b, ID)]
+         c("POS", "pos_b", "ID", "id_b", "orient_a", "orient_b") :=
+           .(pos_b, POS, id_b, ID, orient_b, orient_a)]
       dt[typed == TRUE, is_bnd := FALSE]
     }
   }
@@ -248,7 +281,7 @@ parse_sv_vcf = function(vcf_file, caller = "severus") {
   out = dt[, .(id = ID, id_b, svtype = SVTYPE, svtype_raw, svclass,
                chrom_a = CHROM, pos_a = POS, chrom_b, pos_b,
                sv_len = SVLEN, vaf = VAF, support = SUPPORT,
-               filter = pair_filter, wl_rescue = pair_wl)]
+               filter = pair_filter, wl_rescue = pair_wl, orient_a, orient_b)]
   setattr(out, "n_records", n_records)
   setattr(out, "n_failed", n_failed)
   out
@@ -291,6 +324,8 @@ build_sv_table_from_vep = function(records, vep_sv_vcf) {
   if (!"id_b" %in% names(sv))       sv[, id_b := NA_character_]
   if (!"filter" %in% names(sv))     sv[, filter := NA_character_]
   if (!"wl_rescue" %in% names(sv))  sv[, wl_rescue := NA_character_]
+  if (!"orient_a" %in% names(sv))   sv[, orient_a := NA_integer_]
+  if (!"orient_b" %in% names(sv))   sv[, orient_b := NA_integer_]
 
   vep = parse_vep_vcf(vep_sv_vcf)
   if (is.null(vep) || nrow(vep) == 0) {
@@ -639,6 +674,8 @@ build_sv_table = function(sv_tsv) {
     support = NA_integer_,
     svtype_raw = svtype,
     filter  = NA_character_,
-    wl_rescue = NA_character_
+    wl_rescue = NA_character_,
+    orient_a = NA_integer_,
+    orient_b = NA_integer_
   )
 }

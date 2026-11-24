@@ -1,0 +1,7 @@
+##fileformat=VCFv4.2
+##INFO=<ID=input,Number=1,Type=String,Description="x">
+##INFO=<ID=sources,Number=1,Type=String,Description="x">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr7	10650	.	A	T	.	.	input=BRAF|ENST05|p.Val600Glu;sources=VICC_CIVIC
+chr5	1295113	.	G	A	.	.	input=TERT|null|-;sources=HARTWIG_HOTSPOT_CURATED
+chr7	10660	.	GC	TA	.	.	input=BRAF|ENST05|p.Val601Lys;sources=DOCM

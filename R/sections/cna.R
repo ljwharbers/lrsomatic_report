@@ -30,7 +30,13 @@
 #     wakhan_dir       = character(1),     # NA when there is no Wakhan output
 #     wakhan_heatmap   = character(1),     # NA unless the heatmap HTML is present
 #     ascat_metrics    = list() | NULL     # parse_ascat_metrics()
+#     ascat_segments   = data.table()      # ASCAT's segments even when Wakhan is `source`
+#     ascat_ploidy     = numeric(1)        # its ploidy (purityploidy.txt), NA when absent
 #   )
+#
+# Wakhan segments come from the rank's integer_profile.bed, or — Wakhan builds that write
+# none — from bed_output/*_copynumbers_segments_HP_{1,2}.bed (parse_wakhan_hp_segments(),
+# which adds a zero_coverage column).
 #
 # Precedence. Segments: Wakhan rank-1 integer_profile.bed, else ASCAT segments_raw.txt.
 # Purity/ploidy are those of `source`, so the call thresholds and the segments share one
@@ -256,11 +262,19 @@ cna_locate = function(sample_dir, sample_id) {
   if (!is.na(wdir)) for (i in seq_len(nrow(ranks))) {
     r = ranks$solution_rank[i]; rn = ranks$repository_name[i]
     bed = locate_wakhan_solution_file(wdir, r, rn, "integer_profile.bed")
-    if (is.null(bed)) next
-    profiles[[length(profiles) + 1L]] = list(
-      rank = r, bed = bed,
-      genes = locate_wakhan_solution_file(wdir, r, rn,
-                                          file.path("genes", "genes_copynumber_states.bed")))
+    bed_hp2 = NULL
+    genes = locate_wakhan_solution_file(wdir, r, rn, file.path("genes", "genes_copynumber_states.bed"))
+    if (is.null(bed)) {
+      # Builds without integer_profile.bed: per-haplotype segments under bed_output/
+      bo = locate_wakhan_solution_file(wdir, r, rn, "bed_output")
+      hp = if (!is.null(bo)) Sys.glob(file.path(bo, paste0("*_copynumbers_segments_HP_", 1:2, ".bed")))
+           else character(0)
+      if (length(hp) != 2) next
+      bed = hp[1]; bed_hp2 = hp[2]
+      if (is.null(genes) && file.exists(file.path(bo, "genes_copynumber_states.bed")))
+        genes = file.path(bo, "genes_copynumber_states.bed")
+    }
+    profiles[[length(profiles) + 1L]] = list(rank = r, bed = bed, bed_hp2 = bed_hp2, genes = genes)
   }
 
   list(ascat_segments = seg, ascat_purityploidy = pp, ascat_metrics = metrics,
@@ -285,7 +299,8 @@ cna_parse = function(inputs, section_data, ctx) {
     if (nrow(r) == 0) NULL else r[1]
   }
   profiles = Filter(Negate(is.null), lapply(w$profiles, function(p) {
-    seg = parse_wakhan_integer_profile(p$bed)
+    seg = if (!is.null(p$bed_hp2)) parse_wakhan_hp_segments(p$bed, p$bed_hp2)
+          else parse_wakhan_integer_profile(p$bed)
     if (is.null(seg) || nrow(seg) == 0) return(NULL)
     r = sol_row(p$rank)
     list(rank = p$rank,
@@ -364,7 +379,10 @@ cna_parse = function(inputs, section_data, ctx) {
     profiles = profiles,
     wakhan_dir = if (!is.null(w$dir)) w$dir else NA_character_,
     wakhan_heatmap = if (!is.null(w$heatmap)) w$heatmap else NA_character_,
-    ascat_metrics = ascat_metrics
+    ascat_metrics = ascat_metrics,
+    # Both callers' segments, whichever `source` is: the HMF section calls each separately
+    ascat_segments = if (!is.null(ascat_seg)) ascat_seg else .empty_cn_segments(),
+    ascat_ploidy = if (!is.null(ascat_pp)) ascat_pp$ploidy else NA_real_
   )
 }
 
