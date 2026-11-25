@@ -151,7 +151,8 @@ if (length(hmf_files) > 0) {
   }
   sniff = function(path, n = 1) {
     con = if (grepl("\\.gz$", path)) gzfile(path, "rt") else file(path, "rt")
-    on.exit(close(con)); readLines(con, n = n, warn = FALSE)
+    on.exit(close(con)); x = readLines(con, n = n, warn = FALSE)
+    if (length(x) == 0) "" else x   # an empty file fails the checks below, not strsplit()
   }
   hdr = sniff(hmf_files$driver_panel)
   if (!all(c("gene", "likelihoodType") %in% strsplit(hdr, "\t")[[1]]))

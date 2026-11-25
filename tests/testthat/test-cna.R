@@ -354,9 +354,15 @@ test_that("Wakhan builds without integer_profile.bed are read from bed_output/ H
   inputs = cna_locate(d, "S2")
   expect_length(inputs$wakhan$profiles, 1L)
   expect_match(inputs$wakhan$profiles[[1]]$bed_hp2, "_copynumbers_segments_HP_2\\.bed$")
-  res = cna_parse(inputs, list(), list(sex = "female"))
+  # GAPG lies in the no-reads segment: "no segment", never a homozygous deletion
+  p = list(p = fake_panel(c("KEPT", "GAPG"), c("chr1", "chr1"), c(100, 2000), c(200, 3000),
+                          c("KEPT", "GAPG")))
+  res = cna_parse(inputs, list(), list(sex = "female", all_panels = p))
   expect_equal(res$source, "wakhan")
   expect_equal(res$ploidy, 2.1)
-  expect_equal(res$segments$total, c(3, 0))
-  expect_equal(res$segments$zero_coverage, c(FALSE, TRUE))
+  expect_equal(res$segments$total, 3)                  # the zero-coverage segment is dropped
+  expect_equal(res$profiles[[1]]$n_zero_coverage, 1L)
+  g = res$genes
+  expect_equal(g[gene == "KEPT", call], "gain")
+  expect_true(is.na(g[gene == "GAPG", call]))
 })

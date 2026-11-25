@@ -36,7 +36,8 @@
 #
 # Wakhan segments come from the rank's integer_profile.bed, or — Wakhan builds that write
 # none — from bed_output/*_copynumbers_segments_HP_{1,2}.bed (parse_wakhan_hp_segments(),
-# which adds a zero_coverage column).
+# which adds a zero_coverage column). Zero-coverage segments are dropped here, for every
+# consumer (gene calls, genome metrics, circos, HMF): no reads is no data, not CN 0.
 #
 # Precedence. Segments: Wakhan rank-1 integer_profile.bed, else ASCAT segments_raw.txt.
 # Purity/ploidy are those of `source`, so the call thresholds and the segments share one
@@ -302,12 +303,19 @@ cna_parse = function(inputs, section_data, ctx) {
     seg = if (!is.null(p$bed_hp2)) parse_wakhan_hp_segments(p$bed, p$bed_hp2)
           else parse_wakhan_integer_profile(p$bed)
     if (is.null(seg) || nrow(seg) == 0) return(NULL)
+    # No reads on either haplotype is no data, not CN 0: left out, so a gene there reads "no segment"
+    n_zero = 0L
+    if ("zero_coverage" %in% names(seg)) {
+      n_zero = sum(seg$zero_coverage)
+      seg = seg[zero_coverage == FALSE]
+      if (nrow(seg) == 0) return(NULL)
+    }
     r = sol_row(p$rank)
     list(rank = p$rank,
          purity = if (!is.null(r) && "cell_purity" %in% names(r)) as.numeric(r$cell_purity) else NA_real_,
          ploidy = if (!is.null(r)) as.numeric(r$ploidy) else NA_real_,
          confidence = if (!is.null(r) && "confidence" %in% names(r)) as.numeric(r$confidence) else NA_real_,
-         path = p$bed, genes_path = p$genes, segments = seg)
+         path = p$bed, genes_path = p$genes, segments = seg, n_zero_coverage = n_zero)
   }))
   top = if (length(profiles) > 0) profiles[[1]] else NULL
 

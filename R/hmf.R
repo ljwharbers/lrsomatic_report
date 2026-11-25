@@ -172,10 +172,11 @@ hmf_read_ensembl = function(dir, genes = NULL) {
   # Canonical transcript id and span per gene
   tr = unique(ex[, .(gene_id, gene, chrom, strand, transcript, biotype, trans_start, trans_end,
                      coding_start, coding_end)], by = "gene_id")
-  list(genes = g, exons = ex, transcripts = tr)
+  # Per-gene exon tables, for the per-breakend lookups in hmf_annotate_breakend()
+  list(genes = g, exons = ex, transcripts = tr, exons_by_gene = split(ex, by = "gene_id"))
 }
 
-# KnownHotspots.somatic.38.vcf.gz (SERVE-derived): coordinates plus the protein change and
+# KnownHotspots.somatic.38.vcf.gz (SERVE-derived; `input=` carries the protein change in 1-letter form, p.V600E): coordinates plus the protein change and
 # sources from INFO
 hmf_read_hotspots = function(path) {
   con = if (grepl("\\.gz$", path)) gzfile(path, "rt") else file(path, "rt")
@@ -255,6 +256,18 @@ hmf_protein = function(hgvsp) {
   x
 }
 
+# VEP writes HGVSp in 3-letter codes (p.Val600Glu), SERVE's hotspot `input=` in 1-letter
+# (p.V600E): both go to 1-letter before comparing. Ter -> *, as HGVS does; a 1-letter string
+# has no capital followed by lower case, so it passes through unchanged
+HMF_AA3 = c(Ala = "A", Arg = "R", Asn = "N", Asp = "D", Cys = "C", Gln = "Q", Glu = "E",
+            Gly = "G", His = "H", Ile = "I", Leu = "L", Lys = "K", Met = "M", Phe = "F",
+            Pro = "P", Ser = "S", Thr = "T", Trp = "W", Tyr = "Y", Val = "V", Ter = "*",
+            Sec = "U", Pyl = "O", Xaa = "X")
+hmf_protein_1letter = function(p) {
+  for (k in names(HMF_AA3)) p = gsub(k, HMF_AA3[[k]], p, fixed = TRUE)
+  p
+}
+
 # Is each position inside any BED interval of the same contig?
 hmf_in_regions = function(chrom, pos, bed) {
   out = rep(FALSE, length(chrom))
@@ -305,7 +318,7 @@ hmf_small_variants = function(vep_data, variant_table, res) {
   hs = res$hotspots
   hot_exact = character(0)
   if (!is.null(hs) && nrow(hs) > 0) {
-    hs[, key := variant_key(chrom, pos, ref, alt, space = "vcf")]
+    hs = copy(hs)[, key := variant_key(chrom, pos, ref, alt, space = "vcf")]
     hot_exact = hs$key
   }
   v[, hot := key %in% hot_exact]
@@ -313,7 +326,7 @@ hmf_small_variants = function(vep_data, variant_table, res) {
   # Same protein change on the same gene as a hotspot whose alleles differ (an MNV hotspot
   # called as separate SNVs, or a differently normalised indel)
   hot_protein = if (!is.null(hs) && nrow(hs) > 0)
-    unique(paste(hs$hs_gene[!is.na(hs$hs_protein)], hs$hs_protein[!is.na(hs$hs_protein)]))
+    unique(paste(hs$hs_gene[!is.na(hs$hs_protein)], hmf_protein_1letter(hs$hs_protein[!is.na(hs$hs_protein)])))
     else character(0)
 
   rows = rbindlist(list(
@@ -321,15 +334,19 @@ hmf_small_variants = function(vep_data, variant_table, res) {
     # Hotspot hits on any row: a panel gene, a non-panel gene or none (TERT promoter)
     v[hot == TRUE, .(key, chrom, pos, ref, alt,
                      gene = fifelse(!is.na(pidx), panel$gene[pidx], symbol), pidx,
-                     hgvsp, consequence, effect = NA_character_)]
-  ), use.names = TRUE)
+                     hgvsp, consequence, effect = NA_character_,
+                     # rank the annotation shown: HMF canonical transcript, VEP canonical, any
+                     tx_rank = fifelse(!is.na(pidx) & sub("\\..*$", "", feature) %in% panel$transcript[pidx], 1L,
+                                       fifelse(canonical %in% "YES", 2L, 3L)))]
+  ), use.names = TRUE, fill = TRUE)
   if (nrow(rows) == 0) return(empty)
+  rows[is.na(tx_rank), tx_rank := 0L]
   # One row per variant and gene: the coding row (it carries the effect) over a hotspot-only one
-  setorder(rows, key, gene, effect, na.last = TRUE)
+  setorder(rows, key, gene, effect, tx_rank, na.last = TRUE)
   rows = unique(rows, by = c("key", "gene"))
 
   rows[, hs_match := fcase(key %in% hot_exact, "exact",
-                           paste(gene, hmf_protein(hgvsp)) %in% hot_protein, "protein",
+                           paste(gene, hmf_protein_1letter(hmf_protein(hgvsp))) %in% hot_protein, "protein",
                            default = "")]
   rows[, in_panel := !is.na(pidx)]
   # A hotspot outside the panel is one row per variant, named by the hotspot file's own gene,
@@ -356,7 +373,7 @@ hmf_small_variants = function(vep_data, variant_table, res) {
     in_panel & hotspot,               "hotspot; reportSomaticHotspot is false",
     default = paste0("report", c(MISSENSE = "Missense", NONSENSE_OR_FRAMESHIFT = "Nonsense",
                                  SPLICE = "Splice")[effect], " is false"))]
-  rows[reported & hs_match == "protein", reason := "hotspot (same protein change)"]
+  rows[reported & hs_match == "protein" & flag_hotspot, reason := "hotspot (same protein change)"]
   rows[, role := panel$role[pidx]]
   rows[, in_panel_region := hmf_in_regions(chrom, pos, res$bed)]
 
@@ -439,12 +456,12 @@ hmf_sv_deletions = function(sv_table, res) {
   out[, `:=`(start = g_start, end = g_end, call = "DEL",
              source = paste0(fcase(caller %in% "severus", "Severus", caller %in% "savana", "SAVANA",
                                    is.na(caller), "SV", default = caller), " SV"),
-             note = paste0(if_else_exons(first, last, n_hit, n_exons), " · ", fmt_bp(sv_end - sv_start + 1L),
+             note = paste0(hmf_exon_label(first, last, n_hit, n_exons), " · ", fmt_bp(sv_end - sv_start + 1L),
                            " deletion", fifelse(!is.na(filter) & !filter %in% c("PASS", "."),
                                                 paste0(" · FILTER ", filter), "")))]
   out[]
 }
-if_else_exons = function(first, last, n_hit, n_exons)
+hmf_exon_label = function(first, last, n_hit, n_exons)
   fifelse(n_hit == n_exons, paste0("all ", n_exons, " exons"),
           fifelse(first == last, paste0("exon ", first, " of ", n_exons),
                   paste0("exons ", first, "–", last, " of ", n_exons)))
@@ -486,7 +503,6 @@ hmf_copy_number = function(cna, sv_table, res, sex = "female") {
     out[, support := paste(unique(source), collapse = ", "), by = .(gene, dir)]
     out[, dir := NULL]
     src_rank = function(x) fifelse(x == "Wakhan", 1L, fifelse(x == "ASCAT", 2L, 3L))
-    setorder(out, chrom, start, gene)
     out = out[order(call != "DEL", match(chrom, paste0("chr", c(1:22, "X", "Y"))), start, gene, src_rank(source))]
   }
   # Genes no segment covers, per source (an ASCAT gap can hide a homozygous deletion)
@@ -508,7 +524,8 @@ hmf_annotate_breakend = function(bk_chrom, pos, orient, res, upstream) {
   if (is.na(bk_chrom) || is.na(pos) || is.na(orient)) return(NULL)
   cand = tr[chrom == bk_chrom]
   if (nrow(cand) == 0) return(NULL)
-  up = unname(upstream[cand$gene])
+  # `upstream`: a window per gene name, or one unnamed window for every gene
+  up = if (is.null(names(upstream))) rep(upstream[1], nrow(cand)) else unname(upstream[cand$gene])
   if (length(up) != nrow(cand)) up = rep(NA_real_, nrow(cand))
   up[is.na(up)] = HMF_UPSTREAM_DEFAULT
   lo = fifelse(cand$strand == 1L, cand$trans_start - up, cand$trans_start)
@@ -518,7 +535,7 @@ hmf_annotate_breakend = function(bk_chrom, pos, orient, res, upstream) {
 
   rbindlist(lapply(seq_len(nrow(cand)), function(i) {
     t = cand[i]
-    e = ex[gene_id == t$gene_id]
+    e = if (!is.null(res$ensembl$exons_by_gene)) res$ensembl$exons_by_gene[[t$gene_id]] else ex[gene_id == t$gene_id]
     is_5p = t$strand == orient
     if (!is_5p && is.na(t$coding_start)) return(NULL)   # a 3' partner must be coding
     inside = pos >= t$trans_start && pos <= t$trans_end
@@ -600,6 +617,8 @@ hmf_fusions = function(sv_table, res) {
       if (is.na(ch) || is.na(ps)) next
       for (j in which(hmf_in_range(ch, ps, or, enh$enh_chrom, enh$enh_start, enh$enh_end, enh$enh_orient))) {
         e = enh[j]
+        # Both breakends in the locus: a rearrangement inside it (V(D)J recombination at IG)
+        if (isTRUE(hmf_in_range(och, ops, NA_integer_, e$enh_chrom, e$enh_start, e$enh_end, 0L))) next
         partner = NA_character_; ok = TRUE
         if (!is.na(e$three_gene)) {
           g = res$ensembl$genes[gene == e$three_gene]
@@ -611,7 +630,12 @@ hmf_fusions = function(sv_table, res) {
           }
           partner = e$three_gene
         } else {
-          partner = r[[paste0("gene_", oth)]]
+          # Promiscuous: the partner is a gene whose 5' end the other breakend lies in or upstream of
+          pb = hmf_annotate_breakend(och, ops, r[[paste0("orient_", oth)]], res,
+                                     HMF_UPSTREAM_ENHANCER)
+          pb = if (!is.null(pb)) pb[side == "3p"] else NULL
+          ok = !is.null(pb) && nrow(pb) > 0
+          partner = if (ok) paste(unique(pb$gene), collapse = ",") else NA_character_
         }
         if (!ok) next
         out[[length(out) + 1L]] = c(base, list(type = e$type, five_gene = e$five_gene,
@@ -672,8 +696,9 @@ hmf_fusions = function(sv_table, res) {
               if (is.na(p$phase_5) || is.na(p$phase_3) || p$phase_5 < 0 || p$phase_3 < 0) "non-coding" else
               if (p$phase_5 == p$phase_3) "inframe" else "out-of-frame"
       likelihood = if (type %in% c("KNOWN_PAIR", "EXON_DEL_DUP") || known_exons) "HIGH" else "LOW"
-      # LINX reports promiscuous fusions only in frame; a known pair even when unphased
-      reported = type %in% c("KNOWN_PAIR", "EXON_DEL_DUP") || frame %in% c("inframe", "exonic (unchecked)")
+      # LINX reports promiscuous fusions only in frame; a known pair even when unphased. An exonic
+      # breakend is not phase-checked here, so it cannot make a promiscuous fusion reportable
+      reported = type %in% c("KNOWN_PAIR", "EXON_DEL_DUP") || frame == "inframe"
       exon_lbl = function(region, exon, fused) switch(region,
         upstream = "upstream", exonic = paste0("exon ", exon),
         intronic = paste0("intron ", exon, " → exon ", fused))
@@ -686,8 +711,8 @@ hmf_fusions = function(sv_table, res) {
   }
   if (length(out) == 0) return(empty)
   res_dt = rbindlist(out, use.names = TRUE, fill = TRUE)
-  res_dt = unique(res_dt, by = c("caller", "sv_id", "type", "five_gene", "three_gene"))
   setorder(res_dt, -reported, likelihood, five_gene, three_gene, caller)
+  res_dt = unique(res_dt, by = c("caller", "sv_id", "type", "five_gene", "three_gene"))
   res_dt[, names(empty), with = FALSE]
 }
 

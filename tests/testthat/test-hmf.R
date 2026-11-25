@@ -48,12 +48,15 @@ test_that("a v3 panel's extra columns are read, and absent flags read as false",
 test_that("known fusions: types, exon ranges and IG/ENHANCER overrides in both formats", {
   fu = hmf_read_fusions(file.path(hmf_fx, "known_fusion_data.38.csv"))
   expect_equal(attr(fu, "format"), "v2 (IG_*)")
-  expect_setequal(fu$type, c("KNOWN_PAIR", "PROMISCUOUS_3", "EXON_DEL_DUP", "ENHANCER_KNOWN_PAIR"))
+  expect_setequal(fu$type, c("KNOWN_PAIR", "PROMISCUOUS_3", "EXON_DEL_DUP", "ENHANCER_KNOWN_PAIR",
+                             "ENHANCER_PROMISCUOUS"))
   alk = fu[three_gene == "ALK"]
   expect_equal(c(alk$down_min, alk$down_max), c(3L, 4L))
   expect_true(alk$high_impact)
   expect_true(is.na(alk$five_gene))
   ig = fu[type == "ENHANCER_KNOWN_PAIR"]
+  expect_equal(fu[type == "ENHANCER_PROMISCUOUS", .(five_gene, enh_orient, enh_chrom)],
+               data.table(five_gene = "IGK", enh_orient = 0L, enh_chrom = "chr2"))
   expect_equal(list(ig$enh_orient, ig$enh_chrom, ig$enh_start, ig$enh_end, ig$down_distance),
                list(-1L, "chr14", 1000L, 5000L, 500L))
 
@@ -77,7 +80,7 @@ test_that("the Ensembl cache keeps canonical transcripts only, ranked, chr-prefi
 
 test_that("hotspots split INFO/input into gene and protein; the BED becomes 1-based", {
   hs = hmf_read_hotspots(file.path(hmf_fx, "KnownHotspots.somatic.38.vcf"))
-  expect_equal(hs[pos == 10650, .(hs_gene, hs_protein)], data.table(hs_gene = "BRAF", hs_protein = "p.Val600Glu"))
+  expect_equal(hs[pos == 10650, .(hs_gene, hs_protein)], data.table(hs_gene = "BRAF", hs_protein = "p.V600E"))
   expect_true(is.na(hs[hs_gene == "TERT", hs_protein]))
   bed = hmf_read_bed(file.path(hmf_fx, "ActionableCodingPanel.38.bed"))
   expect_equal(bed[gene == "BRAF", c(start, end)], c(10600L, 10700L))
@@ -123,9 +126,25 @@ test_that("a hotspot outside the panel is listed once, by its own gene, not repo
 })
 
 test_that("the same protein change as a hotspot with other alleles is a hotspot match", {
+  # VEP's 3-letter p.Val601Lys against SERVE's 1-letter p.V601K
   sm = hmf_small_variants(vep_rows(), NULL, hmf_res())
   expect_equal(sm[pos == 10661, hotspot], "protein")
   expect_true(sm[pos == 10661, reported])
+  expect_equal(sm[pos == 10661, reason], "hotspot (same protein change)")
+  expect_equal(hmf_protein_1letter(c("p.Val600Glu", "p.Arg213Ter", "p.Gly12_Gly13delinsValCys", "p.V600E")),
+               c("p.V600E", "p.R213*", "p.G12_G13delinsVC", "p.V600E"))
+})
+
+test_that("a protein hotspot match is not the reason when reportSomaticHotspot is false", {
+  no_hs = hmf_v3_copy("DriverGenePanel.38.tsv", function(l) {
+    i = startsWith(l, "BRAF\t"); x = strsplit(l[i], "\t", fixed = TRUE)[[1]]
+    x[8] = "false"; l[i] = paste(x, collapse = "\t"); l
+  })
+  on.exit(unlink(no_hs))
+  sm = hmf_small_variants(vep_rows(), NULL, hmf_res(driver_panel = no_hs))
+  expect_equal(sm[pos == 10661, hotspot], "protein")
+  expect_true(sm[pos == 10661, reported])                    # reportMissense
+  expect_equal(sm[pos == 10661, reason], "missense reportable")
 })
 
 test_that("without a hotspot file, a hotspot-only call is no longer reported", {
@@ -210,6 +229,25 @@ test_that("a promiscuous 3' partner fuses with any gene, within its exon range",
   # ALK intron 1 -> exon 2, outside the range: LOW, and not high-impact
   fu2 = hmf_fusions(sv_row("p2", "chr2", 1350L, 1L, "chr2", 5650L, 1L), hmf_res())
   expect_equal(fu2$likelihood, "LOW"); expect_false(fu2$high_impact)
+})
+
+test_that("an exonic breakend cannot make a promiscuous fusion reportable", {
+  # EML4 (+) exon 3 -> ALK (-) intron 2: no phase check on the exonic side
+  fu = hmf_fusions(sv_row("p3", "chr2", 1450L, 1L, "chr2", 5450L, 1L), hmf_res())
+  expect_equal(fu$type, "PROMISCUOUS_3")
+  expect_equal(fu$frame, "exonic (unchecked)")
+  expect_false(fu$reported)
+})
+
+test_that("a promiscuous enhancer needs a 3' gene beside its partner, and none inside the locus", {
+  # IGK range chr2:2000-3000; the partner breakend 500 bp upstream of MYC (+)
+  fu = hmf_fusions(sv_row("i1", "chr2", 2500L, 1L, "chr8", 49500L, -1L), hmf_res())
+  expect_equal(fu[, .(type, five_gene, three_gene, reported)],
+               data.table(type = "ENHANCER_PROMISCUOUS", five_gene = "IGK", three_gene = "MYC",
+                          reported = FALSE))
+  # No gene near the partner breakend, or both breakends inside the locus (V(D)J recombination)
+  expect_equal(nrow(hmf_fusions(sv_row("i2", "chr2", 2500L, 1L, "chr8", 3000000L, -1L), hmf_res())), 0L)
+  expect_equal(nrow(hmf_fusions(sv_row("i3", "chr2", 2200L, 1L, "chr2", 2800L, -1L, "DEL"), hmf_res())), 0L)
 })
 
 test_that("EXON_DEL_DUP needs both fused exons in the listed ranges", {
