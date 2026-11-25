@@ -15,3 +15,13 @@
   &--on { color: var(--color-text); font-weight: 600;
           background: color-mix(in srgb, #{$report-primary} 16%, transparent); }
 }
+
+// Per-source switch above the copy-number and fusion tables
+.hmf-sources {
+  display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: center;
+  margin: 0.2rem 0 0.5rem; font-size: 0.85rem;
+}
+.hmf-sources__label { color: var(--color-text-muted); }
+.hmf-sources__opt { cursor: pointer; user-select: none; margin: 0; }
+.hmf-sources__empty { margin-top: 0.6rem; }
+@media print { .hmf-sources { display: none; } }

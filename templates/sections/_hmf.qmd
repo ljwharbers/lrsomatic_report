@@ -18,6 +18,19 @@ hmf_table = function(header, rows) {
 hmf_status = function(reported, label = if (reported) "reported" else "not reported")
   tags$span(class = paste0("hmf-status hmf-status--", if (reported) "on" else "off"), label)
 hmf_err = HMF$error
+hmf_caller_label = function(x) ifelse(x %in% "severus", "Severus", ifelse(x %in% "savana", "SAVANA", x))
+# Every caller's calls are kept; the reader switches sources off here instead (script at the end of
+# this file). Rows carry data-source; the bar shows only when there are two or more sources
+hmf_filtered = function(table, sources) {
+  sources = unique(sources[!is.na(sources)])
+  tags$div(class = "hmf-filtered",
+    if (length(sources) > 1)
+      tags$div(class = "hmf-sources", tags$span(class = "hmf-sources__label", "Show:"),
+        lapply(sources, function(s) tags$label(class = "hmf-sources__opt",
+          tags$input(type = "checkbox", checked = NA, `data-source` = s), paste0(" ", s)))),
+    table,
+    tags$p(class = "hmf-sources__empty section-notice", hidden = NA, "Every source of these calls is switched off."))
+}
 ```
 
 ```{r hmf-error, eval=!is.null(HMF) && !is.null(HMF$error)}
@@ -73,7 +86,7 @@ if (length(cn_sources) == 0 && (is.null(cn) || nrow(cn) == 0)) {
   trs = lapply(seq_len(nrow(cn)), function(i) {
     r = cn[i]
     tags$tr(
-      `data-gene` = toupper(r$gene),
+      `data-gene` = toupper(r$gene), `data-source` = r$source,
       tags$td(class = "cna-genes__gene", r$gene),
       tags$td(class = "cna-genes__locus", paste0(r$chrom, ":", hmf_bp(r$start), "–", hmf_bp(r$end))),
       tags$td(tags$span(class = paste0("cna-call cna-call--", if (r$call == "DEL") "homozygous-deletion" else "amplification"), r$call)),
@@ -85,7 +98,8 @@ if (length(cn_sources) == 0 && (is.null(cn) || nrow(cn) == 0)) {
       tags$td(class = "cna-genes__source", r$note)
     )
   })
-  hmf_table(c("Gene", "Exons", "Call", "Source", "Total CN", "AMP threshold", "Called by", "Role", "Note"), trs)
+  hmf_filtered(hmf_table(c("Gene", "Exons", "Call", "Source", "Total CN", "AMP threshold", "Called by", "Role", "Note"), trs),
+               cn$source)
 }
 ```
 
@@ -105,6 +119,7 @@ if (is.null(HMF$files$known_fusions)) {
   trs = lapply(seq_len(nrow(fu)), function(i) {
     r = fu[i]
     tags$tr(
+      `data-source` = hmf_caller_label(r$caller),
       tags$td(class = "cna-genes__gene", paste0(ifelse(is.na(r$five_gene), "?", r$five_gene), " – ",
                                                 ifelse(is.na(r$three_gene), "?", r$three_gene))),
       tags$td(r$type, if (isTRUE(r$high_impact)) tags$span(class = "cna-genes__span-from", "high-impact partner")),
@@ -113,12 +128,13 @@ if (is.null(HMF$files$known_fusions)) {
       tags$td(r$frame),
       tags$td(r$likelihood),
       tags$td(class = "cna-genes__locus", r$locus, tags$span(class = "cna-genes__span-from", paste0(r$svtype, " · ", r$sv_id))),
-      tags$td(class = "cna-genes__source", if (is.na(r$caller)) "" else r$caller),
+      tags$td(class = "cna-genes__source", if (is.na(r$caller)) "" else hmf_caller_label(r$caller)),
       tags$td(hmf_status(r$reported), if (nzchar(r$note)) tags$span(class = "cna-genes__span-from", r$note))
     )
   })
-  hmf_table(c("Fusion (5′ – 3′)", "Type", "5′ breakend", "3′ breakend", "Frame", "Likelihood",
-              "Breakends", "Caller", "Status"), trs)
+  hmf_filtered(hmf_table(c("Fusion (5′ – 3′)", "Type", "5′ breakend", "3′ breakend", "Frame", "Likelihood",
+                          "Breakends", "Caller", "Status"), trs),
+               hmf_caller_label(fu$caller))
 }
 ```
 
@@ -175,4 +191,32 @@ table_details(
            paste(utils::head(HMF$missing_genes, 10), collapse = ", "), "."),
   summary = "Rules, sources and approximations"
 )
+```
+
+```{r hmf-source-js, results='asis', eval=!is.null(HMF) && is.null(HMF$error)}
+# Emitted only with the section, so a render without --hmf-* is unchanged
+cat("```{=html}\n", r"----(<script>
+// HMF tables: a row shows while its source (ASCAT, Wakhan, Severus SV, SAVANA SV, ...) is ticked.
+// No calls are dropped server-side; this is the reader's switch.
+(function () {
+  document.querySelectorAll(".hmf-filtered").forEach(function (root) {
+    var boxes = Array.prototype.slice.call(root.querySelectorAll(".hmf-sources input[data-source]"));
+    var rows = Array.prototype.slice.call(root.querySelectorAll("tbody tr[data-source]"));
+    var empty = root.querySelector(".hmf-sources__empty");
+    function apply() {
+      var on = new Set(boxes.filter(function (b) { return b.checked; })
+                            .map(function (b) { return b.getAttribute("data-source"); }));
+      var n = 0;
+      rows.forEach(function (tr) {
+        var show = boxes.length === 0 || on.has(tr.getAttribute("data-source"));
+        tr.hidden = !show;
+        if (show) n++;
+      });
+      if (empty) empty.hidden = n > 0 || rows.length === 0;
+    }
+    boxes.forEach(function (b) { b.addEventListener("change", apply); });
+    apply();
+  });
+})();
+</script>)----", "\n```\n", sep = "")
 ```

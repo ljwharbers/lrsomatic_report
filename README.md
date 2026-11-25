@@ -292,8 +292,10 @@ centromeres, unmappable regions) carry no information and are left out, so a gen
 "uncovered" rather than deleted; the footnote lists uncovered genes per source, because an ASCAT
 gap can hide a homozygous deletion. In addition, every **deletion called by an SV caller**
 (Severus DEL, SAVANA `+-` pair) that removes canonical exons of a `reportDeletion` gene is listed
-— whatever the copy number says, and possibly heterozygous. "Called by" names every source making
-the same call for the gene.
+— whatever the copy number says, and possibly heterozygous, and however large (SAVANA's typed `+-`
+pairs can span tens of Mb). "Called by" names every source making the same call for the gene.
+No call is dropped: a **Show** switch above the copy-number and fusion tables turns each source
+(ASCAT, Wakhan, Severus SV, SAVANA SV; Severus, SAVANA) off and on in the browser.
 
 **Fusions** (`--hmf-known-fusions`). Each SV — Severus and SAVANA separately — is placed on
 canonical transcripts using its breakend orientation (from the VCF bracket notation): a gene is
