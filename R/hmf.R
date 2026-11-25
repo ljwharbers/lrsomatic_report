@@ -215,6 +215,47 @@ hmf_read_bed = function(path) {
              gene = if (ncol(dt) >= 4) sub("_[0-9]+$", "", dt[[4]]) else NA_character_)
 }
 
+# The build the HMF resources are on. The published bundle is GRCh38 and declares nothing, so
+# undeclared reads as "hg38"; a copy lifted to CHM13 (the pipeline's HMF_LIFTOVER) declares it
+# in a one-line REFERENCE file inside the Ensembl data cache directory, the coordinate anchor
+# of the whole set (each resource is staged on its own, so the declaration has to travel with
+# one of them). A lifted hotspot VCF also carries ##assembly=, which must agree.
+# Returns list(reference, hotspots) with hotspots NA when undeclared
+hmf_declared_reference = function(files) {
+  ref = "hg38"
+  f = if (!is.null(files$ensembl_data_dir)) file.path(files$ensembl_data_dir, "REFERENCE") else ""
+  if (nzchar(f) && file.exists(f)) {
+    x = normalise_reference_name(readLines(f, n = 1, warn = FALSE)[1])
+    if (!is.na(x)) ref = x
+  }
+  hs = NA_character_
+  if (!is.null(files$hotspots) && file.exists(files$hotspots)) {
+    con = if (grepl("\\.gz$", files$hotspots)) gzfile(files$hotspots, "rt") else file(files$hotspots, "rt")
+    hdr = character(0)
+    repeat {
+      l = readLines(con, n = 200, warn = FALSE)
+      hdr = c(hdr, l[startsWith(l, "##")])
+      if (length(l) < 200 || any(!startsWith(l, "##"))) break
+    }
+    close(con)
+    a = grep("^##assembly=", hdr, value = TRUE)
+    if (length(a)) hs = normalise_reference_name(sub("^##assembly=", "", a[1]))
+  }
+  list(reference = ref, hotspots = hs)
+}
+
+# NULL when the HMF resources are on `reference`, else why not ("mismatch": declared another
+# build; "undeclared": GRCh38 resources on another reference)
+hmf_check_reference = function(files, reference) {
+  d = hmf_declared_reference(files)
+  if (!is.na(d$hotspots) && d$hotspots != d$reference)
+    return(list(kind = "mismatch", msg = paste0("the HMF hotspot VCF declares '", d$hotspots,
+      "' but the Ensembl data cache '", d$reference, "'; use resources lifted together")))
+  if (d$reference == reference) return(NULL)
+  list(kind = if (d$reference == "hg38") "undeclared" else "mismatch",
+       msg = paste0("the HMF resources are on '", d$reference, "' and the report on '", reference, "'"))
+}
+
 # Every resource named in `files` (list of paths, NULL = not given). Panel and Ensembl
 # cache are required for anything at all; the others switch their part on
 hmf_load_resources = function(files) {
@@ -234,6 +275,7 @@ hmf_load_resources = function(files) {
     fusions  = fusions,
     hotspots = if (!is.null(files$hotspots)) hmf_read_hotspots(files$hotspots) else NULL,
     bed      = if (!is.null(files$actionable_bed)) hmf_read_bed(files$actionable_bed) else NULL,
+    # Not in the cache, or (in a lifted cache) dropped because a transcript did not lift whole
     missing_genes = setdiff(panel$gene, ens$genes$gene)
   )
 }
@@ -305,12 +347,17 @@ hmf_small_variants = function(vep_data, variant_table, res) {
   v[, pidx := fifelse(!is.na(gi), gi, gs)]
 
   # Coding rows: the HMF canonical transcript, or VEP's CANONICAL flag where no transcript id
-  # was annotated
+  # was annotated. When VEP's transcript ids are in another namespace altogether, none can equal
+  # an HMF one: the CHM13 rapid-release cache (ENST0522...), a --refseq run (NM_...). Every
+  # coding row would then be dropped in silence, so VEP's own canonical transcript stands in
   coding = v[!is.na(pidx)]
   coding[, hmf_tx := panel$transcript[pidx]]
   coding[, tx := sub("\\..*$", "", feature)]
-  coding = coding[(!is.na(tx) & !is.na(hmf_tx) & tx == hmf_tx) |
-                  (is.na(tx) & canonical %in% "YES")]
+  ns_ok = nrow(coding) == 0 || all(is.na(coding$tx)) || any(coding$tx %in% panel$transcript)
+  coding = if (ns_ok) coding[(!is.na(tx) & !is.na(hmf_tx) & tx == hmf_tx) |
+                             (is.na(tx) & canonical %in% "YES")]
+           else coding[canonical %in% "YES"]
+  transcript_rule = if (ns_ok) "hmf_canonical" else "vep_canonical"
   coding[, effect := hmf_coding_effect(consequence)]
   coding = coding[!is.na(effect)]
 
@@ -339,7 +386,7 @@ hmf_small_variants = function(vep_data, variant_table, res) {
                      tx_rank = fifelse(!is.na(pidx) & sub("\\..*$", "", feature) %in% panel$transcript[pidx], 1L,
                                        fifelse(canonical %in% "YES", 2L, 3L)))]
   ), use.names = TRUE, fill = TRUE)
-  if (nrow(rows) == 0) return(empty)
+  if (nrow(rows) == 0) return(setattr(empty, "transcript_rule", transcript_rule))
   rows[is.na(tx_rank), tx_rank := 0L]
   # One row per variant and gene: the coding row (it carries the effect) over a hotspot-only one
   setorder(rows, key, gene, effect, tx_rank, na.last = TRUE)
@@ -387,6 +434,8 @@ hmf_small_variants = function(vep_data, variant_table, res) {
   out = rows[, .(gene, chrom, pos, ref, alt, hgvsp = hmf_protein(hgvsp), consequence, effect,
                  hotspot = hs_match, role, reported, reason, in_panel_region, vaf, in_panel)]
   setorder(out, -reported, -in_panel, gene, pos)
+  # Which transcript the effects were read from: "hmf_canonical" or "vep_canonical"
+  setattr(out, "transcript_rule", transcript_rule)
   out[]
 }
 
@@ -735,6 +784,7 @@ build_hmf = function(hmf_files, vep_data, variant_table, section_data, ctx) {
     message("HMF ", what, " failed: ", conditionMessage(e)); NULL })
   list(
     files     = files,
+    reference = hmf_declared_reference(files)$reference,
     small     = safely(hmf_small_variants(vep_data, variant_table, res), "small-variant matching"),
     cn        = safely(hmf_copy_number(section_data$cna, section_data$sv$table, res, sex), "copy-number calls"),
     fusions   = if (!is.null(res$fusions)) safely(hmf_fusions(section_data$sv$table, res), "fusion matching"),
@@ -752,7 +802,7 @@ build_hmf = function(hmf_files, vep_data, variant_table, section_data, ctx) {
 # The driver panel as a report gene list (Key Findings chip): gene, canonical gene span from
 # the Ensembl cache, role from likelihoodType. Written as a TSV so load_gene_panel() — the one
 # loader every list goes through — reads it. Returns the path written
-hmf_gene_list_tsv = function(panel_path, ensembl_dir, out_path) {
+hmf_gene_list_tsv = function(panel_path, ensembl_dir, out_path, reference = "hg38") {
   panel = hmf_read_panel(panel_path)
   g = fread(file.path(ensembl_dir, "ensembl_gene_data.csv"), sep = ",", colClasses = "character",
             select = c("GeneName", "Chromosome", "GeneStart", "GeneEnd"))
@@ -762,7 +812,8 @@ hmf_gene_list_tsv = function(panel_path, ensembl_dir, out_path) {
   out = dt[, .(gene, chrom = ensure_chr_prefix(Chromosome), start = GeneStart, end = GeneEnd,
                role = fifelse(is.na(role), "", role))]
   con = file(out_path, "w")
-  writeLines(c("# reference: hg38", "# HMF DriverGenePanel genes; spans from the HMF Ensembl data cache"), con)
+  writeLines(c(paste0("# reference: ", reference),
+               "# HMF DriverGenePanel genes; spans from the HMF Ensembl data cache"), con)
   close(con)
   fwrite(out, out_path, sep = "\t", append = TRUE, col.names = TRUE)
   out_path

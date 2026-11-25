@@ -306,3 +306,55 @@ test_that("the driver panel becomes a coordinate gene list with roles", {
   expect_equal(roles[match(c("TP53", "MYC"), gene), role], c("tsg", "oncogene"))
   expect_error(load_gene_panel(tsv, "t2t"), "declares reference")
 })
+
+# ---- CHM13: a lifted copy declares its build; VEP's transcript ids are another namespace ---
+
+# A copy of the fixture Ensembl cache declaring `ref` in a REFERENCE file, as HMF_LIFTOVER writes it
+hmf_lifted_ensembl = function(ref = "t2t") {
+  d = tempfile("ensembl_lifted")
+  dir.create(d)
+  file.copy(list.files(file.path(hmf_fx, "ensembl_data"), full.names = TRUE), d)
+  writeLines(ref, file.path(d, "REFERENCE"))
+  d
+}
+
+test_that("on VEP ids outside HMF's namespace, VEP's canonical transcript stands in", {
+  # The CHM13 rapid-release cache: ENSG0522.../ENST0522... ids, CANONICAL set, no MANE
+  t2t = vep_rows()[, `:=`(gene_id = sub("^ENSG", "ENSG0522", gene_id),
+                          feature = sub("^ENST", "ENST0522", feature))]
+  sm = hmf_small_variants(t2t, NULL, hmf_res())
+  expect_equal(attr(sm, "transcript_rule"), "vep_canonical")
+  expect_true(sm[gene == "TP53", reported])                 # kept, matched by symbol
+  expect_equal(nrow(sm[gene == "TP53"]), 1L)                # the non-canonical row still is not
+  expect_true(sm[gene == "ALK", reported])
+  # HMF's own ids: the HMF canonical transcript rule
+  expect_equal(attr(hmf_small_variants(vep_rows(), NULL, hmf_res()), "transcript_rule"), "hmf_canonical")
+})
+
+test_that("the resources' build is declared by the Ensembl cache's REFERENCE file, else GRCh38", {
+  expect_equal(hmf_declared_reference(hmf_files())$reference, "hg38")
+  expect_null(hmf_check_reference(hmf_files(), "hg38"))
+  expect_equal(hmf_check_reference(hmf_files(), "t2t")$kind, "undeclared")
+
+  lifted = hmf_lifted_ensembl("T2T-CHM13v2.0")
+  on.exit(unlink(lifted, recursive = TRUE))
+  f = hmf_files(ensembl_data_dir = lifted)
+  expect_equal(hmf_declared_reference(f)$reference, "t2t")
+  expect_null(hmf_check_reference(f, "t2t"))
+  expect_equal(hmf_check_reference(f, "hg38")$kind, "mismatch")
+
+  # A hotspot VCF declaring another build than the cache: resources not lifted together
+  hs = tempfile(fileext = ".vcf"); on.exit(unlink(hs), add = TRUE)
+  l = readLines(file.path(hmf_fx, "KnownHotspots.somatic.38.vcf"))
+  writeLines(c(l[1], "##assembly=GRCh38", l[-1]), hs)
+  bad = hmf_check_reference(hmf_files(ensembl_data_dir = lifted, hotspots = hs), "t2t")
+  expect_equal(bad$kind, "mismatch")
+  expect_match(bad$msg, "lifted together")
+})
+
+test_that("the hmf_driver gene list carries the reference it was built for", {
+  tsv = tempfile(fileext = ".tsv"); on.exit(unlink(tsv))
+  hmf_gene_list_tsv(file.path(hmf_fx, "DriverGenePanel.38.tsv"), file.path(hmf_fx, "ensembl_data"), tsv, "t2t")
+  expect_equal(load_gene_panel(tsv, "t2t")$reference, "t2t")
+  expect_error(load_gene_panel(tsv, "hg38"), "declares reference")
+})

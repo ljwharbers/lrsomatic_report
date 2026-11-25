@@ -147,8 +147,10 @@ f = HMF$files
 given = function(x, what) if (is.null(x)) paste0(what, ": not given") else paste0(what, ": ", basename(x))
 cn_txt = if (length(attr(HMF$cn, "sources"))) paste(unname(attr(HMF$cn, "sources")), collapse = " and ") else "no copy-number segments"
 unc = attr(HMF$cn, "uncovered")
+lifted = identical(HMF$reference, "t2t")
+vep_tx = identical(attr(HMF$small, "transcript_rule"), "vep_canonical")
 table_details(
-  tags$p("Resources: ", paste(c(
+  tags$p("Resources (", if (lifted) "CHM13, lifted from GRCh38 by the pipeline" else "GRCh38", "): ", paste(c(
     paste0(given(f$driver_panel, "driver panel"), " (", HMF$n_genes, " genes, ", HMF$n_panel_columns, " columns)"),
     paste0("Ensembl data cache: ", basename(f$ensembl_data_dir)),
     if (!is.null(f$known_fusions)) paste0(given(f$known_fusions, "known fusions"), " (format ", HMF$fusion_format, ")")
@@ -157,7 +159,10 @@ table_details(
       else given(NULL, "hotspots"),
     if (!is.null(f$actionable_bed)) paste0(given(f$actionable_bed, "actionable coding panel"), " (", formatC(HMF$n_bed, big.mark = ","), " regions)")
       else given(NULL, "actionable coding panel")), collapse = "; "), "."),
-  tags$p("Small variants: somatic calls on the HMF canonical transcript of a DriverGenePanel gene, classified as ",
+  tags$p("Small variants: somatic calls on ",
+         if (vep_tx) "VEP's canonical transcript (VEP's transcript ids are not HMF's Ensembl GRCh38 ones here, so HMF's own canonical transcript cannot be matched)"
+         else "the HMF canonical transcript",
+         " of a DriverGenePanel gene, classified as ",
          "MISSENSE (missense, inframe indel), NONSENSE_OR_FRAMESHIFT (stop gained/lost, start lost, frameshift) or SPLICE ",
          "(splice donor/acceptor, donor +5), and reported when the gene's reportMissense / reportNonsense / reportSplice flag is ",
          "true, or when the variant is a known hotspot (exact alleles, or the same protein change) and reportSomaticHotspot is true. ",
@@ -186,9 +191,13 @@ table_details(
          "(LINX chains SVs); no protein-domain or NMD checks; exonic breakends are not phase-checked; VEP's splice ",
          "consequences stand in for PURPLE's splice definition; under VEP --per_gene, effects seen only on a non-canonical ",
          "transcript (e.g. CDKN2A p14ARF) are not classified; copy number comes from long-read segments, not PURPLE's ",
-         "purity-adjusted fit, and segmental-duplication genes can be called falsely deleted."),
+         "purity-adjusted fit, and segmental-duplication genes can be called falsely deleted.",
+         if (lifted) paste0(" On CHM13 the resources' coordinates were lifted over from GRCh38: a transcript that did not lift whole ",
+                            "was dropped, and pseudoautosomal genes can read CN 0.") else "",
+         if (vep_tx) " VEP's canonical transcript is usually, but not always, the same coding sequence as HMF's." else ""),
   if (length(HMF$missing_genes))
-    tags$p(length(HMF$missing_genes), " panel gene(s) are not in the Ensembl data cache and are skipped: ",
+    tags$p(length(HMF$missing_genes), " panel gene(s) are not in the Ensembl data cache",
+           if (lifted) " (or did not lift over whole)" else "", " and are skipped: ",
            paste(utils::head(HMF$missing_genes, 10), collapse = ", "), "."),
   summary = "Rules, sources and approximations"
 )

@@ -262,8 +262,12 @@ An optional section, on only when `--hmf-driver-panel` and `--hmf-ensembl-data-d
 it applies the [Hartwig Medical Foundation](https://github.com/hartwigmedical/hmftools)
 (WiGiTS / [oncoanalyser](https://github.com/nf-core/oncoanalyser)) driver catalogue to this
 sample's long-read calls. Without those flags the report is unchanged. The resource files are
-the user's own copy of the oncoanalyser resource bundle — nothing from it ships here — and are
-**GRCh38 only**: on any other reference the section is skipped with a warning. Bundles v2.x and
+the user's own copy of the oncoanalyser resource bundle — nothing from it ships here. The bundle
+is GRCh38. **On CHM13** the resources must be a copy lifted over by LRSomatic's `HMF_LIFTOVER`,
+which declares its build in a one-line `REFERENCE` file (`t2t`) inside the Ensembl data cache
+directory, and `##assembly=` in the hotspot VCF. Undeclared resources are GRCh38: on a CHM13
+report they are skipped with a warning, and resources declaring another build than the report's
+are an error. Bundles v2.x and
 v3.x are both read (columns by name; v2's `IG_*` fusion types and `IG_RANGE` are v3's
 `ENHANCER_*` and `ENHANCER_RANGE`). It is a re-implementation of HMF's *reporting rules* on other
 callers' output, not PURPLE or LINX, and the section says so.
@@ -273,7 +277,10 @@ Ensembl cache, role ONCO → oncogene, TSG → tsg). It is not ticked on load: t
 key findings, gene-level copy number and SV panel filter over the HMF driver genes.
 
 **Small variants.** A somatic variant in a DriverGenePanel gene is classified on that gene's HMF
-canonical transcript (VEP rows annotated on any other transcript are ignored) as
+canonical transcript (VEP rows annotated on any other transcript are ignored). When VEP's
+transcript ids are not HMF's Ensembl GRCh38 ones at all — CHM13's rapid-release cache
+(`ENST0522…`), or a `--refseq` run — none could match, so VEP's own canonical transcript
+(`CANONICAL=YES`) stands in, the gene matched by symbol; the footnote says which rule applied. It is classified as
 NONSENSE_OR_FRAMESHIFT (frameshift, stop gained, stop lost, start lost), SPLICE (splice donor,
 splice acceptor, splice donor 5th base) or MISSENSE (missense, inframe insertion/deletion,
 protein altering), first match in that order. It is **reported** when the gene's
@@ -393,7 +400,9 @@ output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 >   `--hmf-known-fusions`, `--hmf-hotspots`, `--hmf-actionable-bed`): Hartwig's driver panel,
 >   hotspots and known fusions applied to the small variants, ASCAT and Wakhan copy number,
 >   SV-caller deletions and SV breakends; the driver panel is also a selectable gene list
->   (`hmf_driver`). Off, and the report unchanged, without the flags. See HMF driver annotation.
+>   (`hmf_driver`). Off, and the report unchanged, without the flags. GRCh38, or on CHM13 a copy
+>   lifted over by the pipeline that declares its build (`REFERENCE` in the Ensembl cache). See
+>   HMF driver annotation.
 > - Wakhan builds that write `bed_output/*_copynumbers_segments_HP_{1,2}.bed` instead of
 >   `integer_profile.bed` are read. Before, the copy-number section fell back to ASCAT. Their zero-coverage segments
 >   (no reads on either haplotype) are left out as no data, not read as CN 0.

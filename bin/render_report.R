@@ -64,13 +64,15 @@ option_list = list(
                            "(top solution of each) differ by at least this much (default: 0.2).",
                            "A value above 1 never warns.")),
   make_option("--hmf-driver-panel", type = "character", default = NULL,
-              help = paste("HMF DriverGenePanel.38.tsv (oncoanalyser resource bundle, GRCh38).",
+              help = paste("HMF DriverGenePanel.38.tsv (oncoanalyser resource bundle: GRCh38, or a",
+                           "CHM13 copy lifted by the pipeline, whose Ensembl cache declares REFERENCE t2t).",
                            "Turns on the HMF driver annotation section and adds the panel as the",
                            "selectable gene list 'hmf_driver'. Needs --hmf-ensembl-data-dir.")),
   make_option("--hmf-ensembl-data-dir", type = "character", default = NULL,
               help = paste("HMF Ensembl data cache directory (common/ensembl_data, with",
                            "ensembl_gene_data.csv and ensembl_trans_exon_data.csv): canonical",
-                           "transcripts and gene spans for the HMF section.")),
+                           "transcripts and gene spans for the HMF section. A REFERENCE file in it",
+                           "declares the build (absent: GRCh38).")),
   make_option("--hmf-known-fusions", type = "character", default = NULL,
               help = "HMF known_fusion_data.38.csv: known-fusion matching of the SV calls (optional)."),
   make_option("--hmf-hotspots", type = "character", default = NULL,
@@ -192,11 +194,17 @@ if (reference == "auto") {
 }
 reference = tolower(reference)
 
-# HMF resources are GRCh38: on any other reference the section is left out, not mis-placed
-if (length(hmf_files) > 0 && reference != "hg38") {
-  message("WARNING: HMF resources are GRCh38-only; the reference is '", reference,
-          "', so the HMF section is skipped.")
-  hmf_files = list()
+# HMF resources must be on the report's reference: the published bundle is GRCh38 (and declares
+# nothing); a CHM13 copy lifted by the pipeline declares t2t (hmf_declared_reference()). Plain
+# GRCh38 files on another reference are left out with a warning; a declared mismatch is an error
+if (length(hmf_files) > 0) {
+  bad = hmf_check_reference(hmf_files, reference)
+  if (!is.null(bad) && bad$kind == "mismatch") abort(paste0("HMF resources: ", bad$msg, "."))
+  if (!is.null(bad)) {
+    message("WARNING: ", bad$msg, ", so the HMF section is skipped. On CHM13, use the copy the ",
+            "pipeline lifts over (its Ensembl data cache declares REFERENCE t2t).")
+    hmf_files = list()
+  }
 }
 
 # ---- Load all gene panels: every builtin ships in the report, --gene-panel only sets which are checked on load; "__all__" is the internal sentinel for none ----
@@ -211,7 +219,7 @@ all_panels = load_all_gene_panels(gene_lists_dir, reference)
 # Ensembl cache, role from likelihoodType, read through the same loader as every list
 if (!is.null(hmf_files$driver_panel)) {
   hmf_tsv = hmf_gene_list_tsv(hmf_files$driver_panel, hmf_files$ensembl_data_dir,
-                              tempfile("hmf_driver", fileext = ".tsv"))
+                              tempfile("hmf_driver", fileext = ".tsv"), reference)
   nm = unique_panel_name("hmf_driver", names(all_panels))
   all_panels[[nm]] = tryCatch(load_gene_panel(hmf_tsv, reference),
                               error = function(e) abort(conditionMessage(e)))

@@ -150,3 +150,17 @@ test_that("the --hmf-* flags are documented and validated before any rendering",
   expect_true(any(grepl("--hmf-hotspots not found", out, fixed = TRUE)))
   expect_false(dir.exists(file.path(getwd(), "._render")))
 })
+
+test_that("HMF resources declaring another build than the report's abort before rendering", {
+  fx = file.path(repo_root, "tests", "fixtures", "hmf")
+  ens = tempfile("ensembl"); dir.create(ens)
+  file.copy(list.files(file.path(fx, "ensembl_data"), full.names = TRUE), ens)
+  writeLines("t2t", file.path(ens, "REFERENCE"))
+  d = tempfile("sample"); dir.create(d)
+  out = suppressWarnings(system2("Rscript", c(render_report, "--sample-dir", d, "--sex", "male",
+    "--reference", "hg38", "--hmf-driver-panel", file.path(fx, "DriverGenePanel.38.tsv"),
+    "--hmf-ensembl-data-dir", ens), stdout = TRUE, stderr = TRUE))
+  expect_equal(attr(out, "status"), 1L)
+  expect_true(any(grepl("HMF resources: the HMF resources are on 't2t' and the report on 'hg38'", out, fixed = TRUE)))
+  expect_false(dir.exists(file.path(getwd(), "._render")))
+})
