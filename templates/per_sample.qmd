@@ -190,7 +190,7 @@ report_counts = list(small_variants = sv_counts, n_sv = n_sv,
                      n_trans = n_trans, n_intra_bnd = n_intra_bnd,
                      sv_caller = sv_primary_caller)
 OVERVIEW = build_overview(variant_table, SECTION_DATA, all_panels, ascat_pp, tmb_info,
-                          report_counts, ctx)
+                          report_counts, ctx, HMF)
 
 # Genome circos, after the overview: its driver labels are the overview's tier 1-2 findings
 # (circos_driver_rows() in R/key_findings.R). Drawn to a temp SVG that sections/_circos.qmd

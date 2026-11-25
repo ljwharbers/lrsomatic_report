@@ -1,6 +1,7 @@
 # Clinical overview: key findings (driver summary) + genome-wide biomarkers.
 #
-# build_overview(variant_table, section_data, all_panels, ascat_pp, tmb_info, counts, ctx)
+# build_overview(variant_table, section_data, all_panels, ascat_pp, tmb_info, counts, ctx, hmf)
+#   hmf: build_hmf()'s result (NULL without --hmf-*); the hmf_driver list's findings (kf_hmf_rows())
 #   variant_table  FULL small-variant table (build_variant_table()), may be NULL
 #   section_data   SECTION_DATA (sv, whatshap, cna, shatterseek, ecdna, reconplot, signatures)
 #   all_panels     named list of gene panels (after the YAML round trip: unlist() fields)
@@ -868,10 +869,121 @@ kf_cna_rows = function(cna, roles, reference) {
              loh = g$loh, in_panel = TRUE)[!is.na(tier)]
 }
 
+# ---- HMF driver annotation -----------------------------------------------------------------
+
+# The gene list built from --hmf-driver-panel carries `hmf = TRUE` (bin/render_report.R). Its
+# key findings are HMF's own calls (build_hmf(), R/hmf.R) rather than the generic rules above,
+# which would list each of its genes a second time under different criteria:
+#   - small variants: every reported one (a reportable coding effect on the HMF canonical
+#     transcript, or a hotspot), tier 1
+#   - copy number: AMP and DEL from a copy-number caller tier 1, PARTIAL_AMP tier 2; a DEL called
+#     only by an SV caller tier 2 up to KF_FOCAL_SV_MAX, tier 3 above it (one 70 Mb deletion
+#     removes dozens of driver genes and may be heterozygous)
+#   - fusions: every reported one, tier 1 at HMF likelihood HIGH (known pairs, exon
+#     deletions/duplications, enhancer known pairs, known exons), tier 2 otherwise
+# One row per gene and call (copy number) or per fusion pair and type, merging sources and
+# callers. A fusion of two genes is "FIVE–THREE" (5′ first), the same en-dash form
+# kf_merge_sv_partners() gives a rearrangement joining two listed genes.
+kf_is_hmf_panel = function(p) isTRUE(as.logical(unlist(p$hmf)))
+
+kf_hmf_rows = function(hmf, panel_names) {
+  out = empty_findings()
+  if (is.null(hmf) || !is.null(hmf$error) || length(panel_names) == 0) return(out)
+  tag = paste(panel_names, collapse = ",")
+  rows = list(out)
+  na0 = function(x) { x = as.character(x); x[is.na(x)] = ""; x }
+
+  sm = hmf$small
+  if (!is.null(sm) && nrow(sm) > 0) {
+    s = sm[reported %in% TRUE]
+    if (nrow(s) > 0) {
+      hg = kf_short_hgvsp(s$hgvsp)
+      rows$small = data.table(
+        gene = toupper(s$gene), type = "small variant",
+        alteration = ifelse(is.na(hg), paste0(kf_pretty_csq(s$consequence), " ", s$ref, ">", s$alt), hg),
+        evidence = kf_join(paste0("HMF: ", s$reason),
+                           ifelse(nzchar(na0(s$hotspot)), paste0("hotspot (", s$hotspot, " match)"), ""),
+                           ifelse(s$in_panel_region %in% TRUE, "ActionableCodingPanel region", "")),
+        tier = 1L, role = na0(s$role), panels = tag, vaf = as.numeric(s$vaf),
+        source_id = paste0(s$chrom, ":", s$pos, ":", s$ref, ">", s$alt), genes = toupper(s$gene),
+        dp = NA_real_, callers = "", locus = paste0(s$chrom, ":", kf_int(s$pos)),
+        loh = FALSE, in_panel = TRUE)
+    }
+  }
+
+  cn = hmf$cn
+  if (!is.null(cn) && nrow(cn) > 0) {
+    c2 = copy(cn)
+    if (!"sv_size" %in% names(c2)) c2[, sv_size := NA_real_]
+    sv_src = grepl(" SV$", c2$source)
+    c2[, tier := fifelse(!sv_src, fifelse(call == "PARTIAL_AMP", 2L, 1L),
+                         fifelse(!is.na(sv_size) & sv_size <= KF_FOCAL_SV_MAX, 2L, 3L))]
+    c2[, dir := fifelse(call == "DEL", "DEL", "AMP")]
+    g = c2[, {
+      best = which.min(tier)
+      cnv = c(min_cn, max_cn); cnv = cnv[!is.na(cnv)]
+      cn_txt = if (length(cnv) == 0) "" else
+               if (min(cnv) == max(cnv)) trimws(formatC(min(cnv), format = "fg", digits = 3))
+               else paste0(trimws(formatC(min(cnv), format = "fg", digits = 3)), "–",
+                           trimws(formatC(max(cnv), format = "fg", digits = 3)))
+      svn = note[grepl(" SV$", source) & nzchar(note)]
+      .(call = call[best], tier = min(tier), chrom = chrom[1], start = start[1], end = end[1],
+        role = role[1], sources = paste(unique(source), collapse = ", "), cn_txt = cn_txt,
+        sv_note = if (length(svn)) svn[1] else "")
+    }, by = .(gene, dir)]
+    rows$cn = data.table(
+      gene = toupper(g$gene), type = "CNA",
+      alteration = paste0(g$call, ifelse(nzchar(g$cn_txt), paste0(" (CN ", g$cn_txt, ")"),
+                                         " (SV deletion)")),
+      evidence = kf_join(paste0("HMF ", g$call, " · ", g$sources), g$sv_note,
+                         ifelse(g$tier == 3L, "large SV deletion, possibly heterozygous", "")),
+      tier = as.integer(g$tier), role = na0(g$role), panels = tag, vaf = NA_real_,
+      source_id = paste0(g$chrom, ":", g$start, "-", g$end), genes = toupper(g$gene),
+      dp = NA_real_, callers = g$sources,
+      locus = paste0(g$chrom, ":", kf_int(g$start), "–", kf_int(g$end)),
+      loh = FALSE, in_panel = TRUE)
+  }
+
+  fu = hmf$fusions
+  if (!is.null(fu) && nrow(fu) > 0) {
+    f = fu[reported %in% TRUE]
+    if (nrow(f) > 0) {
+      f[, caller_lab := fifelse(caller %in% names(KF_CALLER_LABEL), KF_CALLER_LABEL[caller], na0(caller))]
+      g = f[, .(five_exon = five_exon[1], three_exon = three_exon[1], frame = frame[1],
+                likelihood = min(likelihood), high_impact = any(high_impact %in% TRUE),
+                callers = paste(unique(caller_lab[nzchar(caller_lab)]), collapse = ", "),
+                note = { n = note[nzchar(na0(note))]; if (length(n)) n[1] else "" },
+                ids = paste(unique(sv_id), collapse = ","), locus = locus[1]),
+            by = .(type, five_gene, three_gene)]
+      members = lapply(seq_len(nrow(g)), function(i)
+        unique(toupper(na.omit(c(g$five_gene[i], g$three_gene[i])))))
+      exons = kf_join(ifelse(is.na(g$five_exon), "", paste0("5′ ", g$five_exon)),
+                      ifelse(is.na(g$three_exon), "", paste0("3′ ", g$three_exon)), sep = ", ")
+      rows$fusions = data.table(
+        gene = vapply(members, paste, character(1), collapse = "–"), type = "SV",
+        alteration = paste0(gsub("_", " ", tolower(g$type)), " fusion",
+                            ifelse(nzchar(exons), paste0(" (", exons, ")"), "")),
+        evidence = kf_join(paste0("HMF ", g$type), ifelse(g$frame == "n/a", "", g$frame),
+                           ifelse(g$high_impact, "high-impact partner", ""), g$note,
+                           ifelse(nzchar(g$callers), paste0("called by ", g$callers), "")),
+        tier = ifelse(g$likelihood == "HIGH", 1L, 2L), role = "", panels = tag, vaf = NA_real_,
+        source_id = g$ids, genes = vapply(members, paste, character(1), collapse = ","),
+        dp = NA_real_, callers = g$callers, locus = g$locus, loh = FALSE, in_panel = TRUE)
+    }
+  }
+  rbindlist(rows, use.names = TRUE, fill = TRUE)
+}
+
 # ---- findings ------------------------------------------------------------------------------
 
-build_findings = function(variant_table, section_data, all_panels, reference) {
+build_findings = function(variant_table, section_data, all_panels, reference, hmf = NULL) {
   panels = if (is.null(all_panels)) list() else all_panels[vapply(all_panels, is.list, logical(1))]
+  # HMF-built lists take their findings from build_hmf() (kf_hmf_rows()); the generic rules run
+  # over the other lists. Without an HMF result (it failed to load) the list falls back to them.
+  hmf_lists = names(panels)[vapply(panels, kf_is_hmf_panel, logical(1))]
+  if (is.null(hmf) || !is.null(hmf$error)) hmf_lists = character(0)
+  all_list_names = names(panels)
+  panels = panels[setdiff(names(panels), hmf_lists)]
   roles = kf_gene_roles(panels)
   snv_sets = lapply(panels, kf_panel_snv)
   cna = section_data$cna
@@ -882,9 +994,17 @@ build_findings = function(variant_table, section_data, all_panels, reference) {
   sv = kf_small_variant_rows(variant_table, snv_sets, roles, loh_genes)
   n_nonpanel = attr(sv, "n_nonpanel")
   sv_tab = if (!is.null(section_data$sv)) section_data$sv$table else NULL
+  cna_rows = kf_cna_rows(cna, roles, reference)
+  if (length(hmf_lists) && nrow(cna_rows)) {
+    # The copy-number section's gene calls carry every list's name, the HMF one included
+    cna_rows[, panels := vapply(strsplit(panels, ",", fixed = TRUE),
+                                function(p) paste(setdiff(p, hmf_lists), collapse = ","), character(1))]
+    cna_rows = cna_rows[nzchar(panels)]
+  }
   rows = rbindlist(list(empty_findings(), sv,
                         kf_sv_rows(sv_tab, panels, roles),
-                        kf_cna_rows(cna, roles, reference)), use.names = TRUE, fill = TRUE)
+                        cna_rows,
+                        kf_hmf_rows(hmf, hmf_lists)), use.names = TRUE, fill = TRUE)
   if (nrow(rows)) {
     rows[is.na(rescued), rescued := FALSE]
     rows[is.na(ev_tier), ev_tier := tier]
@@ -898,7 +1018,7 @@ build_findings = function(variant_table, section_data, all_panels, reference) {
   if (nrow(rows)) rows[, group_tier := min(tier), by = gene]
   setorder(rows, group_tier, gene, tier, type_rank, -vaf, na.last = TRUE)
   rows[, c("type_rank", "group_tier") := NULL]
-  per_panel_n = vapply(names(panels), function(nm) {
+  per_panel_n = vapply(all_list_names, function(nm) {
     m = rows$tier <= 2L & vapply(strsplit(rows$panels, ",", fixed = TRUE),
                                  function(p) nm %in% p, logical(1))
     length(unique(rows$gene[m]))
@@ -1255,12 +1375,12 @@ KF_SIGNATURE_CONTEXT = "SBS"
 # ---- entry point ---------------------------------------------------------------------------
 
 build_overview = function(variant_table, section_data, all_panels, ascat_pp, tmb_info,
-                          counts, ctx) {
+                          counts, ctx, hmf = NULL) {
   if (is.null(section_data)) section_data = list()
   if (is.null(counts)) counts = list()
   if (is.null(ctx)) ctx = list()
   ref = if (!is.null(ctx$reference)) ctx$reference else NA_character_
-  f = build_findings(variant_table, section_data, all_panels, ref)
+  f = build_findings(variant_table, section_data, all_panels, ref, hmf)
   mode = if (!is.null(ctx$outputs) && !is.null(ctx$outputs$mode)) ctx$outputs$mode else NA_character_
   cna = section_data$cna
   pc = if (!is.null(cna)) purity_disagreement(cna$purity_by_source, ctx$purity_spread_warn,

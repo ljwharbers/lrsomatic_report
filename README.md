@@ -275,8 +275,15 @@ v3.x are both read (columns by name; v2's `IG_*` fusion types and `IG_RANGE` are
 callers' output, not PURPLE or LINX, and the section says so.
 
 The driver panel is also added to the gene lists as **`hmf_driver`** (gene spans from the
-Ensembl cache, role ONCO → oncogene, TSG → tsg). It is not ticked on load: ticking it gives the
-key findings, gene-level copy number and SV panel filter over the HMF driver genes.
+Ensembl cache, role ONCO → oncogene, TSG → tsg), together with the partner genes of the
+known-fusion file for structural variants only (EWSR1, ATF1 and the like are seldom driver-panel
+genes). It is not ticked on load unless `--gene-panel hmf_driver` is given. Ticking it filters the gene-level copy number and SV tables to
+those genes, and fills the overview's **key findings with this section's own calls** rather than
+the generic rules: every reported small variant (tier 1); AMP and DEL from ASCAT or Wakhan
+(tier 1), PARTIAL_AMP (tier 2), a DEL called only by an SV caller (tier 2 up to 3 Mb, tier 3
+above it, since it may be heterozygous); every reported fusion (tier 1 at HMF likelihood HIGH,
+tier 2 otherwise), as one row per gene pair (`EWSR1–ATF1`) naming the callers. If the HMF step
+fails to load, the list falls back to the generic rules.
 
 **Small variants.** A somatic variant in a DriverGenePanel gene is classified on that gene's HMF
 canonical transcript (VEP rows annotated on any other transcript are ignored). When VEP's

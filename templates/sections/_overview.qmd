@@ -172,7 +172,14 @@ table_details(
   "reads “possible biallelic (LOH)”.",
   tags$br(),
   tags$strong("Gene roles"), " (the list's ", tags$code("role"), " column): a truncating variant or homozygous deletion of an ",
-  "oncogene drops to tier 2, amplification of a tumour suppressor is not listed, a biallelic hit in a tumour suppressor is tier 1."
+  "oncogene drops to tier 2, amplification of a tumour suppressor is not listed, a biallelic hit in a tumour suppressor is tier 1.",
+  if (!is.null(HMF) && is.null(HMF$error)) tagList(
+    tags$br(),
+    tags$strong("HMF driver list"), " (", tags$code("hmf_driver"), "): its findings are the HMF driver annotation section's own ",
+    "calls, not the rules above: every reported small variant (tier 1); copy number AMP and DEL from ASCAT or Wakhan (tier 1), ",
+    "PARTIAL_AMP (tier 2), a DEL called only by an SV caller (tier 2 up to ", fmt_bp(KF_FOCAL_SV_MAX), ", tier 3 above, ",
+    "since it may be heterozygous); every reported fusion (tier 1 at HMF likelihood HIGH, else tier 2). The list also holds ",
+    "the known-fusion partner genes, for structural variants only.")
 )
 ```
 

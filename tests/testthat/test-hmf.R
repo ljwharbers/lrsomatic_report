@@ -418,3 +418,53 @@ test_that("a matcher that errors is carried in `failed`, not read as nothing fou
   expect_false(is.null(bad_sv$small))
   expect_null(bad_sv$failed$small)
 })
+
+test_that("the driver gene list adds known-fusion partners, scoped to SVs", {
+  tsv = tempfile(fileext = ".tsv"); on.exit(unlink(tsv))
+  hmf_gene_list_tsv(file.path(hmf_fx, "DriverGenePanel.38.tsv"), file.path(hmf_fx, "ensembl_data"), tsv,
+                    fusions_path = file.path(hmf_fx, "known_fusion_data.38.csv"))
+  p = load_gene_panel(tsv, "hg38")
+  expect_true(all(c("TMPRSS2", "ERG", "ETV4", "EWSR1", "ATF1") %in% p$genes_sv))
+  expect_false("TMPRSS2" %in% p$genes_snv)                  # a fusion partner, not a driver
+  expect_true(all(c("BRAF", "TP53") %in% p$genes_snv))
+  expect_false("IGK" %in% p$genes)                          # not in the Ensembl cache: no span
+})
+
+test_that("the hmf_driver list's key findings are HMF's own calls", {
+  tsv = tempfile(fileext = ".tsv"); on.exit(unlink(tsv))
+  hmf_gene_list_tsv(file.path(hmf_fx, "DriverGenePanel.38.tsv"), file.path(hmf_fx, "ensembl_data"), tsv,
+                    fusions_path = file.path(hmf_fx, "known_fusion_data.38.csv"))
+  hp = load_gene_panel(tsv, "hg38"); hp$name = "hmf_driver"; hp$hmf = TRUE
+  panels = yaml::yaml.load(yaml::as.yaml(list(hmf_driver = hp)))     # as the setup chunk sees it
+  sv = rbind(sv_row("b1", "chr22", 1350L, 1L, "chr12", 1350L, -1L),
+             data.table(id = "d1", caller = "savana", svtype = "DEL", chrom_a = "chr9", pos_a = 30450L,
+                        orient_a = 1L, chrom_b = "chr9", pos_b = 30650L, orient_b = -1L,
+                        gene_a = NA_character_, gene_b = NA_character_), fill = TRUE)
+  sv[, `:=`(svclass = fifelse(svtype == "DEL", "DEL", "translocation"), vaf = 0.4, filter = "PASS")]
+  sd = list(sv = list(table = sv))
+  hmf = build_hmf(hmf_files(), vep_rows(), NULL, sd, list(sex = "female"))
+  f = build_findings(NULL, sd, panels, "hg38", hmf)$findings
+  fus = f[gene == "EWSR1–ATF1"]
+  expect_equal(nrow(fus), 1L)
+  expect_equal(fus[, .(type, tier, panels, genes)],
+               data.table(type = "SV", tier = 1L, panels = "hmf_driver", genes = "EWSR1,ATF1"))
+  expect_match(fus$evidence, "HMF KNOWN_PAIR")
+  expect_match(fus$alteration, "5′ intron 2 → exon 2, 3′ intron 2 → exon 3", fixed = TRUE)
+  braf = f[gene == "BRAF" & type == "small variant"]
+  expect_true(nrow(braf) >= 1L)
+  expect_true(all(braf$tier == 1L) && all(braf$panels == "hmf_driver"))
+  expect_match(braf$evidence[1], "^HMF: hotspot")
+  # CDKN2A's exon deletion by an SV caller alone: tier 2 (focal), named as an SV-caller call
+  tp = f[gene == "CDKN2A" & type == "CNA"]
+  expect_equal(tp[, .(tier, alteration)], data.table(tier = 2L, alteration = "DEL (SV deletion)"))
+  expect_match(tp$evidence, "SAVANA SV")
+  # Nothing from the generic rules is tagged with the HMF list
+  expect_false(any(grepl("translocation|deletion ", f[panels == "hmf_driver"]$alteration)))
+  expect_equal(build_findings(NULL, sd, panels, "hg38", hmf)$per_panel_n[["hmf_driver"]],
+               length(unique(f[tier <= 2]$gene)))
+
+  # Without an HMF result the list falls back to the generic rules
+  g = build_findings(NULL, sd, panels, "hg38", NULL)$findings
+  expect_false(any(grepl("^HMF", g$evidence)))
+  expect_true(any(g$panels == "hmf_driver"))
+})

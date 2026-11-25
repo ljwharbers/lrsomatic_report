@@ -35,6 +35,7 @@ option_list = list(
               help = "Biological sex: male | female | XY | XX (required)"),
   make_option("--gene-panel",  type = "character", default = "none",
               help = paste("Gene panel applied on load: none | builtin name (lymphoid) | path to TSV",
+                           "| hmf_driver (with --hmf-driver-panel)",
                            "(default: none, i.e. unfiltered). Repeatable — pass it several times to",
                            "open with several panels applied at once; a variant or SV is kept if it",
                            "hits any of them.")),
@@ -219,11 +220,14 @@ all_panels = load_all_gene_panels(gene_lists_dir, reference)
 # Ensembl cache, role from likelihoodType, read through the same loader as every list
 if (!is.null(hmf_files$driver_panel)) {
   hmf_tsv = hmf_gene_list_tsv(hmf_files$driver_panel, hmf_files$ensembl_data_dir,
-                              tempfile("hmf_driver", fileext = ".tsv"), reference)
+                              tempfile("hmf_driver", fileext = ".tsv"), reference,
+                              hmf_files$known_fusions)
   nm = unique_panel_name("hmf_driver", names(all_panels))
   all_panels[[nm]] = tryCatch(load_gene_panel(hmf_tsv, reference),
                               error = function(e) abort(conditionMessage(e)))
   all_panels[[nm]]$name = nm
+  # Marks the list whose key findings are HMF's own calls (kf_hmf_rows(), R/key_findings.R)
+  all_panels[[nm]]$hmf = TRUE
   message("HMF driver annotation on: ", paste(names(hmf_files), collapse = ", "))
 }
 
@@ -243,6 +247,9 @@ for (gp in gene_panels) {
     invisible(tryCatch(resolve_gene_panel(gp, gene_lists_dir, reference),
                        error = function(e) abort(conditionMessage(e))))
     default_panels = c(default_panels, gp)
+  } else if (!is.null(hmf_files$driver_panel) && identical(gp, "hmf_driver")) {
+    # The list built from --hmf-driver-panel (registered above, possibly under a suffixed name)
+    default_panels = c(default_panels, names(all_panels)[vapply(all_panels, function(p) isTRUE(p$hmf), logical(1))])
   } else if (file.exists(gp)) {
     # User-supplied TSV: register alongside the builtins so it is selectable in the report
     nm = unique_panel_name(tools::file_path_sans_ext(basename(gp)), names(all_panels))
@@ -251,7 +258,8 @@ for (gp in gene_panels) {
     default_panels = c(default_panels, nm)
   } else {
     abort(paste0("--gene-panel not found: tried builtin '", gp,
-                 "' and as a file path. Use 'none' for no filtering."))
+                 "' and as a file path. Use 'none' for no filtering",
+                 if (identical(gp, "hmf_driver")) " ('hmf_driver' needs --hmf-driver-panel)" else "", "."))
   }
 }
 default_panels = unique(default_panels)

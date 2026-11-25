@@ -522,7 +522,8 @@ hmf_copy_number = function(cna, sv_table, res, sex = "female") {
   empty = data.table(gene = character(), chrom = character(), start = integer(), end = integer(),
                      source = character(), call = character(), min_cn = numeric(),
                      max_cn = numeric(), threshold = numeric(), coverage = numeric(),
-                     note = character(), role = character(), support = character())
+                     note = character(), role = character(), support = character(),
+                     sv_size = numeric())
   per = list()
   if (!is.null(cna)) {
     wk = if (length(cna$profiles) > 0) cna$profiles[[1]] else NULL
@@ -544,7 +545,8 @@ hmf_copy_number = function(cna, sv_table, res, sex = "female") {
   if (!is.null(svd))
     rows = rbind(rows, svd[, .(gene, chrom, start, end, source, call, min_cn = NA_real_,
                                max_cn = NA_real_, threshold = NA_real_, coverage = NA_real_,
-                               note, role)], fill = TRUE)
+                               note, role, sv_size = as.numeric(sv_end - sv_start + 1))], fill = TRUE)
+  if (nrow(rows) > 0 && !"sv_size" %in% names(rows)) rows[, sv_size := NA_real_]
   out = if (nrow(rows) > 0) rows else empty
   if (nrow(out) > 0) {
     # PARTIAL_AMP and AMP agree on direction; DEL stands alone
@@ -905,18 +907,28 @@ build_hmf = function(hmf_files, vep_data, variant_table, section_data, ctx) {
 # The driver panel as a report gene list (Key Findings chip): gene, canonical gene span from
 # the Ensembl cache, role from likelihoodType. Written as a TSV so load_gene_panel() — the one
 # loader every list goes through — reads it. Returns the path written
-hmf_gene_list_tsv = function(panel_path, ensembl_dir, out_path, reference = "hg38") {
+# The partner genes of the known-fusion file (`fusions_path`, optional) are added with
+# applies_to = sv: a fusion partner such as EWSR1 or ATF1 is rarely a DriverGenePanel gene, and
+# without it ticking hmf_driver would hide those SVs from the SV table and the circos
+hmf_gene_list_tsv = function(panel_path, ensembl_dir, out_path, reference = "hg38",
+                             fusions_path = NULL) {
   panel = hmf_read_panel(panel_path)
+  fusion_genes = if (!is.null(fusions_path)) {
+    fu = hmf_read_fusions(fusions_path)
+    setdiff(unique(na.omit(c(fu$five_gene, fu$three_gene))), panel$gene)
+  } else character(0)
   g = fread(file.path(ensembl_dir, "ensembl_gene_data.csv"), sep = ",", colClasses = "character",
             select = c("GeneName", "Chromosome", "GeneStart", "GeneEnd"))
-  g = unique(g[GeneName %in% panel$gene], by = "GeneName")
-  dt = merge(panel[, .(gene, role)], g, by.x = "gene", by.y = "GeneName", all.x = TRUE)
+  g = unique(g[GeneName %in% c(panel$gene, fusion_genes)], by = "GeneName")
+  genes = rbind(panel[, .(gene, role, applies_to = "")],
+                data.table(gene = fusion_genes, role = NA_character_, applies_to = rep("sv", length(fusion_genes))))
+  dt = merge(genes, g, by.x = "gene", by.y = "GeneName", all.x = TRUE)
   dt = dt[!is.na(Chromosome)]
   out = dt[, .(gene, chrom = ensure_chr_prefix(Chromosome), start = GeneStart, end = GeneEnd,
-               role = fifelse(is.na(role), "", role))]
+               role = fifelse(is.na(role), "", role), applies_to)]
   con = file(out_path, "w")
   writeLines(c(paste0("# reference: ", reference),
-               "# HMF DriverGenePanel genes; spans from the HMF Ensembl data cache"), con)
+               "# HMF DriverGenePanel genes, plus known-fusion partners (applies_to sv); spans from the HMF Ensembl data cache"), con)
   close(con)
   fwrite(out, out_path, sep = "\t", append = TRUE, col.names = TRUE)
   out_path
