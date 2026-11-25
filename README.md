@@ -310,7 +310,7 @@ Copy number above), so a gene there is "uncovered" rather than deleted; the foot
 gap can hide a homozygous deletion. In addition, every **deletion called by an SV caller**
 (Severus DEL, SAVANA `+-` pair) that removes canonical exons of a `reportDeletion` gene is listed
 — whatever the copy number says, and possibly heterozygous, and however large (SAVANA's typed `+-`
-pairs can span tens of Mb). "Called by" names every source making the same call for the gene.
+pairs can span tens of Mb). A gene called by several sources has one row per source, side by side.
 No call is dropped: a **Show** switch above the copy-number and fusion tables turns each source
 (ASCAT, Wakhan, Severus SV, SAVANA SV; Severus, SAVANA) off and on in the browser.
 

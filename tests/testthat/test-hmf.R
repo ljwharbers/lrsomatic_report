@@ -174,7 +174,7 @@ test_that("ASCAT and Wakhan are called separately; a gene no Wakhan segment cove
   expect_equal(cn[gene == "MYC", source], "Wakhan")          # 10 > 3 x 2; ASCAT's 5 is not
   expect_equal(cn[gene == "MYC", call], "AMP")
   expect_setequal(cn[gene == "CDKN2A", source], c("Wakhan", "ASCAT"))
-  expect_equal(unique(cn[gene == "CDKN2A", support]), "Wakhan, ASCAT")
+  expect_false("support" %in% names(cn))                    # the Source column already says it
   # TP53: deleted on ASCAT, uncovered (no reads) on Wakhan
   expect_equal(cn[gene == "TP53", source], "ASCAT")
   expect_true("TP53" %in% attr(cn, "uncovered")$wakhan)

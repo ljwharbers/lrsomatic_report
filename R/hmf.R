@@ -516,14 +516,14 @@ hmf_exon_label = function(first, last, n_hit, n_exons)
                   paste0("exons ", first, "–", last, " of ", n_exons)))
 
 # Copy-number driver calls: ASCAT and Wakhan each called on their own segments and ploidy,
-# plus deletions called by the SV callers. One row per gene x source with a call; `support`
-# lists every source calling the same type for the gene. `cna` is SECTION_DATA$cna
+# plus deletions called by the SV callers. One row per gene x source with a call, a gene's rows
+# adjacent (sorted by gene, then source), so agreement between sources reads down the Source
+# column. `cna` is SECTION_DATA$cna
 hmf_copy_number = function(cna, sv_table, res, sex = "female") {
   empty = data.table(gene = character(), chrom = character(), start = integer(), end = integer(),
                      source = character(), call = character(), min_cn = numeric(),
                      max_cn = numeric(), threshold = numeric(), coverage = numeric(),
-                     note = character(), role = character(), support = character(),
-                     sv_size = numeric())
+                     note = character(), role = character(), sv_size = numeric())
   per = list()
   if (!is.null(cna)) {
     wk = if (length(cna$profiles) > 0) cna$profiles[[1]] else NULL
@@ -549,10 +549,6 @@ hmf_copy_number = function(cna, sv_table, res, sex = "female") {
   if (nrow(rows) > 0 && !"sv_size" %in% names(rows)) rows[, sv_size := NA_real_]
   out = if (nrow(rows) > 0) rows else empty
   if (nrow(out) > 0) {
-    # PARTIAL_AMP and AMP agree on direction; DEL stands alone
-    out[, dir := fifelse(call == "DEL", "DEL", "AMP")]
-    out[, support := paste(unique(source), collapse = ", "), by = .(gene, dir)]
-    out[, dir := NULL]
     src_rank = function(x) fifelse(x == "Wakhan", 1L, fifelse(x == "ASCAT", 2L, 3L))
     out = out[order(call != "DEL", match(chrom, paste0("chr", c(1:22, "X", "Y"))), start, gene, src_rank(source))]
   }

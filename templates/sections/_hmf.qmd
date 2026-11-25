@@ -101,12 +101,11 @@ if (!is.null(HMF$failed$cn)) {
       tags$td(class = "cna-genes__source", r$source),
       tags$td(class = "cna-genes__num", if (is.na(r$min_cn)) "–" else if (r$min_cn == r$max_cn) hmf_fmt(r$min_cn) else paste0(hmf_fmt(r$min_cn), "–", hmf_fmt(r$max_cn))),
       tags$td(class = "cna-genes__num", hmf_fmt(r$threshold)),
-      tags$td(r$support),
       tags$td(if (is.na(r$role)) "" else r$role),
       tags$td(class = "cna-genes__source", r$note)
     )
   })
-  hmf_filtered(hmf_table(c("Gene", "Exons", "Call", "Source", "Total CN", "AMP threshold", "Called by", "Role", "Note"), trs),
+  hmf_filtered(hmf_table(c("Gene", "Exons", "Call", "Source", "Total CN", "AMP threshold", "Role", "Note"), trs),
                cn$source)
 }
 ```
@@ -185,7 +184,7 @@ table_details(
          "PARTIAL_AMP = only the maximum exceeds it. Gated by reportDeletion / reportAmplification. Wakhan segments with no reads ",
          "on either haplotype are treated as uncovered, not as CN 0. In addition, every deletion called by an SV caller (Severus DEL, ",
          "SAVANA +− pair) that removes canonical exons of a reportDeletion gene is listed, whatever the copy number says; such a ",
-         "deletion may be heterozygous. “Called by” lists every source making the same call for the gene. ",
+         "deletion may be heterozygous. A gene called by several sources has one row per source. ",
          paste(unlist(lapply(names(unc), function(s) if (length(unc[[s]]))
            paste0(c(wakhan = "Wakhan", ascat = "ASCAT")[s], ": ", length(unc[[s]]), " flagged gene", if (length(unc[[s]]) == 1) "" else "s",
                   " without segment coverage (", paste(utils::head(unc[[s]], 10), collapse = ", "),
