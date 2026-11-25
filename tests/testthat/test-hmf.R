@@ -48,8 +48,8 @@ test_that("a v3 panel's extra columns are read, and absent flags read as false",
 test_that("known fusions: types, exon ranges and IG/ENHANCER overrides in both formats", {
   fu = hmf_read_fusions(file.path(hmf_fx, "known_fusion_data.38.csv"))
   expect_equal(attr(fu, "format"), "v2 (IG_*)")
-  expect_setequal(fu$type, c("KNOWN_PAIR", "PROMISCUOUS_3", "EXON_DEL_DUP", "ENHANCER_KNOWN_PAIR",
-                             "ENHANCER_PROMISCUOUS"))
+  expect_setequal(fu$type, c("KNOWN_PAIR", "PROMISCUOUS_3", "PROMISCUOUS_5", "EXON_DEL_DUP",
+                             "ENHANCER_KNOWN_PAIR", "ENHANCER_PROMISCUOUS"))
   alk = fu[three_gene == "ALK"]
   expect_equal(c(alk$down_min, alk$down_max), c(3L, 4L))
   expect_true(alk$high_impact)
@@ -70,7 +70,7 @@ test_that("known fusions: types, exon ranges and IG/ENHANCER overrides in both f
 
 test_that("the Ensembl cache keeps canonical transcripts only, ranked, chr-prefixed", {
   ens = hmf_read_ensembl(file.path(hmf_fx, "ensembl_data"))
-  expect_equal(nrow(ens$genes), 8L)
+  expect_equal(nrow(ens$genes), 12L)
   expect_true(all(startsWith(ens$genes$chrom, "chr")))
   expect_false(any(startsWith(ens$exons$transcript, "ENST9")))
   expect_equal(ens$exons[gene == "TP53", rank], 1:4)
@@ -162,9 +162,9 @@ cn_seg = function(chrom, start, end, total, zero = FALSE) {
              conf_b = NA_real_, zero_coverage = zero)
 }
 
-test_that("ASCAT and Wakhan are called separately; zero-coverage Wakhan segments are no data", {
-  wk = rbind(cn_seg("chr8", 49000, 52000, 10), cn_seg("chr9", 29000, 32000, 0),
-             cn_seg("chr17", 19000, 22000, 0, zero = TRUE))
+test_that("ASCAT and Wakhan are called separately; a gene no Wakhan segment covers is uncovered", {
+  # chr17's zero-coverage gap segment is what cna_parse() leaves out (cna_gap_segments())
+  wk = rbind(cn_seg("chr8", 49000, 52000, 10), cn_seg("chr9", 29000, 32000, 0))
   as = rbind(cn_seg("chr8", 49000, 52000, 5), cn_seg("chr9", 29000, 32000, 0),
              cn_seg("chr17", 19000, 22000, 0))
   cna = list(source = "wakhan", ploidy = 2, segments = wk,
@@ -231,12 +231,48 @@ test_that("a promiscuous 3' partner fuses with any gene, within its exon range",
   expect_equal(fu2$likelihood, "LOW"); expect_false(fu2$high_impact)
 })
 
-test_that("an exonic breakend cannot make a promiscuous fusion reportable", {
-  # EML4 (+) exon 3 -> ALK (-) intron 2: no phase check on the exonic side
-  fu = hmf_fusions(sv_row("p3", "chr2", 1450L, 1L, "chr2", 5450L, 1L), hmf_res())
-  expect_equal(fu$type, "PROMISCUOUS_3")
-  expect_equal(fu$frame, "exonic (unchecked)")
-  expect_false(fu$reported)
+test_that("exonic breakends are phased the way LINX phases them", {
+  # EML4 exon 3 -> ALK intron 2: EML4 splices round exon 3 (start phase 2) = ALK exon 3 start phase 2
+  fu = hmf_fusions(sv_row("x1", "chr2", 1450L, 1L, "chr2", 5450L, 1L), hmf_res())
+  expect_equal(fu[, .(type, five_exon, frame, reported)],
+               data.table(type = "PROMISCUOUS_3", five_exon = "exon 3 → exon 2", frame = "inframe", reported = TRUE))
+  # EML4 exon 2 (start phase 1) -> ALK intron 2 (phase 2): out of frame, not reported
+  fu = hmf_fusions(sv_row("x2", "chr2", 1250L, 1L, "chr2", 5450L, 1L), hmf_res())
+  expect_equal(fu[, .(frame, reported)], data.table(frame = "out-of-frame", reported = FALSE))
+  # Exon to exon, exact base phase: EML4 1450 is base phase 2; ALK 5349 is 0 = tick(2), 5350 is 2
+  expect_equal(hmf_exonic_base_phase(data.table(start = 1400L, end = 1500L, phase = 2L), 1050L, 1750L, 1L, 1450L), 2L)
+  expect_equal(hmf_fusions(sv_row("x3", "chr2", 1450L, 1L, "chr2", 5349L, 1L), hmf_res())$frame, "inframe")
+  expect_equal(hmf_fusions(sv_row("x4", "chr2", 1450L, 1L, "chr2", 5350L, 1L), hmf_res())[, .(frame, reported)],
+               data.table(frame = "out-of-frame", reported = FALSE))
+})
+
+test_that("5'UTR, upstream and known-pair phasing follow LINX's rules", {
+  # TMPRSS2 (+, CDS 1250-1650, intron 1 is 5'UTR) is PROMISCUOUS_5; ETV1 (+, CDS 1450-1850)
+  # has 5'UTR introns 1-2 and a 3'UTR intron 5; ERG and ETV4 are its known pairs, CDS in exon 1
+  fu = function(...) hmf_fusions(sv_row(...), hmf_res())
+  # 5'UTR -> 5'UTR: -1 == -1, the 3' partner's own start codon is used
+  u = fu("u1", "chr21", 1150L, 1L, "chr7", 1150L, -1L)
+  expect_equal(u[, .(type, three_exon, frame, reported)],
+               data.table(type = "PROMISCUOUS_5", three_exon = "intron 1 → exon 2",
+                          frame = "inframe (5′UTR)", reported = TRUE))
+  # Upstream of the 3' gene: exon 1 has no splice acceptor, so exon 2 is fused
+  u = fu("u2", "chr21", 1150L, 1L, "chr7", 500L, -1L)
+  expect_equal(u[, .(three_exon, reported)], data.table(three_exon = "upstream → exon 2", reported = TRUE))
+  # No fusion: a 3' breakend in the 3'UTR; coding -> 5'UTR; 5'UTR -> coding for a promiscuous partner
+  expect_equal(nrow(fu("u3", "chr21", 1150L, 1L, "chr7", 1920L, -1L)), 0L)
+  expect_equal(nrow(fu("u4", "chr21", 1350L, 1L, "chr7", 1150L, -1L)), 0L)
+  expect_equal(nrow(fu("u5", "chr21", 1150L, 1L, "chr7", 1550L, -1L)), 0L)
+  # Coding -> upstream of a gene whose CDS starts in exon 1: coding, exon 2's start phase
+  u = fu("u6", "chr21", 1350L, 1L, "chr12", 500L, -1L)
+  expect_equal(u[, .(frame, reported)], data.table(frame = "inframe", reported = TRUE))
+  # Known pair out of frame from coding sequence (no skip phasing): not reported
+  u = fu("k1", "chr22", 1150L, 1L, "chr12", 1350L, -1L)
+  expect_equal(u[, .(type, frame, reported)], data.table(type = "KNOWN_PAIR", frame = "out-of-frame", reported = FALSE))
+  # Known pair from the 5'UTR into coding: only when > 1 Mb apart or on another chromosome
+  u = fu("k2", "chr21", 1150L, 1L, "chr21", 900150L, -1L, "DEL")
+  expect_equal(u[, .(three_gene, frame, reported)], data.table(three_gene = "ERG", frame = "5′UTR to coding", reported = FALSE))
+  u = fu("k3", "chr21", 1150L, 1L, "chr17", 1350L, -1L)
+  expect_equal(u[, .(three_gene, frame, reported)], data.table(three_gene = "ETV4", frame = "5′UTR to coding", reported = TRUE))
 })
 
 test_that("a promiscuous enhancer needs a 3' gene beside its partner, and none inside the locus", {
@@ -357,4 +393,28 @@ test_that("the hmf_driver gene list carries the reference it was built for", {
   hmf_gene_list_tsv(file.path(hmf_fx, "DriverGenePanel.38.tsv"), file.path(hmf_fx, "ensembl_data"), tsv, "t2t")
   expect_equal(load_gene_panel(tsv, "t2t")$reference, "t2t")
   expect_error(load_gene_panel(tsv, "hg38"), "declares reference")
+})
+
+test_that("a matcher that errors is carried in `failed`, not read as nothing found", {
+  ok = build_hmf(hmf_files(), vep_rows(), NULL, list(), list(sex = "female"))
+  expect_length(ok$failed, 0L)
+
+  # small variants: a VEP table without hgvsp breaks hmf_small_variants(); the others still run
+  sv = sv_row("b1", "chr22", 1350L, 1L, "chr12", 1350L, -1L)
+  bad_vep = expect_message(
+    build_hmf(hmf_files(), vep_rows()[, !"hgvsp"], NULL, list(sv = list(table = sv)), list()),
+    "small-variant matching failed")
+  expect_null(bad_vep$small)
+  expect_match(bad_vep$failed$small, "hgvsp")
+  expect_null(bad_vep$failed$fusions)
+  expect_equal(bad_vep$fusions$five_gene, "EWSR1")
+
+  # copy number: an SV table without `id` breaks hmf_sv_deletions() inside hmf_copy_number()
+  del = data.table(svtype = "DEL", chrom_a = "chr9", pos_a = 1L, chrom_b = "chr9", pos_b = 1e7L,
+                   orient_a = 1L, orient_b = -1L, vaf = 0.3)
+  bad_sv = suppressMessages(build_hmf(hmf_files(), vep_rows(), NULL, list(sv = list(table = del)), list()))
+  expect_match(bad_sv$failed$cn, "'id' not found")
+  expect_null(bad_sv$cn)
+  expect_false(is.null(bad_sv$small))
+  expect_null(bad_sv$failed$small)
 })

@@ -36,8 +36,9 @@
 #
 # Wakhan segments come from the rank's integer_profile.bed, or — Wakhan builds that write
 # none — from bed_output/*_copynumbers_segments_HP_{1,2}.bed (parse_wakhan_hp_segments(),
-# which adds a zero_coverage column). Zero-coverage segments are dropped here, for every
-# consumer (gene calls, genome metrics, circos, HMF): no reads is no data, not CN 0.
+# which adds a zero_coverage column). Zero-coverage segments over a reference gap band are
+# dropped here, for every consumer (gene calls, genome metrics, circos, HMF): no reads there is
+# no data, not CN 0. Off the gaps they stay, as a homozygous deletion (cna_gap_segments()).
 #
 # Precedence. Segments: Wakhan rank-1 integer_profile.bed, else ASCAT segments_raw.txt.
 # Purity/ploidy are those of `source`, so the call thresholds and the segments share one
@@ -93,6 +94,21 @@ cna_call = function(total, minor, ploidy, expected) {
 
 # Genome-level metrics over the autosomes, as fractions of the autosomal length covered by
 # segments: WGD when the major allele is >= 2 over more than half of it
+# Which zero-coverage segments overlap a reference gap band (acen / gvar / stalk) of `cytobands`
+# (load_cytobands()). Without cytobands every zero-coverage segment counts as a gap
+CNA_GAP_STAINS = c("acen", "gvar", "stalk")
+cna_gap_segments = function(seg, cytobands = NULL) {
+  zc = seg$zero_coverage %in% TRUE
+  if (is.null(cytobands) || !any(zc)) return(zc)
+  gap = as.data.table(cytobands)[stain %in% CNA_GAP_STAINS,
+                                 .(chrom, start = as.numeric(start), end = as.numeric(end))]
+  setkey(gap, chrom, start, end)
+  q = data.table(i = seq_len(nrow(seg)), chrom = as.character(seg$chrom),
+                 start = as.numeric(seg$start), end = as.numeric(seg$end))
+  hit = foverlaps(q, gap, by.x = c("chrom", "start", "end"), nomatch = NULL)$i
+  zc & seq_len(nrow(seg)) %in% hit
+}
+
 cna_genome_metrics = function(segments) {
   na = list(wgd = NA, loh_fraction = NA_real_, major2_fraction = NA_real_, autosomal_bp = 0)
   if (is.null(segments) || nrow(segments) == 0) return(na)
@@ -303,11 +319,15 @@ cna_parse = function(inputs, section_data, ctx) {
     seg = if (!is.null(p$bed_hp2)) parse_wakhan_hp_segments(p$bed, p$bed_hp2)
           else parse_wakhan_integer_profile(p$bed)
     if (is.null(seg) || nrow(seg) == 0) return(NULL)
-    # No reads on either haplotype is no data, not CN 0: left out, so a gene there reads "no segment"
+    # No reads on either haplotype over a reference gap (centromere, heterochromatin, acrocentric
+    # stalk) is no data, not CN 0: left out, so a gene there reads "no segment". Off the gaps a
+    # zero-coverage segment is kept: a clonal homozygous deletion has no reads either (DMD on
+    # COLO829-PB, which ASCAT also calls 0/0)
     n_zero = 0L
     if ("zero_coverage" %in% names(seg)) {
-      n_zero = sum(seg$zero_coverage)
-      seg = seg[zero_coverage == FALSE]
+      drop = cna_gap_segments(seg, ctx$cytobands)
+      n_zero = sum(drop)
+      seg = seg[!drop]
       if (nrow(seg) == 0) return(NULL)
     }
     r = sol_row(p$rank)

@@ -18,6 +18,10 @@ hmf_table = function(header, rows) {
 hmf_status = function(reported, label = if (reported) "reported" else "not reported")
   tags$span(class = paste0("hmf-status hmf-status--", if (reported) "on" else "off"), label)
 hmf_err = HMF$error
+# A part whose matcher errored (build_hmf()'s `failed`): a warning, never the "nothing found" notice
+hmf_failed = function(part, what)
+  section_notice(paste0("HMF ", what, " failed, so this table is missing, not empty: ",
+                        HMF$failed[[part]]), warn = TRUE)
 hmf_caller_label = function(x) ifelse(x %in% "severus", "Severus", ifelse(x %in% "savana", "SAVANA", x))
 # Every caller's calls are kept; the reader switches sources off here instead (script at the end of
 # this file). Rows carry data-source; the bar shows only when there are two or more sources
@@ -43,7 +47,9 @@ cat("::: {.panel-tabset}\n\n### Small variants\n\n")
 
 ```{r hmf-small, eval=!is.null(HMF) && is.null(HMF$error)}
 sm = HMF$small
-if (is.null(sm) || nrow(sm) == 0) {
+if (!is.null(HMF$failed$small)) {
+  hmf_failed("small", "small-variant matching")
+} else if (is.null(sm) || nrow(sm) == 0) {
   section_notice("No somatic small variant falls on a coding effect of an HMF driver gene's canonical transcript, or on a known hotspot.")
 } else {
   n_rep = sum(sm$reported)
@@ -77,7 +83,9 @@ cat("\n\n### Copy number\n\n")
 ```{r hmf-cn, eval=!is.null(HMF) && is.null(HMF$error)}
 cn = HMF$cn
 cn_sources = attr(cn, "sources")
-if (length(cn_sources) == 0 && (is.null(cn) || nrow(cn) == 0)) {
+if (!is.null(HMF$failed$cn)) {
+  hmf_failed("cn", "copy-number calling")
+} else if (length(cn_sources) == 0 && (is.null(cn) || nrow(cn) == 0)) {
   section_notice("No copy-number segments (ASCAT or Wakhan) and no SV-caller deletion over an HMF driver gene, so there are no HMF amplification or deletion calls.")
 } else if (is.null(cn) || nrow(cn) == 0) {
   section_notice(paste0("No HMF driver gene flagged for amplification or deletion is amplified or deleted (",
@@ -113,6 +121,8 @@ if (is.null(HMF$files$known_fusions)) {
   section_notice("No known-fusion file was given (--hmf-known-fusions), so SVs were not matched against HMF's known fusions.")
 } else if (is.null(SECTION_DATA$sv) || is.null(SECTION_DATA$sv$table) || nrow(SECTION_DATA$sv$table) == 0) {
   section_notice("No structural variants were found, so there are no fusions to match.")
+} else if (!is.null(HMF$failed$fusions)) {
+  hmf_failed("fusions", "fusion matching")
 } else if (is.null(fu) || nrow(fu) == 0) {
   section_notice("No structural variant matches an HMF known fusion pair, promiscuous partner, exon deletion/duplication or enhancer region.")
 } else {
@@ -145,7 +155,8 @@ cat("\n\n:::\n\n")
 ```{r hmf-details, eval=!is.null(HMF) && is.null(HMF$error)}
 f = HMF$files
 given = function(x, what) if (is.null(x)) paste0(what, ": not given") else paste0(what, ": ", basename(x))
-cn_txt = if (length(attr(HMF$cn, "sources"))) paste(unname(attr(HMF$cn, "sources")), collapse = " and ") else "no copy-number segments"
+cn_txt = if (!is.null(HMF$failed$cn)) "copy-number calling failed" else
+         if (length(attr(HMF$cn, "sources"))) paste(unname(attr(HMF$cn, "sources")), collapse = " and ") else "no copy-number segments"
 unc = attr(HMF$cn, "uncovered")
 lifted = identical(HMF$reference, "t2t")
 vep_tx = identical(attr(HMF$small, "transcript_rule"), "vep_canonical")
@@ -186,9 +197,12 @@ table_details(
          "enhancer range, partner gene within ", fmt_bp(HMF_UPSTREAM_ENHANCER), "; promiscuous ones need a 3′ gene there too, and an SV ",
          "with both breakends inside the range is a rearrangement within the locus, not a fusion) and enhancer targets. A 3′ breakend may lie up to ",
          fmt_bp(HMF_UPSTREAM_KNOWN), " upstream of a known-pair or high-impact gene, ", fmt_bp(HMF_UPSTREAM_DEFAULT),
-         " otherwise. Promiscuous fusions are reported only in frame, so never with an (unphased) exonic breakend."),
+         " otherwise. Frame follows LINX: fused-exon phases (exon to exon: the exact breakend-base phase), a 5′UTR → 5′UTR join ",
+         "is in frame, a 3′ breakend upstream of its gene fuses to exon 2, and skipping exons can restore the frame. Promiscuous ",
+         "fusions are reported only in frame; a known pair out of frame only from a 5′UTR or non-coding 5′ breakend more than ",
+         fmt_bp(HMF_UNPHASED_KNOWN_MIN), " away or on another chromosome."),
   tags$p(tags$strong("Approximations: "), "no dNdS driver likelihood, biallelic or germline calls; single-SV fusions only ",
-         "(LINX chains SVs); no protein-domain or NMD checks; exonic breakends are not phase-checked; VEP's splice ",
+         "(LINX chains SVs); no protein-domain or NMD checks; canonical transcripts only; VEP's splice ",
          "consequences stand in for PURPLE's splice definition; under VEP --per_gene, effects seen only on a non-canonical ",
          "transcript (e.g. CDKN2A p14ARF) are not classified; copy number comes from long-read segments, not PURPLE's ",
          "purity-adjusted fit, and segmental-duplication genes can be called falsely deleted.",

@@ -360,9 +360,27 @@ test_that("Wakhan builds without integer_profile.bed are read from bed_output/ H
   res = cna_parse(inputs, list(), list(sex = "female", all_panels = p))
   expect_equal(res$source, "wakhan")
   expect_equal(res$ploidy, 2.1)
-  expect_equal(res$segments$total, 3)                  # the zero-coverage segment is dropped
+  expect_equal(res$segments$total, 3)    # without cytobands, every zero-coverage segment is a gap
   expect_equal(res$profiles[[1]]$n_zero_coverage, 1L)
   g = res$genes
   expect_equal(g[gene == "KEPT", call], "gain")
   expect_true(is.na(g[gene == "GAPG", call]))
+
+  # With cytobands only a zero-coverage segment over a gap band is no data; one off the gaps is a
+  # real homozygous deletion and stays
+  for (n in 1:2) writeLines(c("#chr: chromosome number",
+    "#chr\tstart\tend\tcoverage\tcopynumber_state\tconfidence\tsvs_breakpoints_ids",
+    sprintf("chr1\t%d\t%d\t%s\t%s\t0.9\t[]", c(0L, 1001L, 6001L), c(1000L, 5000L, 9000L),
+            c("10.5", "0.0", "0.0"), c(n, 0, 0))),
+    file.path(bo, paste0("S2_2.1_0.8_0.9_copynumbers_segments_HP_", n, ".bed")))
+  bands = data.frame(chrom = "chr1", start = c(0, 1000, 5500), end = c(1000, 5500, 20000),
+                     name = c("p1", "p2", "p3"), stain = c("gneg", "acen", "gneg"))
+  p$p = fake_panel(c("KEPT", "GAPG", "HOMDEL"), rep("chr1", 3), c(100, 2000, 7000), c(200, 3000, 8000),
+                   c("KEPT", "GAPG", "HOMDEL"))
+  res = cna_parse(cna_locate(d, "S2"), list(), list(sex = "female", all_panels = p, cytobands = bands))
+  expect_equal(res$segments$total, c(3, 0))
+  expect_equal(res$profiles[[1]]$n_zero_coverage, 1L)
+  g = res$genes
+  expect_true(is.na(g[gene == "GAPG", call]))
+  expect_equal(g[gene == "HOMDEL", call], "homozygous deletion")
 })

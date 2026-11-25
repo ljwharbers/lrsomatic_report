@@ -28,6 +28,7 @@ HMF_AMP_RATIO_DEFAULT   = 3       # AMP: gene minimum exonic CN above ratio x pl
 HMF_UPSTREAM_DEFAULT    = 10000   # 3' breakend upstream of the gene: promiscuous partners
 HMF_UPSTREAM_KNOWN      = 100000  # ... known pairs and high-impact promiscuous partners
 HMF_UPSTREAM_ENHANCER   = 1000000 # 3' gene distance from an IG/enhancer-range breakend
+HMF_UNPHASED_KNOWN_MIN  = 1000000 # an out-of-frame known pair is reported only further apart (LINX SHORT_UNPHASED_DISTANCE_KNOWN)
 HMF_SPLICE_CONSEQUENCES = c("splice_donor_variant", "splice_acceptor_variant",
                             "splice_donor_5th_base_variant")
 
@@ -442,15 +443,14 @@ hmf_small_variants = function(vep_data, variant_table, res) {
 # ---- Copy number -----------------------------------------------------------------------
 
 # PURPLE's gene calls from one segment set: min/max total CN over the canonical exons of every
-# panel gene flagged for amplification or deletion. Segments with no reads on either haplotype
-# (Wakhan `zero_coverage`) carry no information and are left out, so a gene inside an
-# unmappable gap reads as uncovered rather than deleted
+# panel gene flagged for amplification or deletion. Wakhan's zero-coverage segments over
+# reference gaps were already left out by cna_parse() (cna_gap_segments()), so a gene inside an
+# unmappable gap reads as uncovered; one off the gaps is kept, as the homozygous deletion it is
 hmf_cn_calls = function(segments, ploidy, label, res, sex = "female") {
   panel = res$panel[(report_amplification | report_deletion) & !is.na(gene_id)]
   ex = res$ensembl$exons[gene %in% panel$gene]
   if (is.null(segments) || nrow(segments) == 0 || nrow(ex) == 0) return(NULL)
   seg = copy(segments)
-  if ("zero_coverage" %in% names(seg)) seg = seg[!(zero_coverage %in% TRUE)]
   seg = seg[!is.na(total), .(chrom = ensure_chr_prefix(chrom), start = as.integer(start),
                             end = as.integer(end), total = as.numeric(total))]
   setkey(seg, chrom, start, end)
@@ -563,10 +563,33 @@ hmf_copy_number = function(cna, sv_table, res, sex = "female") {
 
 # ---- Fusions ---------------------------------------------------------------------------
 
-# Every canonical transcript a breakend can belong to, as 5' or 3' partner. Region: exon k,
-# intron k (after exon k), or upstream of the gene (3' partner only). The fused exon is the
-# last exon kept for a 5' partner (k; for an exonic breakend the exon itself) and the first
-# exon kept for a 3' partner (k + 1 after intron k, exon 1 when upstream)
+# LINX's exonic base phase (hmf-common TranscriptUtils.calcExonicCodingPhase): the HMF phase of
+# the base at `pos` in exon `e` (coding bases up to and including it), -1 outside the CDS. The
+# first coding base of an exon is tick(ExonPhase), so a base's phase is (ExonPhase + n) mod 3,
+# with ExonPhase -1 read as 0 where the CDS starts in this exon
+hmf_exonic_base_phase = function(e, cs, ce, strand, pos) {
+  if (is.na(cs) || pos < cs || pos > ce) return(-1L)
+  plus = strand == 1L
+  n = if (plus) pos - max(e$start, cs) + 1L else min(e$end, ce) - pos + 1L
+  before = if (plus) cs < e$start else ce > e$end      # the CDS started in an earlier exon
+  as.integer(((if (before) e$phase else 0L) + n) %% 3L)
+}
+
+# Every canonical transcript a breakend can belong to, as 5' or 3' partner, the way LINX places
+# it (linx BreakendGenePrep / BreakendTransData):
+#   - region: exon k, intron k (after exon k), or upstream of the gene (3' partner only)
+#   - context: coding / 5utr / 3utr / noncoding, from the position against the CDS; a 3' partner
+#     must be coding, have a splice acceptor (>= 2 exons) and not be broken in its 3'UTR
+#   - fused exon and phase, for a partner that is not itself exonic-to-exonic: the last exon kept
+#     for a 5' partner (k after intron k; k - 1 for exon k, which is spliced round), with its end
+#     phase; the first exon kept for a 3' partner (k + 1 after intron k or exon k; exon 2 when
+#     upstream, since exon 1 has no splice acceptor), with its start phase, -1 where that exon
+#     starts at the start codon. A 5' breakend in its 3'UTR gets phase -2, which matches nothing
+#   - base_phase: for an exonic breakend, the phase of the breakend base itself, used when both
+#     breakends are exonic (exact base phasing)
+#   - alt_phases: phases reachable by skipping exons (LINX setAlternativeTranscriptPhasings): end
+#     phases of the 5' exons before the fused one, start phases of the 3' exons after it (-2 in
+#     the 3'UTR)
 hmf_annotate_breakend = function(bk_chrom, pos, orient, res, upstream) {
   tr = res$ensembl$transcripts
   ex = res$ensembl$exons
@@ -586,28 +609,93 @@ hmf_annotate_breakend = function(bk_chrom, pos, orient, res, upstream) {
     t = cand[i]
     e = if (!is.null(res$ensembl$exons_by_gene)) res$ensembl$exons_by_gene[[t$gene_id]] else ex[gene_id == t$gene_id]
     is_5p = t$strand == orient
-    if (!is_5p && is.na(t$coding_start)) return(NULL)   # a 3' partner must be coding
+    if (!is_5p && (is.na(t$coding_start) || nrow(e) < 2)) return(NULL)
+    plus = t$strand == 1L
+    cs = t$coding_start; ce = t$coding_end
+    context = if (is.na(cs)) "noncoding" else if (pos >= cs && pos <= ce) "coding" else
+              if (plus == (pos > ce)) "3utr" else "5utr"
+    if (!is_5p && context == "3utr") return(NULL)
+    starts_cds = function(x) nrow(x) == 1 && !is.na(cs) && (if (plus) x$start == cs else x$end == ce)
+    start_phase = function(x) if (nrow(x) == 0) NA_integer_ else if (starts_cds(x)) -1L else x$phase
     inside = pos >= t$trans_start && pos <= t$trans_end
     in_exon = which(e$start <= pos & e$end >= pos)
+    base_phase = NA_integer_
     if (!inside) {
       if (is_5p) return(NULL)   # a 5' partner keeps its own promoter: never upstream of it
-      region = "upstream"; k = 0L
-      dist = if (t$strand == 1L) t$trans_start - pos else pos - t$trans_end
+      region = "upstream"; k = 0L; fused = 2L
+      dist = if (plus) t$trans_start - pos else pos - t$trans_end
+      e2 = e[rank == 2L]
+      # coding when the CDS already starts in exon 1 (LINX isCodingTypeOverride)
+      context = if (if (plus) e2$start > cs else e2$end < ce) "coding" else "5utr"
+      phase = start_phase(e2)
     } else if (length(in_exon)) {
       region = "exonic"; k = e$rank[in_exon[1]]; dist = 0L
+      ek = e[in_exon[1]]
+      base_phase = hmf_exonic_base_phase(ek, cs, ce, t$strand, pos)
+      # Partner not exonic: exon k is spliced round (LINX nextSpliceExonRank)
+      fused = if (is_5p) k - 1L else k + 1L
+      phase = if (is_5p) ek$phase else start_phase(e[rank == fused])
     } else {
       # Intron k: between exon k and k + 1 in transcript order
-      before = if (t$strand == 1L) e$end < pos else e$start > pos
+      before = if (plus) e$end < pos else e$start > pos
       if (!any(before)) return(NULL)
       region = "intronic"; k = max(e$rank[before]); dist = 0L
+      fused = if (is_5p) k else k + 1L
+      fe = e[rank == fused]
+      phase = if (is_5p) (if (nrow(fe) == 0) NA_integer_ else fe$end_phase) else start_phase(fe)
     }
-    fused = if (is_5p) k else if (region == "intronic") k + 1L else if (region == "upstream") 1L else k
-    fe = e[rank == fused]
-    phase = if (nrow(fe) == 0) NA_integer_ else if (is_5p) fe$end_phase else fe$phase
+    if (is_5p && context == "3utr") phase = -2L
+    alt = if (is_5p) e[rank < fused, end_phase] else {
+      d = e[rank > fused]
+      fifelse(d$phase == -1L & (if (plus) d$end > ce else d$start < cs), -2L, d$phase)
+    }
     data.table(gene = t$gene, strand = t$strand, side = if (is_5p) "5p" else "3p",
-               region = region, exon = k, fused_exon = fused, phase = phase,
-               upstream_distance = as.integer(dist), n_exons = nrow(e))
-  }))
+               region = region, exon = k, fused_exon = fused, phase = as.integer(phase),
+               base_phase = base_phase, context = context,
+               alt_phases = list(unique(setdiff(alt, phase))),
+               upstream_distance = as.integer(dist), n_exons = nrow(e), pos = pos, chrom = bk_chrom)
+  }), fill = TRUE)
+}
+
+# LINX's frame and reportability for one 5'/3' transcript pair (linx FusionFinder
+# transcriptPairHasFusion, FusionReportability). NULL when the pair is no fusion at all:
+# 5'UTR/non-coding -> coding and coding -> 5'UTR fuse only for a known pair. Phased: exact base
+# phase when both breakends are exonic (exon -> exon); otherwise fused-exon phases equal
+# (-1 == -1 is a 5'UTR -> 5'UTR fusion using the 3' partner's own start codon), or equal after
+# skipping exons. Reported: a known pair in frame, or out of frame only from a 5'UTR/non-coding
+# 5' breakend more than HMF_UNPHASED_KNOWN_MIN apart (or on another chromosome); an exon
+# deletion/duplication in frame, or exonic at both ends; a promiscuous fusion only in frame,
+# and through skipped exons only for a high-impact or known-exon partner
+hmf_frame_rule = function(p, type, known_exons, hi_imp) {
+  utr5 = p$context_5 %in% c("5utr", "noncoding")
+  if (type != "KNOWN_PAIR" && ((utr5 && p$context_3 == "coding") ||
+                               (p$context_5 == "coding" && p$context_3 == "5utr")))
+    return(NULL)
+  both_ex = p$region_5 == "exonic" && p$region_3 == "exonic"
+  skipped = FALSE
+  if (both_ex) {
+    phased = if (p$context_5 == "coding" && p$context_3 == "coding")
+               (p$base_phase_5 + 1L) %% 3L == p$base_phase_3   # LINX exonToExonInPhase: tick(5') == 3'
+             else utr5 && p$context_3 == "5utr"
+    phased = isTRUE(phased)
+  } else {
+    phased = isTRUE(p$phase_5 == p$phase_3)
+    if (!phased && (p$gene_5 != p$gene_3 || type == "EXON_DEL_DUP")) {
+      a5 = unlist(p$alt_phases_5); a3 = unlist(p$alt_phases_3)
+      phased = isTRUE(p$phase_3 %in% a5 || p$phase_5 %in% a3 || length(intersect(a5, a3)) > 0)
+      skipped = phased
+    }
+  }
+  frame = if (phased && skipped) "skipped exons" else
+          if (phased && !both_ex && p$phase_5 == -1L) "inframe (5′UTR)" else
+          if (phased) "inframe" else
+          if (utr5) "5′UTR to coding" else "out-of-frame"
+  short = p$chrom_5 == p$chrom_3 && abs(p$pos_5 - p$pos_3) <= HMF_UNPHASED_KNOWN_MIN
+  reported = switch(type,
+    KNOWN_PAIR   = phased || (utr5 && !short),
+    EXON_DEL_DUP = phased || both_ex,
+    phased && (!skipped || hi_imp || known_exons))
+  list(frame = frame, reported = reported)
 }
 
 # Every 5' candidate against every 3' one, columns suffixed _5 / _3; NULL when either is empty
@@ -713,6 +801,12 @@ hmf_fusions = function(sv_table, res) {
     for (k in seq_len(nrow(pairs))) {
       p = pairs[k]
       g5 = p$gene_5; g3 = p$gene_3
+      # Exon -> exon: both exons are kept (and the 3' one may not be the last unless still 5'UTR);
+      # otherwise an exonic side is spliced round, which needs an exon to splice to
+      if (p$region_5 == "exonic" && p$region_3 == "exonic") {
+        p[, `:=`(fused_exon_5 = exon_5, fused_exon_3 = exon_3)]
+        if (p$exon_3 == p$n_exons_3 && p$context_3 != "5utr") next
+      } else if (p$fused_exon_5 < 1L || p$fused_exon_3 > p$n_exons_3) next
       # EXON_DEL_DUP needs both breakends in one gene; any other same-gene pair is no fusion
       if (g5 == g3) {
         d = deldup[five_gene == g5 | three_gene == g5]
@@ -741,15 +835,13 @@ hmf_fusions = function(sv_table, res) {
       max_up = if (type == "KNOWN_PAIR" || hi_imp) HMF_UPSTREAM_KNOWN else HMF_UPSTREAM_DEFAULT
       if (p$region_3 == "upstream" && p$upstream_distance_3 > max_up) next
 
-      frame = if (p$region_5 == "exonic" || p$region_3 == "exonic") "exonic (unchecked)" else
-              if (is.na(p$phase_5) || is.na(p$phase_3) || p$phase_5 < 0 || p$phase_3 < 0) "non-coding" else
-              if (p$phase_5 == p$phase_3) "inframe" else "out-of-frame"
+      fr = hmf_frame_rule(p, type, known_exons, hi_imp)
+      if (is.null(fr)) next
+      frame = fr$frame; reported = fr$reported
       likelihood = if (type %in% c("KNOWN_PAIR", "EXON_DEL_DUP") || known_exons) "HIGH" else "LOW"
-      # LINX reports promiscuous fusions only in frame; a known pair even when unphased. An exonic
-      # breakend is not phase-checked here, so it cannot make a promiscuous fusion reportable
-      reported = type %in% c("KNOWN_PAIR", "EXON_DEL_DUP") || frame == "inframe"
       exon_lbl = function(region, exon, fused) switch(region,
-        upstream = "upstream", exonic = paste0("exon ", exon),
+        upstream = paste0("upstream → exon ", fused),
+        exonic = if (exon == fused) paste0("exon ", exon) else paste0("exon ", exon, " → exon ", fused),
         intronic = paste0("intron ", exon, " → exon ", fused))
       out[[length(out) + 1L]] = c(base, list(type = type, five_gene = g5, three_gene = g3,
         five_exon = exon_lbl(p$region_5, p$exon_5, p$fused_exon_5),
@@ -780,14 +872,25 @@ build_hmf = function(hmf_files, vep_data, variant_table, section_data, ctx) {
   if (!is.null(res$error)) return(list(error = res$error, files = files))
 
   sex = if (!is.null(ctx$sex)) as.character(unlist(ctx$sex))[1] else "female"
-  safely = function(expr, what) tryCatch(expr, error = function(e) {
-    message("HMF ", what, " failed: ", conditionMessage(e)); NULL })
+  # A part that errors is NULL and its message goes into `failed` (named by part), so _hmf.qmd
+  # says the step failed instead of rendering its "nothing found" notice. message() alone never
+  # reaches the HTML: the setup chunk runs with message = FALSE
+  failed = list()
+  safely = function(expr, part, what) tryCatch(expr, error = function(e) {
+    message("HMF ", what, " failed: ", conditionMessage(e))
+    failed[[part]] <<- conditionMessage(e)
+    NULL
+  })
+  small   = safely(hmf_small_variants(vep_data, variant_table, res), "small", "small-variant matching")
+  cn      = safely(hmf_copy_number(section_data$cna, section_data$sv$table, res, sex), "cn", "copy-number calls")
+  fusions = if (!is.null(res$fusions)) safely(hmf_fusions(section_data$sv$table, res), "fusions", "fusion matching")
   list(
     files     = files,
     reference = hmf_declared_reference(files)$reference,
-    small     = safely(hmf_small_variants(vep_data, variant_table, res), "small-variant matching"),
-    cn        = safely(hmf_copy_number(section_data$cna, section_data$sv$table, res, sex), "copy-number calls"),
-    fusions   = if (!is.null(res$fusions)) safely(hmf_fusions(section_data$sv$table, res), "fusion matching"),
+    small     = small,
+    cn        = cn,
+    fusions   = fusions,
+    failed    = failed,
     cn_source = if (!is.null(section_data$cna)) section_data$cna$source else NA_character_,
     ploidy    = if (!is.null(section_data$cna)) section_data$cna$ploidy else NA_real_,
     n_genes   = nrow(res$panel),

@@ -209,8 +209,10 @@ genes on an embedded list.
 Segments come from Wakhan's rank-1 `integer_profile.bed` (haplotype-resolved) — or, for Wakhan
 builds that write none, its `bed_output/*_copynumbers_segments_HP_{1,2}.bed` pair — else ASCAT's
 `segments_raw.txt`. In the HP pair, a segment with no reads on either haplotype (median coverage
-0: centromeres, unmappable regions) is no data rather than CN 0. It is left out, so a gene there
-reads "no segment", not a homozygous deletion. The purity and ploidy used are those of the same source, so the thresholds
+0) that overlaps a reference gap band (centromere, heterochromatin, acrocentric stalk: `acen`,
+`gvar`, `stalk` in the cytobands) is no data rather than CN 0. It is left out, so a gene there
+reads "no segment", not a homozygous deletion. A zero-coverage segment off the gaps is kept: a
+clonal homozygous deletion has no reads either. The purity and ploidy used are those of the same source, so the thresholds
 and the segments share one ploidy scale; every source found (Wakhan cell purity, ASCAT, SAVANA)
 is listed, because they can disagree.
 
@@ -296,7 +298,7 @@ SAGE's more sensitive calling tier, and it says nothing about actionability.
 over the gene's canonical exons, for genes with `reportDeletion` or `reportAmplification`:
 DEL = minimum total CN **< 0.5**; AMP = minimum total CN **> amplificationRatio × ploidy**
 (amplificationRatio from the panel, default **3**; halved on chrX in a male); PARTIAL_AMP = only
-the maximum exceeds it. Wakhan segments with no reads on either haplotype are left out (see
+the maximum exceeds it. Wakhan's zero-coverage segments over reference gaps are left out (see
 Copy number above), so a gene there is "uncovered" rather than deleted; the footnote lists uncovered genes per source, because an ASCAT
 gap can hide a homozygous deletion. In addition, every **deletion called by an SV caller**
 (Severus DEL, SAVANA `+-` pair) that removes canonical exons of a `reportDeletion` gene is listed
@@ -308,8 +310,11 @@ No call is dropped: a **Show** switch above the copy-number and fusion tables tu
 **Fusions** (`--hmf-known-fusions`). Each SV — Severus and SAVANA separately — is placed on
 canonical transcripts using its breakend orientation (from the VCF bracket notation): a gene is
 the 5′ partner when its strand equals the orientation; a 5′ breakend must lie inside its gene, a
-3′ one inside or upstream of a coding gene. Breakend in intron *k* → fused exon *k* on the 5′
-side, *k* + 1 on the 3′ side. Classified in LINX's order: KNOWN_PAIR; EXON_DEL_DUP (same gene,
+3′ one inside or upstream of a coding gene with at least two exons, and not in its 3′UTR. As in
+LINX: breakend in intron *k* → fused exon *k* on the 5′ side, *k* + 1 on the 3′ side; a 3′
+breakend upstream of its gene fuses to exon 2 (exon 1 has no splice acceptor); an exonic
+breakend joined to an intronic one is spliced round its exon (*k* − 1 on the 5′ side, *k* + 1 on
+the 3′ side). Classified in LINX's order: KNOWN_PAIR; EXON_DEL_DUP (same gene,
 both fused exons within the listed ranges); PROMISCUOUS_3 / PROMISCUOUS_5 / PROMISCUOUS_BOTH,
 whose listed exon ranges set "known exons" and gate the high-impact flag; IG/enhancer known
 pairs (one breakend in the enhancer range with the listed orientation, the partner gene within
@@ -318,13 +323,19 @@ breakend in the range, the other inside or within **1 Mb** upstream of a coding 
 a 3′ partner; never reported); PROMISCUOUS_ENHANCER_TARGET (a breakend in the listed range). An
 SV with both breakends inside one IG/enhancer range is a rearrangement within the locus (V(D)J
 recombination) and is never an enhancer fusion. A 3′ breakend may lie up to **100 kb** upstream of a known-pair or high-impact
-gene, **10 kb** otherwise. Frame = the 5′ fused exon's end phase against the 3′ fused exon's
-start phase. Likelihood HIGH for known pairs, exon deletions/duplications, enhancer known pairs
-and fusions within known exons, LOW otherwise; promiscuous fusions are reported only in frame,
-so never with an exonic breakend, whose phase is not checked.
+gene, **10 kb** otherwise. **Frame**, LINX's rules: the 5′ fused exon's end phase against the
+3′ fused exon's start phase; exon to exon, the exact phase of the two breakend bases. A 5′UTR or
+non-coding 5′ breakend joined to a 5′UTR 3′ exon is in frame (the 3′ partner's own start codon is
+used). 5′UTR → coding and coding → 5′UTR are fusions only for a known pair. Skipping exons can
+restore the frame. Likelihood HIGH for known pairs, exon deletions/duplications, enhancer known
+pairs and fusions within known exons, LOW otherwise. **Reported:** a promiscuous fusion only in
+frame, and through skipped exons only for a high-impact or known-exon partner; a known pair in
+frame, or out of frame only from a 5′UTR/non-coding 5′ breakend more than **1 Mb** away (or on
+another chromosome); an exon deletion/duplication in frame, or with both breakends in exons.
+A matching step that fails is shown as a warning in its tab, never as "none found".
 
 **Not reproduced:** dNdS driver likelihood, biallelic status and germline reporting (PURPLE);
-SV chaining, protein-domain and NMD checks, phase of exonic breakends (LINX); PURPLE's splice
+SV chaining, protein-domain and NMD checks, alternative (non-canonical) transcripts (LINX); PURPLE's splice
 definition (VEP's consequences stand in); effects seen only on a non-canonical transcript under
 VEP `--per_gene` (e.g. CDKN2A p14ARF); PURPLE's purity-adjusted copy number. Segmental-duplication
 genes can still be called deleted where a caller writes CN 0 with reads present.
@@ -405,7 +416,8 @@ output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 >   HMF driver annotation.
 > - Wakhan builds that write `bed_output/*_copynumbers_segments_HP_{1,2}.bed` instead of
 >   `integer_profile.bed` are read. Before, the copy-number section fell back to ASCAT. Their zero-coverage segments
->   (no reads on either haplotype) are left out as no data, not read as CN 0.
+>   (no reads on either haplotype) over reference gaps are left out as no data, not read as CN 0;
+>   off the gaps they stay, as homozygous deletions.
 > - The SV table carries each breakend's orientation (`orient_a`, `orient_b`; hidden, exported).
 
 > **Changed in 2.2.0:**
