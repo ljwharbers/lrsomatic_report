@@ -165,6 +165,31 @@ parse_wakhan_integer_profile = function(path) {
   out[]
 }
 
+# Wakhan solution_*/bed_output/<id>_<repo>_copynumbers_segments_HP_{1,2}.bed (the layout
+# of Wakhan builds that write no integer_profile.bed) -> the same unified segments. One file
+# per haplotype, identical boundaries; `copynumber_state` is the haplotype's CN. Appends
+# `zero_coverage`: both haplotypes at median coverage 0, i.e. no reads at all — an
+# unmappable gap (centromere, heterochromatin) reads as CN 0 there, not as a deletion.
+parse_wakhan_hp_segments = function(hp1_path, hp2_path) {
+  a = read_hash_header_table(hp1_path); b = read_hash_header_table(hp2_path)
+  if (is.null(a) || is.null(b)) return(NULL)
+  if (nrow(a) == 0 || nrow(b) == 0) return(.empty_cn_segments())
+  num = function(dt, k) if (k %in% names(dt)) suppressWarnings(as.numeric(dt[[k]])) else NA_real_
+  side = function(dt, s) data.table(chrom = ensure_chr_prefix(dt$chr), start = num(dt, "start"),
+                                    end = num(dt, "end"), cn = num(dt, "copynumber_state"),
+                                    conf = num(dt, "confidence"), cov = num(dt, "coverage"),
+                                    sv = as.character(if ("svs_breakpoints_ids" %in% names(dt)) dt$svs_breakpoints_ids else NA))
+  m = merge(side(a), side(b), by = c("chrom", "start", "end"), suffixes = c("_a", "_b"))
+  if (nrow(m) != nrow(a) || nrow(m) != nrow(b))
+    message("Wakhan HP_1/HP_2 segment boundaries differ; ", nrow(m), " shared segments kept")
+  out = m[, .(chrom, start, end, cn_a = cn_a, cn_b = cn_b, total = cn_a + cn_b,
+              minor = pmin(cn_a, cn_b), conf = pmin(conf_a, conf_b),
+              sv_ids = fifelse(sv_a %in% c("", "[]"), NA_character_, sv_a),
+              conf_a, conf_b, zero_coverage = cov_a %in% 0 & cov_b %in% 0)]
+  setorder(out, chrom, start)
+  out[]
+}
+
 # Wakhan solution_*/genes/genes_copynumber_states.bed -> list(genes, n_dropped). Rows whose
 # haplotype state exceeds `max_cn` are artefacts (state 394 with ~3300x "adjusted
 # coverage" on P15) and are dropped and counted. NULL when the file is absent.

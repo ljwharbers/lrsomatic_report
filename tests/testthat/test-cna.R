@@ -332,3 +332,55 @@ test_that("purity disagreement compares each caller's top solution only", {
                 list(), cna_ctx())
   expect_null(build_overview(NULL, list(cna = x), list(), NULL, NULL, list(), list())$purity_check)
 })
+
+test_that("Wakhan builds without integer_profile.bed are read from bed_output/ HP_1 + HP_2", {
+  d = cna_tempdir("S2")
+  bo = file.path(d, "wakhan", "solution_1", "bed_output")
+  dir.create(bo, recursive = TRUE)
+  writeLines(c("repository_name\tdna_purity\tcell_purity\tploidy\tconfidence\tsolution_rank",
+               "2.1_0.8_0.9\t0.85\t0.8\t2.1\t0.9\t1"), file.path(d, "wakhan", "solutions_ranks.tsv"))
+  hp = function(n, states, cov) {
+    f = file.path(bo, paste0("S2_2.1_0.8_0.9_copynumbers_segments_HP_", n, ".bed"))
+    writeLines(c("#chr: chromosome number",
+                 "#chr\tstart\tend\tcoverage\tcopynumber_state\tconfidence\tsvs_breakpoints_ids",
+                 sprintf("chr1\t%d\t%d\t%s\t%s\t0.9\t[]", c(0L, 1001L), c(1000L, 5000L), cov, states)), f)
+  }
+  hp(1, c(1, 0), c("10.5", "0.0"))
+  hp(2, c(2, 0), c("11.0", "0.0"))
+  # A subclonal file beside them must not be picked
+  file.copy(file.path(bo, "S2_2.1_0.8_0.9_copynumbers_segments_HP_1.bed"),
+            file.path(bo, "S2_2.1_0.8_0.9_copynumbers_subclonal_segments_HP_1.bed"))
+
+  inputs = cna_locate(d, "S2")
+  expect_length(inputs$wakhan$profiles, 1L)
+  expect_match(inputs$wakhan$profiles[[1]]$bed_hp2, "_copynumbers_segments_HP_2\\.bed$")
+  # GAPG lies in the no-reads segment: "no segment", never a homozygous deletion
+  p = list(p = fake_panel(c("KEPT", "GAPG"), c("chr1", "chr1"), c(100, 2000), c(200, 3000),
+                          c("KEPT", "GAPG")))
+  res = cna_parse(inputs, list(), list(sex = "female", all_panels = p))
+  expect_equal(res$source, "wakhan")
+  expect_equal(res$ploidy, 2.1)
+  expect_equal(res$segments$total, 3)    # without cytobands, every zero-coverage segment is a gap
+  expect_equal(res$profiles[[1]]$n_zero_coverage, 1L)
+  g = res$genes
+  expect_equal(g[gene == "KEPT", call], "gain")
+  expect_true(is.na(g[gene == "GAPG", call]))
+
+  # With cytobands only a zero-coverage segment over a gap band is no data; one off the gaps is a
+  # real homozygous deletion and stays
+  for (n in 1:2) writeLines(c("#chr: chromosome number",
+    "#chr\tstart\tend\tcoverage\tcopynumber_state\tconfidence\tsvs_breakpoints_ids",
+    sprintf("chr1\t%d\t%d\t%s\t%s\t0.9\t[]", c(0L, 1001L, 6001L), c(1000L, 5000L, 9000L),
+            c("10.5", "0.0", "0.0"), c(n, 0, 0))),
+    file.path(bo, paste0("S2_2.1_0.8_0.9_copynumbers_segments_HP_", n, ".bed")))
+  bands = data.frame(chrom = "chr1", start = c(0, 1000, 5500), end = c(1000, 5500, 20000),
+                     name = c("p1", "p2", "p3"), stain = c("gneg", "acen", "gneg"))
+  p$p = fake_panel(c("KEPT", "GAPG", "HOMDEL"), rep("chr1", 3), c(100, 2000, 7000), c(200, 3000, 8000),
+                   c("KEPT", "GAPG", "HOMDEL"))
+  res = cna_parse(cna_locate(d, "S2"), list(), list(sex = "female", all_panels = p, cytobands = bands))
+  expect_equal(res$segments$total, c(3, 0))
+  expect_equal(res$profiles[[1]]$n_zero_coverage, 1L)
+  g = res$genes
+  expect_true(is.na(g[gene == "GAPG", call]))
+  expect_equal(g[gene == "HOMDEL", call], "homozygous deletion")
+})

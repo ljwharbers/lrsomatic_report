@@ -30,7 +30,15 @@
 #     wakhan_dir       = character(1),     # NA when there is no Wakhan output
 #     wakhan_heatmap   = character(1),     # NA unless the heatmap HTML is present
 #     ascat_metrics    = list() | NULL     # parse_ascat_metrics()
+#     ascat_segments   = data.table()      # ASCAT's segments even when Wakhan is `source`
+#     ascat_ploidy     = numeric(1)        # its ploidy (purityploidy.txt), NA when absent
 #   )
+#
+# Wakhan segments come from the rank's integer_profile.bed, or — Wakhan builds that write
+# none — from bed_output/*_copynumbers_segments_HP_{1,2}.bed (parse_wakhan_hp_segments(),
+# which adds a zero_coverage column). Zero-coverage segments over a reference gap band are
+# dropped here, for every consumer (gene calls, genome metrics, circos, HMF): no reads there is
+# no data, not CN 0. Off the gaps they stay, as a homozygous deletion (cna_gap_segments()).
 #
 # Precedence. Segments: Wakhan rank-1 integer_profile.bed, else ASCAT segments_raw.txt.
 # Purity/ploidy are those of `source`, so the call thresholds and the segments share one
@@ -86,6 +94,21 @@ cna_call = function(total, minor, ploidy, expected) {
 
 # Genome-level metrics over the autosomes, as fractions of the autosomal length covered by
 # segments: WGD when the major allele is >= 2 over more than half of it
+# Which zero-coverage segments overlap a reference gap band (acen / gvar / stalk) of `cytobands`
+# (load_cytobands()). Without cytobands every zero-coverage segment counts as a gap
+CNA_GAP_STAINS = c("acen", "gvar", "stalk")
+cna_gap_segments = function(seg, cytobands = NULL) {
+  zc = seg$zero_coverage %in% TRUE
+  if (is.null(cytobands) || !any(zc)) return(zc)
+  gap = as.data.table(cytobands)[stain %in% CNA_GAP_STAINS,
+                                 .(chrom, start = as.numeric(start), end = as.numeric(end))]
+  setkey(gap, chrom, start, end)
+  q = data.table(i = seq_len(nrow(seg)), chrom = as.character(seg$chrom),
+                 start = as.numeric(seg$start), end = as.numeric(seg$end))
+  hit = foverlaps(q, gap, by.x = c("chrom", "start", "end"), nomatch = NULL)$i
+  zc & seq_len(nrow(seg)) %in% hit
+}
+
 cna_genome_metrics = function(segments) {
   na = list(wgd = NA, loh_fraction = NA_real_, major2_fraction = NA_real_, autosomal_bp = 0)
   if (is.null(segments) || nrow(segments) == 0) return(na)
@@ -256,11 +279,19 @@ cna_locate = function(sample_dir, sample_id) {
   if (!is.na(wdir)) for (i in seq_len(nrow(ranks))) {
     r = ranks$solution_rank[i]; rn = ranks$repository_name[i]
     bed = locate_wakhan_solution_file(wdir, r, rn, "integer_profile.bed")
-    if (is.null(bed)) next
-    profiles[[length(profiles) + 1L]] = list(
-      rank = r, bed = bed,
-      genes = locate_wakhan_solution_file(wdir, r, rn,
-                                          file.path("genes", "genes_copynumber_states.bed")))
+    bed_hp2 = NULL
+    genes = locate_wakhan_solution_file(wdir, r, rn, file.path("genes", "genes_copynumber_states.bed"))
+    if (is.null(bed)) {
+      # Builds without integer_profile.bed: per-haplotype segments under bed_output/
+      bo = locate_wakhan_solution_file(wdir, r, rn, "bed_output")
+      hp = if (!is.null(bo)) Sys.glob(file.path(bo, paste0("*_copynumbers_segments_HP_", 1:2, ".bed")))
+           else character(0)
+      if (length(hp) != 2) next
+      bed = hp[1]; bed_hp2 = hp[2]
+      if (is.null(genes) && file.exists(file.path(bo, "genes_copynumber_states.bed")))
+        genes = file.path(bo, "genes_copynumber_states.bed")
+    }
+    profiles[[length(profiles) + 1L]] = list(rank = r, bed = bed, bed_hp2 = bed_hp2, genes = genes)
   }
 
   list(ascat_segments = seg, ascat_purityploidy = pp, ascat_metrics = metrics,
@@ -285,14 +316,26 @@ cna_parse = function(inputs, section_data, ctx) {
     if (nrow(r) == 0) NULL else r[1]
   }
   profiles = Filter(Negate(is.null), lapply(w$profiles, function(p) {
-    seg = parse_wakhan_integer_profile(p$bed)
+    seg = if (!is.null(p$bed_hp2)) parse_wakhan_hp_segments(p$bed, p$bed_hp2)
+          else parse_wakhan_integer_profile(p$bed)
     if (is.null(seg) || nrow(seg) == 0) return(NULL)
+    # No reads on either haplotype over a reference gap (centromere, heterochromatin, acrocentric
+    # stalk) is no data, not CN 0: left out, so a gene there reads "no segment". Off the gaps a
+    # zero-coverage segment is kept: a clonal homozygous deletion has no reads either (DMD on
+    # COLO829-PB, which ASCAT also calls 0/0)
+    n_zero = 0L
+    if ("zero_coverage" %in% names(seg)) {
+      drop = cna_gap_segments(seg, ctx$cytobands)
+      n_zero = sum(drop)
+      seg = seg[!drop]
+      if (nrow(seg) == 0) return(NULL)
+    }
     r = sol_row(p$rank)
     list(rank = p$rank,
          purity = if (!is.null(r) && "cell_purity" %in% names(r)) as.numeric(r$cell_purity) else NA_real_,
          ploidy = if (!is.null(r)) as.numeric(r$ploidy) else NA_real_,
          confidence = if (!is.null(r) && "confidence" %in% names(r)) as.numeric(r$confidence) else NA_real_,
-         path = p$bed, genes_path = p$genes, segments = seg)
+         path = p$bed, genes_path = p$genes, segments = seg, n_zero_coverage = n_zero)
   }))
   top = if (length(profiles) > 0) profiles[[1]] else NULL
 
@@ -364,7 +407,10 @@ cna_parse = function(inputs, section_data, ctx) {
     profiles = profiles,
     wakhan_dir = if (!is.null(w$dir)) w$dir else NA_character_,
     wakhan_heatmap = if (!is.null(w$heatmap)) w$heatmap else NA_character_,
-    ascat_metrics = ascat_metrics
+    ascat_metrics = ascat_metrics,
+    # Both callers' segments, whichever `source` is: the HMF section calls each separately
+    ascat_segments = if (!is.null(ascat_seg)) ascat_seg else .empty_cn_segments(),
+    ascat_ploidy = if (!is.null(ascat_pp)) ascat_pp$ploidy else NA_real_
   )
 }
 

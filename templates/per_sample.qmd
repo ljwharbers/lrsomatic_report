@@ -29,6 +29,7 @@ params:
   embed_full_table: true # --embed-full-table: the sidecar's bytes go into the HTML too
   embed_full_table_max_mb: NULL # --embed-full-table-max-mb (NULL: FULL_TABLE_EMBED_MAX_MB)
   purity_spread_warn: NULL # --purity-spread-warn; NULL = PURITY_SPREAD_WARN (R/key_findings.R)
+  hmf: NULL              # --hmf-*: named list of HMF resource paths; NULL = HMF section off
 ---
 
 ```{r setup, include=FALSE}
@@ -59,6 +60,7 @@ for (f in section_files(file.path(repo_dir, "R/sections"))) {
   source(f)
 }
 source(file.path(repo_dir, "R/key_findings.R"))
+source(file.path(repo_dir, "R/hmf.R"))
 
 outputs = params$outputs
 sample_id = params$sample_id
@@ -87,7 +89,8 @@ ctx = list(
   repo_dir    = repo_dir,
   outputs     = outputs,
   purity_spread_warn = if (!is.null(params$purity_spread_warn))
-                         as.numeric(params$purity_spread_warn) else PURITY_SPREAD_WARN
+                         as.numeric(params$purity_spread_warn) else PURITY_SPREAD_WARN,
+  hmf         = params$hmf
 )
 
 # Section-module contract: each section owns locate() and parse(); see CLAUDE.md
@@ -153,6 +156,9 @@ n_vaf = if (!is.null(variant_table) && "vaf" %in% names(variant_table))
 n_multi = if (!is.null(variant_table) && "callers" %in% names(variant_table))
             sum(grepl(",", variant_table$callers, fixed = TRUE)) else 0L
 
+# HMF driver / fusion / hotspot annotation (R/hmf.R); NULL unless --hmf-driver-panel was given
+HMF = if (!is.null(ctx$hmf)) build_hmf(ctx$hmf, vep_data, variant_table, SECTION_DATA, ctx) else NULL
+
 # SNV data for circos (from VEP file — contains all somatic variants)
 snv_circos = NULL
 if (!is.null(vep_data) && nrow(vep_data) > 0) {
@@ -184,7 +190,7 @@ report_counts = list(small_variants = sv_counts, n_sv = n_sv,
                      n_trans = n_trans, n_intra_bnd = n_intra_bnd,
                      sv_caller = sv_primary_caller)
 OVERVIEW = build_overview(variant_table, SECTION_DATA, all_panels, ascat_pp, tmb_info,
-                          report_counts, ctx)
+                          report_counts, ctx, HMF)
 
 # Genome circos, after the overview: its driver labels are the overview's tier 1-2 findings
 # (circos_driver_rows() in R/key_findings.R). Drawn to a temp SVG that sections/_circos.qmd
@@ -425,6 +431,8 @@ cat("</script>\n")
 {{< include sections/_smallvariants.qmd >}}
 
 {{< include sections/_sv.qmd >}}
+
+{{< include sections/_hmf.qmd >}}
 
 {{< include sections/_qc.qmd >}}
 

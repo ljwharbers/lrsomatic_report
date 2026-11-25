@@ -21,6 +21,7 @@ suppressPackageStartupMessages({
 source(file.path(repo_dir, "R/utils.R"))
 source(file.path(repo_dir, "R/references.R"))
 source(file.path(repo_dir, "R/locate_outputs.R"))
+source(file.path(repo_dir, "R/hmf.R"))
 
 # ---- CLI argument parsing -----------------------------------------------
 option_list = list(
@@ -34,6 +35,7 @@ option_list = list(
               help = "Biological sex: male | female | XY | XX (required)"),
   make_option("--gene-panel",  type = "character", default = "none",
               help = paste("Gene panel applied on load: none | builtin name (lymphoid) | path to TSV",
+                           "| hmf_driver (with --hmf-driver-panel)",
                            "(default: none, i.e. unfiltered). Repeatable — pass it several times to",
                            "open with several panels applied at once; a variant or SV is kept if it",
                            "hits any of them.")),
@@ -62,6 +64,23 @@ option_list = list(
               help = paste("Warn prominently when the purity estimates of ASCAT, Wakhan and SAVANA",
                            "(top solution of each) differ by at least this much (default: 0.2).",
                            "A value above 1 never warns.")),
+  make_option("--hmf-driver-panel", type = "character", default = NULL,
+              help = paste("HMF DriverGenePanel.38.tsv (oncoanalyser resource bundle: GRCh38, or a",
+                           "CHM13 copy lifted by the pipeline, whose Ensembl cache declares REFERENCE t2t).",
+                           "Turns on the HMF driver annotation section and adds the panel as the",
+                           "selectable gene list 'hmf_driver'. Needs --hmf-ensembl-data-dir.")),
+  make_option("--hmf-ensembl-data-dir", type = "character", default = NULL,
+              help = paste("HMF Ensembl data cache directory (common/ensembl_data, with",
+                           "ensembl_gene_data.csv and ensembl_trans_exon_data.csv): canonical",
+                           "transcripts and gene spans for the HMF section. A REFERENCE file in it",
+                           "declares the build (absent: GRCh38).")),
+  make_option("--hmf-known-fusions", type = "character", default = NULL,
+              help = "HMF known_fusion_data.38.csv: known-fusion matching of the SV calls (optional)."),
+  make_option("--hmf-hotspots", type = "character", default = NULL,
+              help = "HMF KnownHotspots.somatic.38.vcf.gz: hotspot matching of small variants (optional)."),
+  make_option("--hmf-actionable-bed", type = "character", default = NULL,
+              help = paste("HMF ActionableCodingPanel.38.bed(.gz): flags small variants inside the",
+                           "panel's coding regions (optional; absent from bundle v3).")),
   make_option("--version",     action = "store_true", default = FALSE,
               help = "Print the tool version and exit"),
   make_option("--output",      type = "character", default = NULL,
@@ -116,6 +135,42 @@ output     = if (!is.null(opt[["output"]])) opt[["output"]] else
 title      = if (!is.null(opt[["title"]])) opt[["title"]] else
              paste0("LRSomatic Report – ", sample_id)
 
+# ---- HMF resources: checked before anything renders -----------------------
+hmf_opts = c(driver_panel = "hmf-driver-panel", ensembl_data_dir = "hmf-ensembl-data-dir",
+             known_fusions = "hmf-known-fusions", hotspots = "hmf-hotspots",
+             actionable_bed = "hmf-actionable-bed")
+hmf_files = lapply(hmf_opts, function(o) opt[[o]])
+hmf_files = Filter(Negate(is.null), hmf_files)
+if (length(hmf_files) > 0) {
+  if (is.null(hmf_files$driver_panel))
+    abort(paste0("--", hmf_opts[names(hmf_files)][1], " needs --hmf-driver-panel"))
+  if (is.null(hmf_files$ensembl_data_dir))
+    abort("--hmf-driver-panel needs --hmf-ensembl-data-dir (the HMF Ensembl data cache)")
+  for (nm in names(hmf_files)) {
+    p = hmf_files[[nm]]
+    ok = if (nm == "ensembl_data_dir") dir.exists(p) else file.exists(p) && !dir.exists(p)
+    if (!ok) abort(paste0("--", hmf_opts[[nm]], " not found: ", p))
+    hmf_files[[nm]] = normalizePath(p)
+  }
+  sniff = function(path, n = 1) {
+    con = if (grepl("\\.gz$", path)) gzfile(path, "rt") else file(path, "rt")
+    on.exit(close(con)); x = readLines(con, n = n, warn = FALSE)
+    if (length(x) == 0) "" else x   # an empty file fails the checks below, not strsplit()
+  }
+  hdr = sniff(hmf_files$driver_panel)
+  if (!all(c("gene", "likelihoodType") %in% strsplit(hdr, "\t")[[1]]))
+    abort("--hmf-driver-panel does not look like an HMF DriverGenePanel (no gene / likelihoodType columns): ",
+          hmf_files$driver_panel)
+  for (f in c("ensembl_gene_data.csv", "ensembl_trans_exon_data.csv"))
+    if (!file.exists(file.path(hmf_files$ensembl_data_dir, f)))
+      abort("--hmf-ensembl-data-dir has no ", f, ": ", hmf_files$ensembl_data_dir)
+  if (!is.null(hmf_files$known_fusions) &&
+      !all(c("Type", "FiveGene", "ThreeGene") %in% strsplit(sniff(hmf_files$known_fusions), ",")[[1]]))
+    abort("--hmf-known-fusions does not look like an HMF known_fusion_data.csv: ", hmf_files$known_fusions)
+  if (!is.null(hmf_files$hotspots) && !startsWith(sniff(hmf_files$hotspots), "##fileformat=VCF"))
+    abort("--hmf-hotspots is not a VCF: ", hmf_files$hotspots)
+}
+
 # ---- Locate per-tool outputs ---------------------------------------------
 message("Locating outputs in: ", sample_dir)
 outputs = apply_run_mode(locate_outputs(sample_dir, sample_id), run_mode)
@@ -140,6 +195,19 @@ if (reference == "auto") {
 }
 reference = tolower(reference)
 
+# HMF resources must be on the report's reference: the published bundle is GRCh38 (and declares
+# nothing); a CHM13 copy lifted by the pipeline declares t2t (hmf_declared_reference()). Plain
+# GRCh38 files on another reference are left out with a warning; a declared mismatch is an error
+if (length(hmf_files) > 0) {
+  bad = hmf_check_reference(hmf_files, reference)
+  if (!is.null(bad) && bad$kind == "mismatch") abort(paste0("HMF resources: ", bad$msg, "."))
+  if (!is.null(bad)) {
+    message("WARNING: ", bad$msg, ", so the HMF section is skipped. On CHM13, use the copy the ",
+            "pipeline lifts over (its Ensembl data cache declares REFERENCE t2t).")
+    hmf_files = list()
+  }
+}
+
 # ---- Load all gene panels: every builtin ships in the report, --gene-panel only sets which are checked on load; "__all__" is the internal sentinel for none ----
 gene_lists_dir = if (!is.null(opt[["gene-lists-dir"]])) {
   normalizePath(opt[["gene-lists-dir"]], mustWork = TRUE)
@@ -147,6 +215,21 @@ gene_lists_dir = if (!is.null(opt[["gene-lists-dir"]])) {
   file.path(repo_dir, "assets", "gene_lists")
 }
 all_panels = load_all_gene_panels(gene_lists_dir, reference)
+
+# The HMF driver panel as a selectable gene list (unticked on load): spans from the HMF
+# Ensembl cache, role from likelihoodType, read through the same loader as every list
+if (!is.null(hmf_files$driver_panel)) {
+  hmf_tsv = hmf_gene_list_tsv(hmf_files$driver_panel, hmf_files$ensembl_data_dir,
+                              tempfile("hmf_driver", fileext = ".tsv"), reference,
+                              hmf_files$known_fusions)
+  nm = unique_panel_name("hmf_driver", names(all_panels))
+  all_panels[[nm]] = tryCatch(load_gene_panel(hmf_tsv, reference),
+                              error = function(e) abort(conditionMessage(e)))
+  all_panels[[nm]]$name = nm
+  # Marks the list whose key findings are HMF's own calls (kf_hmf_rows(), R/key_findings.R)
+  all_panels[[nm]]$hmf = TRUE
+  message("HMF driver annotation on: ", paste(names(hmf_files), collapse = ", "))
+}
 
 # "none" combined with a real panel is contradictory
 if (any(vapply(gene_panels, is_no_gene_panel, logical(1))) && length(gene_panels) > 1) {
@@ -164,6 +247,9 @@ for (gp in gene_panels) {
     invisible(tryCatch(resolve_gene_panel(gp, gene_lists_dir, reference),
                        error = function(e) abort(conditionMessage(e))))
     default_panels = c(default_panels, gp)
+  } else if (!is.null(hmf_files$driver_panel) && identical(gp, "hmf_driver")) {
+    # The list built from --hmf-driver-panel (registered above, possibly under a suffixed name)
+    default_panels = c(default_panels, names(all_panels)[vapply(all_panels, function(p) isTRUE(p$hmf), logical(1))])
   } else if (file.exists(gp)) {
     # User-supplied TSV: register alongside the builtins so it is selectable in the report
     nm = unique_panel_name(tools::file_path_sans_ext(basename(gp)), names(all_panels))
@@ -172,7 +258,8 @@ for (gp in gene_panels) {
     default_panels = c(default_panels, nm)
   } else {
     abort(paste0("--gene-panel not found: tried builtin '", gp,
-                 "' and as a file path. Use 'none' for no filtering."))
+                 "' and as a file path. Use 'none' for no filtering",
+                 if (identical(gp, "hmf_driver")) " ('hmf_driver' needs --hmf-driver-panel)" else "", "."))
   }
 }
 default_panels = unique(default_panels)
@@ -208,7 +295,9 @@ quarto::quarto_render(
     embed         = embed,
     embed_full_table = embed_full_table,
     embed_full_table_max_mb = embed_full_table_max_mb,
-    purity_spread_warn = purity_spread_warn
+    purity_spread_warn = purity_spread_warn,
+    # NULL (section off) or a named list of paths; plain strings survive the YAML round trip
+    hmf           = if (length(hmf_files) > 0) hmf_files else NULL
   ),
   quiet = FALSE
 )

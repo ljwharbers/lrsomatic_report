@@ -16,7 +16,8 @@ grep -qx "$version" v.txt
 
 echo "== help lists the flags the pipeline passes =="
 docker run --rm "$image" render_report.R --help > help.txt 2>&1
-for flag in --sample-dir --sample-id --sex --reference --gene-panel --gene-lists-dir --output --embed; do
+for flag in --sample-dir --sample-id --sex --reference --gene-panel --gene-lists-dir --output --embed \
+            --hmf-driver-panel --hmf-ensembl-data-dir --hmf-known-fusions --hmf-hotspots --hmf-actionable-bed; do
     grep -q -- "$flag" help.txt || { echo "missing flag: $flag"; exit 1; }
 done
 
@@ -75,5 +76,26 @@ grep -q 'const DEFAULT_PANELS' render/smoke2_report.html
 grep -q 'smokepanel' render/smoke2_report.html
 # That the bundled set is replaced rather than merged is asserted in tests/testthat, where
 # it can be checked precisely instead of by grepping rendered HTML.
+
+# The optional HMF section: present with the --hmf-* flags (synthetic resource fixtures),
+# absent from every render above, which passed none
+echo "== --hmf-* renders the HMF section, and only then =="
+rm -rf hmf && cp -r tests/fixtures/hmf hmf
+docker run --rm --user "$(id -u):$(id -g)" \
+    -v "$PWD/render:/work" -v "$PWD/hmf:/hmf" -w /work \
+    -e HOME=/work -e TMPDIR=/work \
+    "$image" render_report.R \
+        --sample-dir sample_dir \
+        --sample-id smoke3 \
+        --sex male \
+        --reference hg38 \
+        --hmf-driver-panel /hmf/DriverGenePanel.38.tsv \
+        --hmf-ensembl-data-dir /hmf/ensembl_data \
+        --hmf-known-fusions /hmf/known_fusion_data.38.csv \
+        --hmf-hotspots /hmf/KnownHotspots.somatic.38.vcf \
+        --output smoke3_report.html
+grep -q 'id="hmf-drivers"' render/smoke3_report.html
+grep -q 'hmf_driver' render/smoke3_report.html
+! grep -q 'id="hmf-drivers"' render/smoke_report.html
 
 echo "all smoke tests passed"

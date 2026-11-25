@@ -64,7 +64,8 @@ extract_extra_keys = function(extra_vec, keys) {
 normalise_reference_name = function(x) {
   if (is.null(x) || length(x) != 1 || is.na(x) || !nzchar(trimws(x))) return(NA_character_)
   x = tolower(trimws(x))
-  if (x %in% c("t2t", "chm13", "chm13v2", "chm13v2.0", "t2t-chm13")) return("t2t")
+  if (x %in% c("t2t", "chm13", "chm13v2", "chm13v2.0", "t2t-chm13", "t2t-chm13v2",
+               "t2t-chm13v2.0")) return("t2t")
   if (x %in% c("hg38", "grch38", "hg38-noalt")) return("hg38")
   x
 }

@@ -96,6 +96,14 @@ from the sample directory, and so is the run mode unless `--run-mode` states it.
 --purity-spread-warn  Purity difference (max − min over the top solution of ASCAT, Wakhan
                   and SAVANA) at which the report warns that the callers disagree
                   (default: 0.2; a value above 1 never warns). See Copy-number calls.
+--hmf-driver-panel  HMF DriverGenePanel.38.tsv (oncoanalyser resource bundle, GRCh38). Turns on
+                  the HMF driver annotation section and adds the panel as the selectable gene
+                  list hmf_driver. Needs --hmf-ensembl-data-dir. See HMF driver annotation.
+--hmf-ensembl-data-dir  The bundle's common/ensembl_data directory (ensembl_gene_data.csv,
+                  ensembl_trans_exon_data.csv): canonical transcripts and gene spans.
+--hmf-known-fusions  known_fusion_data.38.csv: known-fusion matching of the SV calls (optional).
+--hmf-hotspots    KnownHotspots.somatic.38.vcf.gz: hotspot matching of small variants (optional).
+--hmf-actionable-bed  ActionableCodingPanel.38.bed(.gz): a region flag (optional; not in bundle v3).
 --output          Output HTML path  (default: <sample-id>_report.html in current dir).
                   The small-variant TSV is written to the same directory.
 --title           Report title
@@ -198,8 +206,13 @@ genes on an embedded list.
 
 ## Copy-number calls
 
-Segments come from Wakhan's rank-1 `integer_profile.bed` (haplotype-resolved), else ASCAT's
-`segments_raw.txt`. The purity and ploidy used are those of the same source, so the thresholds
+Segments come from Wakhan's rank-1 `integer_profile.bed` (haplotype-resolved) — or, for Wakhan
+builds that write none, its `bed_output/*_copynumbers_segments_HP_{1,2}.bed` pair — else ASCAT's
+`segments_raw.txt`. In the HP pair, a segment with no reads on either haplotype (median coverage
+0) that overlaps a reference gap band (centromere, heterochromatin, acrocentric stalk: `acen`,
+`gvar`, `stalk` in the cytobands) is no data rather than CN 0. It is left out, so a gene there
+reads "no segment", not a homozygous deletion. A zero-coverage segment off the gaps is kept: a
+clonal homozygous deletion has no reads either. The purity and ploidy used are those of the same source, so the thresholds
 and the segments share one ploidy scale; every source found (Wakhan cell purity, ASCAT, SAVANA)
 is listed, because they can disagree.
 
@@ -244,6 +257,95 @@ WGD / LOH / GI metrics are shown alongside when present.
 Gene positions come from the gene list's coordinates. A gene without coordinates is called
 only where Wakhan's own per-gene file lists it (rows with a haplotype state above 100 are
 dropped as implausible).
+
+## HMF driver annotation
+
+An optional section, on only when `--hmf-driver-panel` and `--hmf-ensembl-data-dir` are given:
+it applies the [Hartwig Medical Foundation](https://github.com/hartwigmedical/hmftools)
+(WiGiTS / [oncoanalyser](https://github.com/nf-core/oncoanalyser)) driver catalogue to this
+sample's long-read calls. Without those flags the report is unchanged. The resource files are
+the user's own copy of the oncoanalyser resource bundle — nothing from it ships here. The bundle
+is GRCh38. **On CHM13** the resources must be a copy lifted over by LRSomatic's `HMF_LIFTOVER`,
+which declares its build in a one-line `REFERENCE` file (`t2t`) inside the Ensembl data cache
+directory, and `##assembly=` in the hotspot VCF. Undeclared resources are GRCh38: on a CHM13
+report they are skipped with a warning, and resources declaring another build than the report's
+are an error. Bundles v2.x and
+v3.x are both read (columns by name; v2's `IG_*` fusion types and `IG_RANGE` are v3's
+`ENHANCER_*` and `ENHANCER_RANGE`). It is a re-implementation of HMF's *reporting rules* on other
+callers' output, not PURPLE or LINX, and the section says so.
+
+The driver panel is also added to the gene lists as **`hmf_driver`** (gene spans from the
+Ensembl cache, role ONCO → oncogene, TSG → tsg), together with the partner genes of the
+known-fusion file for structural variants only (EWSR1, ATF1 and the like are seldom driver-panel
+genes). It is not ticked on load unless `--gene-panel hmf_driver` is given. Ticking it filters the gene-level copy number and SV tables to
+those genes, and fills the overview's **key findings with this section's own calls** rather than
+the generic rules: every reported small variant (tier 1); AMP and DEL from ASCAT or Wakhan
+(tier 1), PARTIAL_AMP (tier 2), a DEL called only by an SV caller (tier 2 up to 3 Mb, tier 3
+above it, since it may be heterozygous); every reported fusion (tier 1 at HMF likelihood HIGH,
+tier 2 otherwise), as one row per gene pair (`EWSR1–ATF1`) naming the callers. If the HMF step
+fails to load, the list falls back to the generic rules.
+
+**Small variants.** A somatic variant in a DriverGenePanel gene is classified on that gene's HMF
+canonical transcript (VEP rows annotated on any other transcript are ignored). When VEP's
+transcript ids are not HMF's Ensembl GRCh38 ones at all — CHM13's rapid-release cache
+(`ENST0522…`), or a `--refseq` run — none could match, so VEP's own canonical transcript
+(`CANONICAL=YES`) stands in, the gene matched by symbol; the footnote says which rule applied. It is classified as
+NONSENSE_OR_FRAMESHIFT (frameshift, stop gained, stop lost, start lost), SPLICE (splice donor,
+splice acceptor, splice donor 5th base) or MISSENSE (missense, inframe insertion/deletion,
+protein altering), first match in that order. It is **reported** when the gene's
+`reportMissense` / `reportNonsense` / `reportSplice` flag for that class is true, or when it is a
+known hotspot and `reportSomaticHotspot` is true. A hotspot (`--hmf-hotspots`) matches on exact
+alleles, or on the same gene and protein change with other alleles (an MNV hotspot called as
+separate SNVs; VEP's 3-letter `p.Val600Glu` is compared to the file's 1-letter `p.V600E`). Hotspots in genes outside the panel (and non-coding ones outside it) are listed,
+not reported; a non-coding hotspot of a panel gene — the TERT promoter — is reported.
+`--hmf-actionable-bed` only marks variants inside ActionableCodingPanel: HMF uses that file for
+SAGE's more sensitive calling tier, and it says nothing about actionability.
+
+**Copy number.** ASCAT and Wakhan are called **separately**, each on its own segments and ploidy,
+over the gene's canonical exons, for genes with `reportDeletion` or `reportAmplification`:
+DEL = minimum total CN **< 0.5**; AMP = minimum total CN **> amplificationRatio × ploidy**
+(amplificationRatio from the panel, default **3**; halved on chrX in a male); PARTIAL_AMP = only
+the maximum exceeds it. Wakhan's zero-coverage segments over reference gaps are left out (see
+Copy number above), so a gene there is "uncovered" rather than deleted; the footnote lists uncovered genes per source, because an ASCAT
+gap can hide a homozygous deletion. In addition, every **deletion called by an SV caller**
+(Severus DEL, SAVANA `+-` pair) that removes canonical exons of a `reportDeletion` gene is listed
+— whatever the copy number says, and possibly heterozygous, and however large (SAVANA's typed `+-`
+pairs can span tens of Mb). A gene called by several sources has one row per source, side by side.
+No call is dropped: a **Show** switch above the copy-number and fusion tables turns each source
+(ASCAT, Wakhan, Severus SV, SAVANA SV; Severus, SAVANA) off and on in the browser.
+
+**Fusions** (`--hmf-known-fusions`). Each SV — Severus and SAVANA separately — is placed on
+canonical transcripts using its breakend orientation (from the VCF bracket notation): a gene is
+the 5′ partner when its strand equals the orientation; a 5′ breakend must lie inside its gene, a
+3′ one inside or upstream of a coding gene with at least two exons, and not in its 3′UTR. As in
+LINX: breakend in intron *k* → fused exon *k* on the 5′ side, *k* + 1 on the 3′ side; a 3′
+breakend upstream of its gene fuses to exon 2 (exon 1 has no splice acceptor); an exonic
+breakend joined to an intronic one is spliced round its exon (*k* − 1 on the 5′ side, *k* + 1 on
+the 3′ side). Classified in LINX's order: KNOWN_PAIR; EXON_DEL_DUP (same gene,
+both fused exons within the listed ranges); PROMISCUOUS_3 / PROMISCUOUS_5 / PROMISCUOUS_BOTH,
+whose listed exon ranges set "known exons" and gate the high-impact flag; IG/enhancer known
+pairs (one breakend in the enhancer range with the listed orientation, the partner gene within
+**1 Mb** upstream or the listed downstream distance); promiscuous IG/enhancer partners (one
+breakend in the range, the other inside or within **1 Mb** upstream of a coding gene, placed as
+a 3′ partner; never reported); PROMISCUOUS_ENHANCER_TARGET (a breakend in the listed range). An
+SV with both breakends inside one IG/enhancer range is a rearrangement within the locus (V(D)J
+recombination) and is never an enhancer fusion. A 3′ breakend may lie up to **100 kb** upstream of a known-pair or high-impact
+gene, **10 kb** otherwise. **Frame**, LINX's rules: the 5′ fused exon's end phase against the
+3′ fused exon's start phase; exon to exon, the exact phase of the two breakend bases. A 5′UTR or
+non-coding 5′ breakend joined to a 5′UTR 3′ exon is in frame (the 3′ partner's own start codon is
+used). 5′UTR → coding and coding → 5′UTR are fusions only for a known pair. Skipping exons can
+restore the frame. Likelihood HIGH for known pairs, exon deletions/duplications, enhancer known
+pairs and fusions within known exons, LOW otherwise. **Reported:** a promiscuous fusion only in
+frame, and through skipped exons only for a high-impact or known-exon partner; a known pair in
+frame, or out of frame only from a 5′UTR/non-coding 5′ breakend more than **1 Mb** away (or on
+another chromosome); an exon deletion/duplication in frame, or with both breakends in exons.
+A matching step that fails is shown as a warning in its tab, never as "none found".
+
+**Not reproduced:** dNdS driver likelihood, biallelic status and germline reporting (PURPLE);
+SV chaining, protein-domain and NMD checks, alternative (non-canonical) transcripts (LINX); PURPLE's splice
+definition (VEP's consequences stand in); effects seen only on a non-canonical transcript under
+VEP `--per_gene` (e.g. CDKN2A p14ARF); PURPLE's purity-adjusted copy number. Segmental-duplication
+genes can still be called deleted where a caller writes CN 0 with reads present.
 
 ## Mutational signatures
 
@@ -310,6 +412,20 @@ The sidecar is always written either way.
 **Wakhan's interactive Plotly plots are no longer embedded.** They remain in the pipeline's
 output, under `wakhan/solution_rank_<N>/integer_profile.html` and
 `wakhan/*_heatmap_ploidy_purity.html`; the report names them.
+
+> **Changed in 2.3.0:**
+> - Optional **HMF driver annotation** section (`--hmf-driver-panel`, `--hmf-ensembl-data-dir`,
+>   `--hmf-known-fusions`, `--hmf-hotspots`, `--hmf-actionable-bed`): Hartwig's driver panel,
+>   hotspots and known fusions applied to the small variants, ASCAT and Wakhan copy number,
+>   SV-caller deletions and SV breakends; the driver panel is also a selectable gene list
+>   (`hmf_driver`). Off, and the report unchanged, without the flags. GRCh38, or on CHM13 a copy
+>   lifted over by the pipeline that declares its build (`REFERENCE` in the Ensembl cache). See
+>   HMF driver annotation.
+> - Wakhan builds that write `bed_output/*_copynumbers_segments_HP_{1,2}.bed` instead of
+>   `integer_profile.bed` are read. Before, the copy-number section fell back to ASCAT. Their zero-coverage segments
+>   (no reads on either haplotype) over reference gaps are left out as no data, not read as CN 0;
+>   off the gaps they stay, as homozygous deletions.
+> - The SV table carries each breakend's orientation (`orient_a`, `orient_b`; hidden, exported).
 
 > **Changed in 2.2.0:**
 > - A **purity disagreement warning** opens the overview and the copy-number section when the
