@@ -7,7 +7,7 @@ package:
 source:
   url: https://github.com/ljwharbers/lrsomatic_report/archive/refs/tags/v{{ version }}.tar.gz
   # Recorded after the tag is cut, in a follow-up commit; container/check_sha256.sh verifies it.
-  sha256: c20f0a94b22f5365fbf84ef36c4d0e57dc4994b38197a6c2b45e294e0dab1a7c
+  sha256: abe87cdda736d4871d930a8f2287a36d8db2f9f1ff91d0fcd00cc7e8755a0502
 
 build:
   number: 0
